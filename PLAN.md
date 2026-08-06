@@ -421,7 +421,7 @@ have the detail.
 - [x] Phase 0 — Foundations & scaffolding
 - [x] Phase 1 — Data model & migrations
 - [x] Phase 2 — Capture flow (mobile-first)
-- [ ] Phase 3 — Review/browse (desktop)
+- [x] Phase 3 — Review/browse (desktop)
 - [ ] Phase 4 — Event grouping & geocoding
 - [ ] Phase 5 — Book layout engine
 - [ ] Phase 6 — Page review UI
@@ -487,3 +487,92 @@ manual hero-photo selection, is unaffected. `keepsake-brief.md` §2.5 and
 §4.3, and Phase 5's delegate prompt above, are rewritten to match — Phase 5
 hasn't run yet, so this matters for its own future correctness, not just
 as a historical record.)
+
+**Phase 3 complete (2026-08-06, same session as Phases 0-2 above).**
+`lib/repo.php` gained `quote_update()`/`anecdote_update()`/
+`snapshot_update()` (plus `_get`/`_delete`/`_for_year` for all three),
+following `photo_update()`'s exact partial-update pattern: only keys
+present in `$fields` are touched, and editing `entry_date` re-resolves
+`year_project_id` through `year_project_get_or_create()` — brief §3's
+"auto-assigned year is editable" now holds for every content type, not
+just photos. `photo_update()` itself gained `skip_for_book`/`full_page`/
+`event_group_id` (it previously only handled caption/location_text/
+captured_at, flagged explicitly as Phase 3's job in that function's own
+Phase 2 comment). `snapshot_update()` reads the row's own type and only
+ever writes that template's columns — the other template's fields, if
+sent, are silently ignored, mirroring `snapshot_create()`'s existing
+invariant. New `event_groups` CRUD (`event_group_create/_rename/_merge/
+_split/_delete`, `event_groups_for_year`) — `_merge()` refuses to cross
+the year-isolation boundary (a source group from a different year is
+skipped, not merged); `_split()` recomputes both groups' date ranges from
+post-split membership. New `year_project_list/_get/_get_by_year/
+_update_subtitle/_set_cover_photo`. All backed by `tools/verify-review.php`
+(20+ checks: year re-resolution for all three newly-editable types,
+snapshot template-field isolation on update, skip_for_book/full_page
+persisting independently through repeated partial updates, cover_photo_id
+cleanup on delete, merge/split semantics including cross-year rejection)
+— passes clean alongside `tools/verify-schema.php` and
+`tools/verify-capture.php`.
+
+`public/index.php` now runs a real `SELECT * FROM year_projects ORDER BY
+year DESC` (Phase 0's placeholder loop over 2020-current-year is gone).
+**Decision**: shows only years with a real row — no synthesized
+placeholders for years with nothing captured yet, since
+`year_project_get_or_create()` is the only thing that ever creates one and
+there is deliberately no status column to fake (`dashboard_status()`
+derives in-progress/layout-generated/empty from EXISTS checks instead).
+Trade-off flagged in that file's own header: a brand-new deploy with zero
+captures shows an empty state with nothing to click, and the fix (a "jump
+to a year" input) is noted but not built, since nothing asked for it yet.
+
+`public/review.php` (new) is the desktop review/browse screen (brief §5.2):
+three views behind `?year=YYYY&view=timeline|grid|groups`, sharing one set
+of `render_entry_*()` functions across all of them so there is exactly one
+markup for "edit a quote/anecdote/snapshot/photo" in the whole app, not one
+per view. Timeline groups by month (default, chronological). Grid filters
+by type; filtering to Photo is the exit-criterion surface — a real
+`.photo-grid` of thumbnails with `skip_for_book`/`full_page` visible at a
+glance (dimmed/bordered, not hidden) via always-on toggle pills that save
+instantly, no Save button needed, backed by `tools/verify-review.php`'s
+persistence checks. Groups is event-group review against the real
+`event_groups` table/schema — Phase 4 hasn't run, so it's usually empty; a
+"New group" form makes manual creation possible (the brief's own fallback:
+"nothing else can" populate it yet), and rename/merge/split are wired to
+the repo layer above. The book's subtitle (brief §4.6) is tap-to-edit via
+`inline-edit.js`, used for the first time in this app.
+
+**Two decisions worth flagging explicitly, both recorded in
+`review.php`/`review.js`'s own comments too:**
+- **Delete is a plain button + `window.confirm()`, not `swipe.js`'s mobile
+  gesture.** `swipe.js` was ported in Phase 0 specifically ahead of this
+  screen, but personal-cms's own written convention (its CLAUDE.md) is that
+  swipe-to-delete fits a low-stakes, quickly-retyped item on a phone held
+  one-handed — not a desktop screen (brief: "Primarily desktop") deleting
+  an entry that can carry a caption, a crop and a date nobody wants to
+  retype from memory, with no undo. `attachSwipeDelete`/`showSnackbar`
+  weren't force-fit in; `showSnackbar` alone is reused for save/error
+  toasts, matching the rest of the suite's feedback pattern.
+- **Field-edit saves and the two flag toggles patch the DOM in place;
+  anything that changes which rows exist or how they relate to each other**
+  (delete an entry, create/merge/split/ungroup an event group) **reloads
+  the page after the request succeeds**, rather than hand-patching every
+  affected row client-side — reloading re-renders from the exact state
+  `lib/repo.php`'s merge/split logic just committed, which can't drift from
+  it the way a bespoke DOM patch could.
+
+**One CSS gap flagged, not silently worked around** (same pattern as Phase
+2's `capture.css`): `public/assets/review.css` is a new, separate file —
+`styles.css` stays untouched and byte-identical to Personal CRM's — scoped
+to classes this phase's own markup introduces (the photo grid, the
+type-filter/view-tab pill rows' spacing, a couple of `width:100%`-on-a-
+flex-item overrides for two-button rows, mirroring `capture.css`'s
+identical override for its cropper bar). No sibling before Keepsake has
+ever needed a photo grid or an at-a-glance inclusion toggle. Flagged in
+that file's own header for Kathryn/Foundation to decide whether it folds
+into `styles.css` permanently.
+
+Next: Phase 4's event-grouping/geocoding engine, which will populate
+`event_groups` automatically (date-gap detection + Nominatim reverse
+geocoding) — the manual create/rename/merge/split UI built this phase
+should need no changes to keep working once real auto-detected groups
+start showing up alongside hand-made ones.
