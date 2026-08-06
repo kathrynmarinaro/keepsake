@@ -370,10 +370,34 @@ default, verify year-project isolation holds everywhere (spot-check that
 regenerating one year's layout cannot touch another year's rows), clean up
 any TODOs left by earlier phases, and write a top-level README covering
 setup, config, and the suite conventions this app follows — written with an
-eventual public GitHub audience in mind per the brief's Section 'Purpose'."
+eventual public GitHub audience in mind per the brief's Section 'Purpose'.
+
+**Also, on explicit instruction: combine all of Keepsake's CSS into a single
+file.** Phases 2, 3 and 5 each flagged the same gap and each added its own
+separate, scoped file rather than editing the house stylesheet
+(`capture.css`, `review.css`, `layout.css` — see PLAN.md's Suite Conventions
+entries for those phases for why each exists). Fold all three into
+`public/assets/styles.css` itself and delete the three separate files, so
+Keepsake ends this phase with the one-file convention every sibling app
+follows, updating every `<link>` in `public/*.php` to match. Two things to
+get right doing this:
+  1. **This makes `styles.css` diverge from being byte-identical to Personal
+     CRM's** — Keepsake is the first app in the suite that needs
+     photo/crop/layout classes at all, so this divergence is expected and
+     accepted, not a regression to avoid. Say so plainly in the file's own
+     header comment (it currently claims byte-identical parity with the
+     sibling copy) rather than leaving that claim stale and wrong.
+  2. **Do not silently push these new classes back into
+     `kathrynmarinaro/personal-cms` or `kathrynmarinaro/inspiration`.**
+     Whether the photo/crop/grid vocabulary this app grew is worth
+     backporting to the shared house system is Kathryn's call, not this
+     phase's — flag it as a suggestion in the final report if it seems
+     worth doing, don't act on it unilaterally."
 **Exit criteria**: fresh clone + documented setup steps actually works;
 `git log -p | grep`-style secret scan is clean; README is something a
-stranger could follow.
+stranger could follow; `public/assets/` contains exactly one CSS file, and
+every screen still renders correctly from it (no class dropped in the
+merge).
 
 ## Model guidance — should you use Fable for any of this?
 
