@@ -402,7 +402,7 @@ Update this after every phase. Keep it terse — the phase sections above
 have the detail.
 
 - [x] Phase 0 — Foundations & scaffolding
-- [ ] Phase 1 — Data model & migrations
+- [x] Phase 1 — Data model & migrations
 - [ ] Phase 2 — Capture flow (mobile-first)
 - [ ] Phase 3 — Review/browse (desktop)
 - [ ] Phase 4 — Event grouping & geocoding
@@ -411,9 +411,16 @@ have the detail.
 - [ ] Phase 7 — PDF export
 - [ ] Phase 8 — Polish & open-source readiness
 
-**Last updated**: 2026-08-06 (Phase 0 complete — folder structure, config,
-PDO DB helper, single-user session auth, base layout, placeholder
-dashboard. Sibling repos `kathrynmarinaro/inspiration` and
-`kathrynmarinaro/personal-cms` were unreachable this session, so CSS/login
-markup/upload-crop are stubbed placeholders — see "Suite conventions"
-above for the exact reconciliation list before Phase 2.)
+**Last updated**: 2026-08-06 (Phase 1 complete, in the same session as the
+Phase 0 reconciliation pass above. `schema.sql` now holds year_projects,
+event_groups, photos, quotes, anecdotes, photo_text_bundles, snapshots,
+geocode_cache, book_layouts, book_pages and book_page_photos alongside
+Phase 0's `users` table. Documented in `docs/SCHEMA.md`. Year isolation
+verified with `tools/verify-schema.php` — ported `test-harness.php` from
+personal-cms, seeded two year_projects with one of everything each, all
+checks pass, including for the tables that derive their year through a
+parent row instead of storing it, and including cascade-delete staying
+inside its own year. Next: Phase 2's capture flow, which is also the point
+`PLAN.md`'s Suite Conventions section flagged as needing the Inspiration
+Board upload/crop component specifically — pull it from
+`kathrynmarinaro/inspiration` rather than building a new one.)
