@@ -73,4 +73,37 @@ return array(
 
         'webp_quality' => 82,
     ),
+
+    /* ---- event grouping (Phase 4, brief §4.1/§7) ------------------------
+     * Date-gap threshold, in days, between two photos' captured_at dates
+     * before lib/grouping.php's auto-grouping pass starts a new event group
+     * instead of extending the current one. 3 is PLAN.md's own suggested
+     * starting point for a first pass, not a researched constant — brief §7
+     * flags this exact number as the one most likely to need retuning once
+     * Kathryn has real backfilled data to look at (a multi-week vacation
+     * probably wants a much larger gap than a single day trip — see
+     * keepsake-brief.md §8's open item on this).
+     */
+    'grouping' => array(
+        'gap_days' => 3,
+    ),
+
+    /* ---- reverse geocoding (Phase 4, brief §4.1/§7) ---------------------
+     * OpenStreetMap Nominatim — free, no API key, per the brief's "avoid
+     * paid APIs" principle. Nominatim's usage policy
+     * (https://operations.osmfoundation.org/policies/nominatim/) requires:
+     *   - a descriptive User-Agent identifying the app and a way to reach
+     *     its operator. The placeholder contact below is fine for a
+     *     personal single-user deploy, but replace it with something real
+     *     (an email you'd actually see, or a URL) before this runs against
+     *     the live service — see lib/geocode.php.
+     *   - no more than ~1 request/second — 'min_interval_seconds' below,
+     *     enforced in lib/geocode.php's geocode_rate_limit() and only ever
+     *     applied to an actual network call, never to a geocode_cache hit.
+     */
+    'geocode' => array(
+        'endpoint'             => 'https://nominatim.openstreetmap.org/reverse',
+        'user_agent'           => 'Keepsake/1.0 (personal photo-book app; contact: CHANGE_ME@example.com)',
+        'min_interval_seconds' => 1.0,
+    ),
 );
