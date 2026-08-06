@@ -598,31 +598,41 @@ function event_group_get(int $id): ?array
 }
 
 /**
- * Manual creation — brief §5.2 says Kathryn can "rename, merge, split
- * auto-detected groups", but Phase 4 (the auto-detector) hasn't run yet, so
- * this is the only way a group exists to review against before then. Created
- * with is_manual_name = 1 unconditionally: every field on a hand-made group
- * is a manual decision, not something a future auto-naming pass should ever
- * overwrite.
+ * Creation, manual by default. Brief §5.2 originally described this as the
+ * ONLY way a group exists (Phase 4's auto-detector hadn't run yet), so
+ * is_manual_name defaulted to 1 unconditionally — every field on a
+ * hand-made group was a manual decision, not something a future
+ * auto-naming pass should ever overwrite.
+ *
+ * Phase 4 (lib/grouping.php) is now the other caller, and needs the
+ * opposite default: a freshly auto-detected group's name IS something its
+ * own next run should be allowed to revise (e.g. once a joining photo
+ * brings GPS the first pass didn't have) — so it passes
+ * 'is_manual_name' => false explicitly. Every existing manual caller
+ * (public/api/event-groups-create.php, event_group_split()) sends no such
+ * key and keeps getting 1, unchanged.
  *
  * @param array{
  *   year_project_id:int, name:string, start_date:string, end_date:string,
- *   location_name?:?string
+ *   location_name?:?string, is_manual_name?:bool
  * } $data
  * @return int the new event_groups id
  */
 function event_group_create(array $data): int
 {
+    $isManual = array_key_exists('is_manual_name', $data) ? (bool) $data['is_manual_name'] : true;
+
     q(
         'INSERT INTO event_groups
             (year_project_id, name, start_date, end_date, location_name, is_manual_name)
-         VALUES (?, ?, ?, ?, ?, 1)',
+         VALUES (?, ?, ?, ?, ?, ?)',
         array(
             $data['year_project_id'],
             $data['name'],
             $data['start_date'],
             $data['end_date'],
             (isset($data['location_name']) && $data['location_name'] !== '') ? $data['location_name'] : null,
+            $isManual ? 1 : 0,
         )
     );
     return (int) db()->lastInsertId();
