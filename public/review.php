@@ -461,10 +461,22 @@ function render_photo_cell(array $p): string
 
     <?php else: /* groups */ ?>
 
+      <div class="card">
+        <p><strong>Automatic grouping</strong></p>
+        <p class="hint">
+          Clusters any ungrouped photos by date gap (currently
+          <?= (int) cfg('grouping.gap_days', 3) ?> days between shots) and
+          looks up a location for each new or extended group. Only touches
+          photos with no event group yet — anything already grouped, by a
+          prior run or by hand, is left alone. Clear a photo's "Event group"
+          field (its own edit panel) to make it eligible again.
+        </p>
+        <button type="button" class="btn-secondary" id="run-grouping-btn">Group photos</button>
+      </div>
+
       <p class="hint">
-        Phase 4's automatic grouping hasn't run yet, so groups below are only
-        the ones created by hand. Assign a photo to a group from that
-        photo's own edit panel in Timeline or Grid view.
+        Rename, merge or split any group below — auto-grouping never
+        overwrites a name you've set by hand.
       </p>
 
       <details class="accordion" open>

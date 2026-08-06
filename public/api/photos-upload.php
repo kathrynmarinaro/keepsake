@@ -28,6 +28,8 @@ require_once __DIR__ . '/../../lib/bootstrap.php';
 require_once __DIR__ . '/../../lib/imageproc.php';
 require_once __DIR__ . '/../../lib/exif.php';
 require_once __DIR__ . '/../../lib/repo.php';
+require_once __DIR__ . '/../../lib/geocode.php';
+require_once __DIR__ . '/../../lib/grouping.php';
 
 require_login_api();
 require_same_origin();
@@ -84,6 +86,34 @@ foreach (photos_upload_normalize_files($_FILES['files']) as $file) {
 
     $row['name'] = $label;
     $created[]   = $row;
+}
+
+/* Phase 4 trigger point 1/2 (PLAN.md: "there is no queue/cron in this
+ * app", brief §4.1) — auto-group runs synchronously at the end of THIS
+ * batch, scoped only to the year_project_id(s) it actually touched, so an
+ * upload landing in 2019 never re-clusters 2026's photos in the same
+ * request. The other trigger point is public/api/event-groups-auto.php,
+ * called from review.php's "Group photos" button — both call the exact
+ * same lib/grouping.php::event_grouping_run(), so there is one place the
+ * clustering/naming logic lives, not two.
+ *
+ * A grouping failure (a Nominatim outage, an unexpected exception) must not
+ * cost Kathryn a successful upload she's already watched complete — fail
+ * soft here the same way a single photo's thumbnail failure does above. */
+$touchedYears = array();
+foreach ($created as $row) {
+    $touchedYears[(int) substr((string) $row['entry_date'], 0, 4)] = true;
+}
+foreach (array_keys($touchedYears) as $year) {
+    $yearProject = year_project_get_by_year($year);
+    if ($yearProject === null) {
+        continue;
+    }
+    try {
+        event_grouping_run((int) $yearProject['id']);
+    } catch (Throwable $e) {
+        error_log('photos-upload: auto-grouping failed for year ' . $year . ': ' . $e->getMessage());
+    }
 }
 
 json_out(array('created' => $created, 'rejected' => $rejected));

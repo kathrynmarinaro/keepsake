@@ -337,6 +337,40 @@ async function deleteGroup(button) {
   window.location.reload();
 }
 
+/**
+ * "Group photos" (brief §4.1/§5.2, PLAN.md Phase 4) — re-runs date-gap
+ * clustering + reverse geocoding over whatever's currently ungrouped for
+ * this year. Reloads on success for the same reason every other structural
+ * group change here does (see this file's header): the response is a
+ * summary count, not the resulting rows, and a reload renders exactly what
+ * lib/grouping.php just committed.
+ */
+async function runGrouping(button) {
+  const yearProjectId = Number(document.querySelector('#subtitle-list .list-row').dataset.id);
+
+  button.disabled = true;
+  let result;
+  try {
+    result = await apiPost('api/event-groups-auto.php', { year_project_id: yearProjectId });
+  } catch (err) {
+    showSnackbar(err.message || 'Could not group photos — try again.', { isError: true });
+    button.disabled = false;
+    return;
+  }
+
+  if (result.photos_grouped === 0) {
+    showSnackbar('Nothing to group — every photo already belongs to a group.');
+    button.disabled = false;
+    return;
+  }
+
+  const bits = [];
+  if (result.groups_created) { bits.push(`${result.groups_created} new group${result.groups_created === 1 ? '' : 's'}`); }
+  if (result.groups_extended) { bits.push(`${result.groups_extended} group${result.groups_extended === 1 ? '' : 's'} extended`); }
+  showSnackbar(`Grouped ${result.photos_grouped} photo${result.photos_grouped === 1 ? '' : 's'} (${bits.join(', ')}).`);
+  window.location.reload();
+}
+
 async function mergeGroups() {
   const targetSelect = document.getElementById('merge-target');
   const targetId = Number(targetSelect.value);
@@ -430,6 +464,7 @@ document.addEventListener('click', (event) => {
 });
 
 document.getElementById('merge-btn')?.addEventListener('click', mergeGroups);
+document.getElementById('run-grouping-btn')?.addEventListener('click', (event) => runGrouping(event.currentTarget));
 
 /* Subtitle tap-to-edit (brief §4.6) — ported ahead of need in Phase 0,
    used for the first time here. */
