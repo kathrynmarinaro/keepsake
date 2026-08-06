@@ -106,4 +106,97 @@ return array(
         'user_agent'           => 'Keepsake/1.0 (personal photo-book app; contact: CHANGE_ME@example.com)',
         'min_interval_seconds' => 1.0,
     ),
+
+    /* ---- book layout engine (Phase 5, brief §4.3/§7) --------------------
+     * EVERY NUMBER IN HERE IS A STARTING POINT, NOT A RESEARCHED CONSTANT.
+     * Brief §7 says the auto-arrange algorithm "will likely need iteration
+     * after seeing real output" — this block is where that iteration
+     * happens, so it is deliberately over-exposed: change a value, re-run
+     * "Create book layout", compare the new version against the old one on
+     * public/layout.php (versions are never overwritten, so nothing is lost
+     * by trying).
+     *
+     * THE ONE TUNABLE THAT IS NOT HERE: the orientation-pairing score table
+     * (is a portrait+landscape pair worse than two portraits, and by how
+     * much?). It is 12 numbers keyed by a shape, which reads as noise in a
+     * config file and as a table in code — it lives at the top of
+     * layout_orientation_score() in lib/layout.php and nowhere else. That
+     * function is the first place to look if pages are pairing badly; this
+     * block is the place to look if pages are the wrong SIZE or the book
+     * feels monotonous.
+     */
+    'layout' => array(
+
+        /* ---- sub-grouping within an event group (brief §4.3) ----
+         * A gap of more than this many hours between two consecutive photos
+         * starts a new page-group inside the same event, so "a beach
+         * morning vs. a dinner that evening" don't share a page. 5 hours is
+         * chosen to sit above the gaps inside one outing (lunch, a drive, a
+         * nap) and below the gap between two separate outings in a day; a
+         * night's sleep clears it easily, which is what makes this double as
+         * "sub-group by day" without a separate calendar-day rule.
+         * Fractional values are fine (2.5).
+         */
+        'subgroup_gap_hours' => 5.0,
+
+        /* ---- standalone text (brief §4.3) ----
+         * A quote or anecdote longer than this many characters gets a full
+         * page of its own instead of sharing a page as a text card. ~180 is
+         * the brief's own suggested starting point, explicitly "a starting
+         * point to adjust after seeing a real draft".
+         */
+        'text_page_chars' => 180,
+
+        /* How far, in days, a quote/anecdote that falls in NO event group's
+         * date range may reach to attach itself to a nearby page-group as a
+         * text card. Text inside an event's range always attaches to that
+         * event regardless of this value (the brief requires it); this is
+         * only about the leftovers. Beyond this window a short text gets a
+         * page to itself — so if a draft comes back with too many
+         * one-quote pages, widen this before anything else.
+         */
+        'text_attach_days' => 2,
+
+        /* ---- what makes a page good (brief §4.3) ----
+         * Two scores are added per candidate page: how well its photos'
+         * orientations read together (the PRIMARY driver, per the brief) and
+         * how much this app likes that page size in the abstract (the
+         * SECONDARY influence). These weights set the balance between them —
+         * raising density_weight makes the engine chase its preferred page
+         * sizes even when the orientations don't really suit.
+         */
+        'orientation_weight' => 1.0,
+        'density_weight'     => 0.5,
+
+        /* House preference for each page size, before orientation and
+         * variety have their say. 2- and 3-up are the book's default voice;
+         * 4-up is busier; 1-up is deliberately LOW because "one photo per
+         * page for everything" is the exact look brief §4 exists to avoid —
+         * a photo that deserves a page of its own gets there by Kathryn
+         * ticking "full page" on it (§2.4), not by the engine drifting
+         * there. Raise the 1 to let more singles through.
+         */
+        'density_preference' => array(1 => 0.35, 2 => 1.0, 3 => 0.95, 4 => 0.85),
+
+        /* ---- rhythm / variety (brief §4.3: "not ten 2-up spreads in a row") ----
+         * How many recently-emitted pages the engine remembers, and how hard
+         * it pushes away from repeating a page size. The penalty is applied
+         * once per page in the immediately preceding RUN of the same size
+         * (two 2-ups in a row make a third cost 2 x this), and at
+         * echo_factor of it for other pages of that size still inside the
+         * window. Raise repeat_penalty for a more restless book; set it to 0
+         * to turn the variety heuristic off entirely and let orientation
+         * matching decide alone.
+         */
+        'variety_window'         => 4,
+        'variety_repeat_penalty' => 0.18,
+        'variety_echo_factor'    => 0.5,
+
+        /* Charged against a page size that would leave exactly ONE photo
+         * behind at the end of a page-group, which is how a stray orphan
+         * page happens. Big enough to change the decision, small enough that
+         * a genuinely better-pairing page still wins.
+         */
+        'orphan_page_penalty' => 0.35,
+    ),
 );
