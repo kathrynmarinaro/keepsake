@@ -98,10 +98,71 @@ function event_grouping_range_gap_days(string $startA, string $endA, string $sta
 }
 
 /**
+ * THE clustering primitive, and the only one in this app: sort rows by a key,
+ * walk them once, and start a new cluster wherever the distance between two
+ * CONSECUTIVE rows exceeds a threshold ("chain clustering"). Pure — no DB
+ * access, no assumption about what the rows are.
+ *
+ * The metric is injected rather than baked in because this app needs the same
+ * algorithm at two very different scales, and they must not be two
+ * implementations that can drift apart:
+ *
+ *   - Phase 4 (event grouping, this file): distance in whole CALENDAR DAYS
+ *     between two photos' captured_at dates, threshold ~3 days. Truncating to
+ *     the date is load-bearing there — "3 days apart" has to mean three
+ *     calendar days regardless of what time of day either photo was taken.
+ *   - Phase 5 (lib/layout.php's day/close-timing sub-grouping): elapsed HOURS
+ *     between two photos' captured_at datetimes, threshold ~5 hours, which is
+ *     exactly the resolution photos.captured_at is a DATETIME for (see
+ *     schema.sql's comment on that column: "a beach morning vs. a dinner that
+ *     evening").
+ *
+ * A single seconds-based metric could not serve both: 07-01 00:01 and
+ * 07-04 23:59 are 3 calendar days apart (Phase 4: same event) but ~4.0 elapsed
+ * days (a seconds threshold of 3 days: different events). Injecting the metric
+ * keeps each caller's semantics exactly what it wants while there is still
+ * only one clustering loop to get right.
+ *
+ * @param array    $rows      any rows the two callables understand
+ * @param callable $sortKey   fn(array $row): string — chronological sort key
+ * @param callable $distance  fn(array $a, array $b): float — consecutive distance
+ * @param float    $threshold split when distance is strictly greater than this
+ * @return list<list<array>> clusters, ordered, each internally ordered
+ */
+function event_grouping_cluster_by(array $rows, callable $sortKey, callable $distance, float $threshold): array
+{
+    usort($rows, static function (array $a, array $b) use ($sortKey): int {
+        return strcmp((string) $sortKey($a), (string) $sortKey($b));
+    });
+
+    $clusters = array();
+    $current  = array();
+    $prev     = null;
+
+    foreach ($rows as $row) {
+        if ($prev !== null && (float) $distance($prev, $row) > $threshold) {
+            $clusters[] = $current;
+            $current    = array();
+        }
+        $current[] = $row;
+        $prev      = $row;
+    }
+    if ($current !== array()) {
+        $clusters[] = $current;
+    }
+
+    return $clusters;
+}
+
+/**
  * Step 1 of the heuristic: group ungrouped photos among themselves by pure
  * date-gap distance. Pure function over photo rows (only 'captured_at' and
  * 'id' are read) — no DB access, so tools/verify-grouping.php can feed it
  * synthetic rows directly.
+ *
+ * A thin wrapper over event_grouping_cluster_by() above: this function IS the
+ * "whole calendar days between captured_at dates" metric, applied to the one
+ * shared clustering loop.
  *
  * @param array $photos rows with at least 'id' and 'captured_at'
  * @return list<array> list of clusters, each a list of the same photo rows,
@@ -109,28 +170,15 @@ function event_grouping_range_gap_days(string $startA, string $endA, string $sta
  */
 function event_grouping_cluster_ungrouped(array $photos, int $gapDays): array
 {
-    usort($photos, static function (array $a, array $b): int {
-        return strcmp((string) $a['captured_at'], (string) $b['captured_at']);
-    });
-
-    $clusters = array();
-    $current  = array();
-    $prevDate = null;
-
-    foreach ($photos as $photo) {
-        $date = substr((string) $photo['captured_at'], 0, 10);
-        if ($prevDate !== null && event_grouping_day_gap($prevDate, $date) > $gapDays) {
-            $clusters[] = $current;
-            $current    = array();
-        }
-        $current[] = $photo;
-        $prevDate  = $date;
-    }
-    if ($current !== array()) {
-        $clusters[] = $current;
-    }
-
-    return $clusters;
+    return event_grouping_cluster_by(
+        $photos,
+        static fn(array $photo): string => (string) $photo['captured_at'],
+        static fn(array $a, array $b): float => (float) event_grouping_day_gap(
+            substr((string) $a['captured_at'], 0, 10),
+            substr((string) $b['captured_at'], 0, 10)
+        ),
+        (float) $gapDays
+    );
 }
 
 /**
