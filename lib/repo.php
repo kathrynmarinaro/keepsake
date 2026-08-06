@@ -804,6 +804,13 @@ function event_group_delete(int $id): void
  * reach for by accident.
  */
 
+/** Hard ceiling on slots per page — book_page_photos' own CHECK (1..4). Kept
+ * as its own constant here (rather than importing lib/layout.php's identical
+ * LAYOUT_MAX_SLOTS) so this file has no dependency on the layer built on top
+ * of it — repo.php is loaded on its own by callers that never touch
+ * lib/layout.php at all (e.g. public/api/photos-update.php). */
+const BOOK_PAGE_MAX_SLOTS = 4;
+
 /**
  * A new layout for a year, at the next version number for that year.
  *
@@ -938,6 +945,152 @@ function book_page_slot_create(int $pageId, int $slotNumber, array $occupant): i
     return (int) db()->lastInsertId();
 }
 
+/** One book_pages row, or null. */
+function book_page_get(int $id): ?array
+{
+    $row = q('SELECT * FROM book_pages WHERE id = ?', array($id))->fetch();
+    return $row ?: null;
+}
+
+/** One book_page_photos (filled slot) row, or null. */
+function book_page_slot_get(int $id): ?array
+{
+    $row = q('SELECT * FROM book_page_photos WHERE id = ?', array($id))->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Phase 6's drag-and-drop (brief §4.4/§5.4): trade the PHOTOS occupying two
+ * existing slots — same page or two different pages of the SAME layout,
+ * doesn't matter, since a slot's year is derived only through
+ * book_page_id -> book_pages.book_layout_id -> book_layouts.year_project_id,
+ * never touched here.
+ *
+ * PHOTOS ONLY, deliberately, echoing schema.sql's own note on
+ * book_page_photos.slot_number ("swap these two photos"): a slot currently
+ * holding a quote/anecdote card refuses the swap even if asked. Text cards
+ * are not draggable in this build (see public/assets/layout.js) — letting
+ * one land in a photo's place would leave a page_type='photos' page's card
+ * slot rules unclear for no real benefit, since the brief's own phrase for
+ * this interaction is "swap two PHOTOS between slots".
+ *
+ * Swaps only the CONTENT (photo_id) between the two rows, not book_page_id/
+ * slot_number — the rows keep their own identity and positions; their
+ * occupants trade places. The rendered result is identical to swapping
+ * position instead, but this way never touches the (book_page_id,
+ * slot_number) unique key, so there's no intermediate state to worry about
+ * and no MySQL-specific multi-table UPDATE the SQLite test harness can't run.
+ *
+ * SAME-LAYOUT ONLY: refuses (returns false) if the two slots belong to
+ * different book_layouts rows — different versions of the same year, or
+ * different years entirely. A drag-and-drop UI scoped to one open layout
+ * can't construct this case through the screen itself; this is the
+ * defense-in-depth every other year-isolation check in this app also gets.
+ *
+ * Fails soft (returns false, changes nothing) rather than throwing: a stale
+ * drag target — the other slot was deleted by a reflow that ran in another
+ * tab, say — degrades this one action instead of crashing the screen.
+ */
+function book_page_slot_swap(int $slotIdA, int $slotIdB): bool
+{
+    if ($slotIdA === $slotIdB) {
+        return false;
+    }
+
+    $a = book_page_slot_get($slotIdA);
+    $b = book_page_slot_get($slotIdB);
+    if ($a === null || $b === null || $a['photo_id'] === null || $b['photo_id'] === null) {
+        return false;
+    }
+
+    $pageA = book_page_get((int) $a['book_page_id']);
+    $pageB = book_page_get((int) $b['book_page_id']);
+    if ($pageA === null || $pageB === null
+        || (int) $pageA['book_layout_id'] !== (int) $pageB['book_layout_id']) {
+        return false;
+    }
+
+    q('UPDATE book_page_photos SET photo_id = ? WHERE id = ?', array($b['photo_id'], $slotIdA));
+    q('UPDATE book_page_photos SET photo_id = ? WHERE id = ?', array($a['photo_id'], $slotIdB));
+    return true;
+}
+
+/**
+ * Phase 6's other drag-and-drop gesture (brief §4.4/§5.4): move a photo
+ * slot's occupant onto a DIFFERENT page — at the next open slot_number
+ * (1..4, book_page_photos' own CHECK), or a specific one if given and free.
+ *
+ * PHOTOS ONLY (see book_page_slot_swap()'s header — same reasoning), and the
+ * destination must be a page_type='photos' page: a photo can share one of
+ * those pages with a text card (schema.sql: "may include ONE text-card slot
+ * mixed in among the photos"), but never lands on a page_type='snapshot'
+ * page (brief §2.3's fixed template has zero slots, always) or a
+ * page_type='text' page (its one slot is a quote/anecdote card, not a
+ * photo) — moving onto either would leave that page's page_type
+ * disagreeing with what it actually holds.
+ *
+ * SAME-LAYOUT ONLY, same reasoning as the swap above.
+ *
+ * Fails soft (returns false, changes nothing): a full destination page, a bad
+ * slot_number, a stale page id (deleted by a reflow since the drag started),
+ * or a source slot that no longer holds a photo all leave the layout exactly
+ * as it was rather than throwing mid-drag.
+ *
+ * @return bool
+ */
+function book_page_slot_move(int $slotId, int $targetPageId, ?int $targetSlotNumber = null): bool
+{
+    $slot = book_page_slot_get($slotId);
+    if ($slot === null || $slot['photo_id'] === null) {
+        return false;
+    }
+
+    $sourcePage = book_page_get((int) $slot['book_page_id']);
+    $targetPage = book_page_get($targetPageId);
+    if ($sourcePage === null || $targetPage === null
+        || (int) $sourcePage['book_layout_id'] !== (int) $targetPage['book_layout_id']
+        || $targetPage['page_type'] !== 'photos') {
+        return false;
+    }
+
+    $occupied = array();
+    foreach (q(
+        'SELECT slot_number FROM book_page_photos WHERE book_page_id = ?',
+        array($targetPageId)
+    )->fetchAll() as $row) {
+        $occupied[(int) $row['slot_number']] = true;
+    }
+    // Moving within the SAME page (reordering) doesn't count the slot's own
+    // current position as "taken" — it's the one being vacated.
+    if ((int) $slot['book_page_id'] === $targetPageId) {
+        unset($occupied[(int) $slot['slot_number']]);
+    }
+
+    if ($targetSlotNumber !== null) {
+        if ($targetSlotNumber < 1 || $targetSlotNumber > BOOK_PAGE_MAX_SLOTS || isset($occupied[$targetSlotNumber])) {
+            return false;
+        }
+        $newSlotNumber = $targetSlotNumber;
+    } else {
+        $newSlotNumber = null;
+        for ($n = 1; $n <= BOOK_PAGE_MAX_SLOTS; $n++) {
+            if (!isset($occupied[$n])) {
+                $newSlotNumber = $n;
+                break;
+            }
+        }
+        if ($newSlotNumber === null) {
+            return false; // the destination page already has 4 filled slots
+        }
+    }
+
+    q(
+        'UPDATE book_page_photos SET book_page_id = ?, slot_number = ? WHERE id = ?',
+        array($targetPageId, $newSlotNumber, $slotId)
+    );
+    return true;
+}
+
 /**
  * Every page of a layout in page order, each carrying its own 'slots' list in
  * slot order. Two queries, not one per page: a full year's book is ~100 pages
@@ -981,15 +1134,29 @@ function book_pages_for_layout(int $layoutId): array
  * text for a preview screen, so it doesn't fetch a row per slot. Kept separate
  * from book_pages_for_layout() because reflow and Phase 7's export want the
  * ids and nothing else; this one is for anything that has to SHOW the page.
+ *
+ * Phase 6 extended the snapshot join to every one of that template's fields
+ * (age/height, grade/school/teacher/..., notes) plus the hero photo's own
+ * paths — public/layout.php's spread view renders a snapshot page from its
+ * real template fields (brief §2.3/§4.3), not just its type and date the way
+ * Phase 5's plainer preview did.
  */
 function book_layout_pages_with_content(int $layoutId): array
 {
     $pages = q(
-        'SELECT bp.*, s.type AS snapshot_type, s.entry_date AS snapshot_date
+        "SELECT bp.*,
+                s.type AS snapshot_type, s.entry_date AS snapshot_date,
+                s.notes AS snapshot_notes, s.hero_photo_id AS snapshot_hero_photo_id,
+                s.age AS snapshot_age, s.height AS snapshot_height,
+                s.grade AS snapshot_grade, s.school AS snapshot_school,
+                s.teacher AS snapshot_teacher, s.favorite_color AS snapshot_favorite_color,
+                s.dream_job AS snapshot_dream_job, s.favorite_class AS snapshot_favorite_class,
+                hero.thumb_path AS snapshot_hero_thumb, hero.original_path AS snapshot_hero_original
            FROM book_pages bp
            LEFT JOIN snapshots s ON s.id = bp.snapshot_id
+           LEFT JOIN photos hero ON hero.id = s.hero_photo_id
           WHERE bp.book_layout_id = ?
-          ORDER BY bp.page_number',
+          ORDER BY bp.page_number",
         array($layoutId)
     )->fetchAll();
 
