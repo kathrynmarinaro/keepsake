@@ -1,0 +1,44 @@
+<?php
+/* POST /api/anecdotes.php
+ *   { anecdote_text, entry_date, photo_id? }
+ *
+ * Quick-add (brief §2.2). Same shape as quotes.php minus who_said_it — see
+ * that file's header for the year-assignment and bundling notes, which
+ * apply here identically.
+ */
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../../lib/bootstrap.php';
+require_once __DIR__ . '/../../lib/repo.php';
+
+require_login_api();
+require_same_origin();
+require_method('POST');
+
+$body = json_body();
+
+$text = is_string($body['anecdote_text'] ?? null) ? trim($body['anecdote_text']) : '';
+$date = is_string($body['entry_date'] ?? null) ? $body['entry_date'] : '';
+
+if ($text === '') {
+    json_error('bad_request', 400, 'anecdote_text is required.');
+}
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+    json_error('bad_request', 400, 'entry_date must be Y-m-d.');
+}
+
+$id = anecdote_create(array('anecdote_text' => $text, 'entry_date' => $date));
+
+$bundled = false;
+$photoId = isset($body['photo_id']) && $body['photo_id'] !== '' ? (int) $body['photo_id'] : null;
+if ($photoId !== null) {
+    try {
+        photo_text_bundle_create($photoId, null, $id);
+        $bundled = true;
+    } catch (Throwable $e) {
+        error_log('anecdotes: bundling failed: ' . $e->getMessage());
+    }
+}
+
+json_out(array('id' => $id, 'bundled' => $bundled), 201);
