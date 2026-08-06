@@ -448,7 +448,7 @@ have the detail.
 - [x] Phase 3 — Review/browse (desktop)
 - [x] Phase 4 — Event grouping & geocoding
 - [x] Phase 5 — Book layout engine
-- [ ] Phase 6 — Page review UI
+- [x] Phase 6 — Page review UI
 - [ ] Phase 7 — PDF export
 - [ ] Phase 8 — Polish & open-source readiness
 
@@ -837,3 +837,47 @@ rendering, drag-and-drop, the "reflow from here" button (the logic is built
 and tested — `layout_reflow_from()`), and cover/title/subtitle selection.
 Phase 6 should expect to replace `public/layout.php`'s page markup entirely;
 the version list and the active-layout switch are the parts worth keeping.
+
+### Phase 6 note
+
+Built in two passes in one session: a subagent ran most of it (repo-layer
+`book_page_slot_swap()`/`book_page_slot_move()`, the three new API
+endpoints, the visual page-by-page rendering and drag-and-drop in
+`public/layout.php`/`layout.js`, the title/cover card) but was cut off by a
+usage-limit reset before writing the test script its own doc comments
+already referenced by name (`tools/verify-page-review.php`) or committing
+anything — the work was sitting complete and lint-clean in the working
+tree, just unverified and unpushed. The parent session picked up from
+there: read every changed/new file, confirmed the repo-layer functions were
+correct by tracing them (same-page reordering correctly excludes the slot's
+own current position from "occupied"; cross-layout and wrong-page-type
+attempts are refused; a photo can never be duplicated or lost), wrote
+`tools/verify-page-review.php` against a REAL `layout_generate()` output
+rather than hand-built rows, and ran it alongside all five earlier
+`verify-*.php` scripts — all six pass. Then committed in three logical
+chunks (repo layer + endpoints; the UI; the test) and pushed, exactly as if
+nothing had been interrupted. Flagging the interruption itself here rather
+than silently smoothing it over, per this file's own "How to resume" logic
+— a future session should be able to trust this log.
+
+**One known, deliberately-unfixed cosmetic gap**: moving the only photo off
+a page leaves an empty `page_type='photos'` book_pages row (0 filled
+slots) rather than deleting/renumbering it. `public/layout.php`'s renderer
+degrades gracefully — an empty page card, not a crash or an error — but it
+is a visible blank spot in the book until "Reflow from here" is used
+downstream of it, which regenerates around the gap. Brief §4.4 frames
+manual adjustment as "rarely needed"; this was judged not worth the added
+complexity of auto-deleting-and-renumbering pages under this session's time
+constraints, but it's a real, known limitation, not an oversight — worth
+fixing in Phase 8's polish pass if it turns out to matter in practice.
+
+CSS was correctly NOT touched here: PLAN.md's Phase 8 section (added last
+session, see its own note above) already owns folding `capture.css`/
+`review.css`/`layout.css` into `styles.css`, and this phase's new markup
+was kept inside the existing `layout.css` rather than adding a fourth file.
+
+Next: Phase 7's PDF export, reading directly from the reviewed/reflowed
+layout tables — or Phase 8's polish pass (including the CSS consolidation
+and the empty-page gap above) if Kathryn would rather close out loose ends
+before export. Either is a valid next step per PLAN.md's own phase
+ordering; ask rather than assume which one.
