@@ -87,14 +87,17 @@ suite conventions, not adapted or re-themed:
    inline-editable text — but they cost one file each to have sitting ready,
    the same reasoning `personal-cms/CLAUDE.md` gives for porting `reorder.js`
    before gift ideas needed it.
-3. **Login page markup/flow, matched to Personal CRM's shape**, not copied
-   wholesale: Personal CRM's login is a single site-wide password with no
-   username, stored as `password_hash` directly in `config.php`. Keepsake
-   keeps a real `username` + `password_hash` **table** instead (Phase 0's own
-   decision) — see item 6 below and `lib/auth.php`'s header comment for why
-   that one piece was deliberately *not* replaced. Everything else about the
-   login screen (markup, `.login-*` classes, the safe-redirect guard, failing
-   open when unconfigured) now matches the sibling pattern.
+3. **Login page markup/flow, fully matched to Personal CRM's shape**, no
+   remaining divergence: Personal CRM's login is a single site-wide password
+   with no username, stored as `password_hash` directly in `config.php`.
+   Keepsake's first reconciliation pass kept a real `username` +
+   `password_hash` **table** instead (Phase 0's own decision); Kathryn later
+   asked for the username to be dropped, so a follow-up pass switched
+   Keepsake to the same single-password-in-config model as every sibling —
+   see `lib/auth.php`'s header comment for the history and item 7 below for
+   the schema side. Everything about the login screen (markup, `.login-*`
+   classes, the safe-redirect guard, failing open when unconfigured) matches
+   the sibling pattern.
 4. **Function-based `lib/`, not classes.** `src/lib/Database.php`
    (`Keepsake\Database`) and `src/lib/Auth.php` (`Keepsake\Auth`) are gone.
    `lib/bootstrap.php` + `lib/db.php` + `lib/auth.php` now hold plain
@@ -116,32 +119,43 @@ suite conventions, not adapted or re-themed:
    updated to match.
 7. **One `schema.sql` at the repo root, no migrations directory.**
    `migrations/001_create_users_table.sql` and `scripts/migrate.php` are
-   gone; the `users` table now lives directly in `schema.sql`, written
+   gone; auth-related tables now live directly in `schema.sql`, written
    `CREATE TABLE IF NOT EXISTS` so re-applying the file is always safe — no
    runner needed, matching `personal-cms/schema.sql` and
-   `inspiration/schema.sql`.
-8. **`scripts/` renamed to `tools/`.** `seed_user.php` moved and rewritten
-   against the new `lib/`, behavior unchanged (upsert by username, CLI-only).
+   `inspiration/schema.sql`. There is no `users` table any more (see the
+   auth update below) — the auth section of `schema.sql` now holds only
+   `login_attempts`.
+8. **`scripts/` renamed to `tools/`.** Originally `seed_user.php`, since
+   replaced by `tools/make-hash.php` (see below) — same CLI-only reasoning.
    No `apply-schema.php` was added: neither sibling has one either — both
    just document `mysql -u root <db> < schema.sql` in prose, so Keepsake does
    the same rather than inventing a new pattern (README's Setup section).
 
-**One deliberate non-adoption, flagged rather than silently decided:**
-Keepsake keeps its own `users` table (`id`, `username`, `password_hash`)
+**Auth update, after the reconciliation pass above: the `users` table is
+gone, and login throttling is now ported.** The reconciliation pass above
+deliberately preserved Keepsake's own `username` + `password_hash` table
 instead of switching to the siblings' single `password_hash` value in
-`config.php`. The task that drove this reconciliation pass was explicit that
-auth *semantics* should be preserved through the code-shape rewrite, and a
-real table was Phase 0's considered choice, not an oversight — a username
-costs nothing extra for a single-user app, and it's orthogonal to the
-function-vs-class question the rest of this pass exists to fix. What *was*
-adopted from the siblings: **the gate now fails open** when no user is
-seeded yet (`auth_is_configured()`), matching every sibling's "an
-unconfigured deploy must not be able to lock you out of your own app"
-stance — Phase 0 hadn't implemented that at all. Login throttling
-(`personal-cms`'s escalating-delay curve and `login_attempts` table) was
-**not** ported in this pass — flagged in `lib/auth.php` as worth adding
-before this app is reachable on the open internet, but out of scope for a
-pass whose job was code shape, not new behavior.
+`config.php`, since its job was code shape, not auth semantics. Kathryn
+subsequently asked for both changes directly:
+
+- **No username.** `schema.sql`'s `users` table is deleted; `config.php`
+  gets a `password_hash` value exactly like every sibling. `tools/seed_user.php`
+  is replaced by `tools/make-hash.php` (ported from `personal-cms`, which
+  ports it from the Workout Generator unchanged) — prints a hash to paste
+  into config rather than writing a table row. `lib/auth.php`'s
+  `auth_attempt_login()` now takes just a password; `auth_current_user()` is
+  gone (there's no username left to return), and callers that only needed to
+  know "is anyone logged in" now call `auth_is_logged_in()` directly.
+- **Login throttling, ported from `personal-cms`.** The escalating-delay
+  curve (`auth_attempt_delay()`, pure and unit-testable) plus a hard lockout
+  window, both keyed to `REMOTE_ADDR` server-side in a new `login_attempts`
+  table (`ip`, `succeeded`, `attempted_at`) — a session-based counter
+  protects nothing, since an attacker just drops the cookie between guesses.
+  `public/login.php` checks `auth_blocked_for()` before even looking at the
+  posted password, so a locked-out client doesn't get to spend a guess to
+  learn it was going to be refused. Constants (`AUTH_WINDOW_MINUTES`,
+  `AUTH_LOCK_AFTER`, `AUTH_SLOW_AFTER`, `AUTH_MAX_DELAY`) match
+  `personal-cms`'s values exactly rather than being re-tuned from scratch.
 
 ## Architecture decisions (fixed, don't relitigate per-phase)
 
@@ -414,13 +428,16 @@ have the detail.
 **Last updated**: 2026-08-06 (Phase 1 complete, in the same session as the
 Phase 0 reconciliation pass above. `schema.sql` now holds year_projects,
 event_groups, photos, quotes, anecdotes, photo_text_bundles, snapshots,
-geocode_cache, book_layouts, book_pages and book_page_photos alongside
-Phase 0's `users` table. Documented in `docs/SCHEMA.md`. Year isolation
-verified with `tools/verify-schema.php` — ported `test-harness.php` from
-personal-cms, seeded two year_projects with one of everything each, all
-checks pass, including for the tables that derive their year through a
-parent row instead of storing it, and including cascade-delete staying
-inside its own year. Next: Phase 2's capture flow, which is also the point
-`PLAN.md`'s Suite Conventions section flagged as needing the Inspiration
-Board upload/crop component specifically — pull it from
+geocode_cache, book_layouts, book_pages and book_page_photos. Documented in
+`docs/SCHEMA.md`. Year isolation verified with `tools/verify-schema.php` —
+ported `test-harness.php` from personal-cms, seeded two year_projects with
+one of everything each, all checks pass, including for the tables that
+derive their year through a parent row instead of storing it, and including
+cascade-delete staying inside its own year. Auth was revisited right after:
+the `users` table is gone (single `password_hash` in config, no username,
+matching every sibling — see "Suite conventions" above), and login
+throttling is now ported from `personal-cms`'s `login_attempts` table/escalating-delay
+curve. Next: Phase 2's capture flow, which is also the point `PLAN.md`'s
+Suite Conventions section flagged as needing the Inspiration Board
+upload/crop component specifically — pull it from
 `kathrynmarinaro/inspiration` rather than building a new one.)

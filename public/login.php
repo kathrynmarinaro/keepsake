@@ -6,9 +6,10 @@
  * header/footer with index.php: a signed-out visitor must not be shown any
  * authenticated chrome, and there's currently only one other screen anyway.
  *
- * Username + password against the `users` table, not a single site-wide
- * password — see lib/auth.php for why Keepsake diverges from the sibling
- * config-only pattern here. */
+ * One password, no username — matching every sibling app (see lib/auth.php).
+ * Also enforces the login-throttle lockout (lib/auth.php's login_attempts
+ * table): a client that has failed too many times in the window gets turned
+ * away with a wait time instead of being allowed to keep guessing. */
 
 declare(strict_types=1);
 
@@ -45,24 +46,29 @@ function keepsake_safe_redirect_target(?string $target): string
 $error = null;
 $redirect = keepsake_safe_redirect_target($_GET['redirect'] ?? null);
 
+// Checked before touching the POST body at all: a locked-out client doesn't
+// get to spend a password guess just to find out it was going to be refused.
+$blockedFor = auth_blocked_for();
+
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-    $username = (string) ($_POST['username'] ?? '');
     $password = (string) ($_POST['password'] ?? '');
     $redirect = keepsake_safe_redirect_target($_POST['redirect'] ?? null);
 
-    if ($username === '' || $password === '') {
-        $error = 'Please enter both a username and password.';
+    if ($blockedFor > 0) {
+        $error = 'Too many attempts. Try again in ' . $blockedFor . ' seconds.';
+    } elseif ($password === '') {
+        $error = 'Please enter a password.';
     } elseif (!auth_is_configured()) {
         // Say so plainly instead of failing as a wrong password — with the
         // gate failing open, the app is fully usable in this state, and
         // "incorrect password" would send you hunting for a typo that isn't
         // there.
-        $error = 'No user is set up yet. Run tools/seed_user.php to create one.';
-    } elseif (auth_attempt_login($username, $password)) {
+        $error = 'No password is set up yet. Run tools/make-hash.php to create one.';
+    } elseif (auth_attempt_login($password)) {
         header('Location: ' . $redirect);
         exit;
     } else {
-        $error = 'Incorrect username or password.';
+        $error = 'Incorrect password.';
     }
 }
 ?>
@@ -82,23 +88,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
       <input type="hidden" name="redirect" value="<?= h($redirect) ?>">
 
       <label class="field">
-        <span class="label">Username</span>
-        <input
-          class="input"
-          type="text"
-          name="username"
-          autocomplete="username"
-          autofocus
-          required>
-      </label>
-
-      <label class="field">
         <span class="label">Password</span>
         <input
           class="input"
           type="password"
           name="password"
           autocomplete="current-password"
+          autofocus
           required>
       </label>
 
@@ -106,7 +102,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         <p class="login-error" role="alert"><?= h($error) ?></p>
       <?php endif; ?>
 
-      <button class="btn-primary" type="submit">Log in</button>
+      <button class="btn-primary" type="submit"<?= $blockedFor > 0 ? ' disabled' : '' ?>>Log in</button>
     </form>
   </main>
 </body>

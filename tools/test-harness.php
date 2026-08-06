@@ -47,9 +47,9 @@
  *                                                 primary key and MySQL does not
  *
  * QUERY constructs handled, on the connection itself (see HarnessPdo), because
- * this app's repo code writes upserts (tools/seed_user.php's user upsert,
- * and any future book_layouts/version-safe insert) and the tests run the
- * real repo code:
+ * this app's repo code may write upserts (a future book_layouts/version-safe
+ * insert, a geocode_cache lookup-or-create) and the tests run the real repo
+ * code:
  *
  *   INSERT IGNORE                              -> INSERT OR IGNORE
  *   ON DUPLICATE KEY UPDATE ...                -> ON CONFLICT DO UPDATE SET ...
@@ -428,9 +428,11 @@ function harness_key_columns(string $list): array
  * trailing DO UPDATE (3.35+) and it is the faithful translation: MySQL's
  * ON DUPLICATE KEY UPDATE fires on a violation of ANY unique constraint, which
  * is exactly what a bare ON CONFLICT does. Naming a target would pick one key
- * and quietly stop testing the others — Keepsake's own `users` table has two
- * (its id and users_username_unique), which is exactly the case guessing
- * wrong would break silently.
+ * and quietly stop testing the others on a table with more than one unique
+ * constraint — exactly the case guessing wrong would break silently. No
+ * repo query uses ON DUPLICATE KEY UPDATE as of this pass, but the rewrite is
+ * kept ready rather than removed, the same reasoning reorder.js is ported
+ * ahead of Keepsake needing it.
  */
 function harness_translate_query(string $sql): string
 {

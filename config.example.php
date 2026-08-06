@@ -28,17 +28,16 @@ return array(
     'env' => 'local',
 
     /* ---- the gate -----------------------------------------------------
-     * Unlike the siblings (a single password_hash living right here in
-     * config.php), Keepsake keeps a real `users` table (see schema.sql)
-     * seeded via `php tools/seed_user.php <username> <password>` — a
-     * Phase 0 decision this file's reconciliation pass preserved rather
-     * than replaced (see lib/auth.php).
+     * One password, no username, matching every sibling app. Setting it up:
+     *   1. php tools/make-hash.php
+     *   2. paste the printed hash below as 'password_hash'
      *
-     * THE GATE FAILS OPEN until a user is seeded, same as every sibling:
-     * a deploy with no user seeded yet is reachable by anyone who finds
+     * THE GATE FAILS OPEN until this is set, same as every sibling: a
+     * deploy with no hash configured yet is reachable by anyone who finds
      * the URL rather than being reachable by nobody, including you.
-     * SEED A USER BEFORE POINTING A REAL DOMAIN AT THIS.
+     * SET THIS BEFORE POINTING A REAL DOMAIN AT THIS.
      */
+    'password_hash' => 'CHANGE_ME',
 
     // PHP session cookie name. Namespaced so signing in or out here never
     // disturbs the RSS Reader, Grocery or Personal CRM on the same host.

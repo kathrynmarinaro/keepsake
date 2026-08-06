@@ -32,7 +32,8 @@ lib/                Application code, not web-accessible directly (kept
   bootstrap.php     Loads config, wires up DB + auth. Required by every
                      entry point in public/ and tools/.
   db.php            PDO connection (db(), q()).
-  auth.php          Session-based auth (single user, `users` table).
+  auth.php          Session-based auth (single password in config.php,
+                     no `users` table — plus login throttling).
 
 schema.sql          The whole database schema, one file, no migrations
                     directory — CREATE TABLE IF NOT EXISTS throughout, so
@@ -43,7 +44,7 @@ config.php          Real config with DB credentials. Gitignored, never
                     committed.
 
 tools/               CLI-only helper scripts (not web-accessible).
-  seed_user.php       Creates/updates an allowed login.
+  make-hash.php       Prints a password hash to paste into config.php.
   test-harness.php    Translates schema.sql into an in-memory SQLite
                        database for testing without MySQL.
   verify-schema.php   Loads schema.sql via test-harness.php and verifies
@@ -90,18 +91,21 @@ conventions" section for what changed and why.
    No MySQL available? `php tools/verify-schema.php` applies the same file
    to an in-memory SQLite database and checks it end to end, including
    year-project isolation — see `docs/SCHEMA.md`.
-4. Seed an allowed login:
+4. Set the password:
    ```
-   php tools/seed_user.php <username> <password>
+   php tools/make-hash.php
    ```
-   Or run it with no arguments to be prompted interactively. Re-running with
-   the same username updates the password (upsert), so this is also how you
-   reset the password later.
+   Prompts interactively (or pass the password as an argument), then prints a
+   hash to paste into `config.php` as `'password_hash'`. Re-running it and
+   pasting the new hash is also how you change the password later. One
+   password, no username, matching every sibling app.
 
-   **The app works with no user seeded** — the login gate fails open until a
-   `users` row exists, matching every sibling app, so it can never lock
-   Kathryn out of her own deploy. Seed a user before pointing a real domain
-   at this.
+   **The app works with no password configured** — the login gate fails open
+   until `password_hash` is set to something other than `'CHANGE_ME'`,
+   matching every sibling app, so it can never lock Kathryn out of her own
+   deploy. Set a real password before pointing a real domain at this — failed
+   attempts against whatever *is* configured are throttled either way (see
+   `lib/auth.php`'s `login_attempts` table).
 5. Serve the app. For local development, PHP's built-in server works and
    needs no web server config:
    ```
@@ -121,6 +125,8 @@ migration framework. See `PLAN.md`'s "Suite conventions" section for the full
 record of what was reconciled against the sibling repos and why, and
 `keepsake-brief.md` for the product brief this app is built from.
 
-One deliberate divergence: Keepsake keeps a real `users` table
-(`id`, `username`, `password_hash`) rather than a single `password_hash` in
-`config.php`. See `lib/auth.php`'s header comment for the reasoning.
+No divergence remaining on auth: Keepsake originally kept a real `users`
+table with a username (a Phase 0 decision preserved through the first
+reconciliation pass), but that's since been dropped on request — one
+password in `config.php`, no username, exactly like every sibling. See
+`lib/auth.php`'s header comment for the history.

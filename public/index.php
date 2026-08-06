@@ -16,8 +16,6 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 
 require_login_page();
 
-$currentUser = auth_current_user();
-
 // TODO(Phase 2/3): replace with a real query, e.g.
 //   SELECT * FROM year_projects ORDER BY year DESC
 $currentYear = (int) date('Y');
@@ -42,7 +40,7 @@ for ($year = $currentYear; $year >= 2020; $year--) {
 <main class="wrap">
   <header class="screen-head">
     <h1>Year Projects</h1>
-    <?php if ($currentUser): ?>
+    <?php if (auth_is_logged_in()): ?>
     <div class="head-actions">
       <form method="post" action="logout.php">
         <button class="link-btn" type="submit">Log out</button>

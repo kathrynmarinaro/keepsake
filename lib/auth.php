@@ -10,26 +10,27 @@
  * in or out here never disturbs the RSS Reader, Grocery or Personal CRM on
  * the same host.
  *
- * It FAILS OPEN when no login exists yet — see require_login_page(). That
- * matches every sibling in the suite: locking Kathryn out of her own app with
- * no way back in is worse than an unlisted URL reachable to anyone who finds
- * it. Seed a user with tools/seed_user.php to arm the gate.
+ * It FAILS OPEN when no password is configured yet — see require_login_page().
+ * That matches every sibling in the suite: locking Kathryn out of her own app
+ * with no way back in is worse than an unlisted URL reachable to anyone who
+ * finds it. Run tools/make-hash.php and paste the result into config.php as
+ * 'password_hash' to arm the gate.
  * ---------------------------------------------------------------------------
  *
- * ONE STRUCTURAL DIVERGENCE FROM THE SIBLINGS, KEPT DELIBERATELY: this app
- * has a real `users` table (id, username, password_hash) rather than a single
- * password hash living in config.php. Keepsake's Phase 0 built it this way
- * before the sibling repos were reachable, and Part 1's reconciliation pass
- * (see PLAN.md) preserves that choice rather than replacing it — a username
- * costs nothing extra for a single-user app and the config-vs-table question
- * is orthogonal to the folder/function-style convention this pass exists to
- * fix. "Configured" below therefore means "at least one row in `users`",
- * where the siblings mean "password_hash is set in config.php".
+ * SINGLE PASSWORD IN config.php, NOT A `users` TABLE. Phase 0 originally
+ * built a real `users` table with a username, kept through this pass's first
+ * reconciliation as a deliberate divergence — Kathryn later decided she
+ * doesn't want a username for a one-person app, so this now matches every
+ * sibling exactly: one `password_hash` value living in config.php, checked
+ * with auth_is_configured()/auth_attempt_login(string $password). There is no
+ * `users` table in schema.sql any more.
  *
- * Login throttling (the escalating-delay curve, login_attempts table) is
- * NOT ported in this pass — Part 1 changes code SHAPE, not auth semantics,
- * and Phase 0 never had it. Worth doing before this app is reachable on the
- * open internet; see PLAN.md for the flag. */
+ * LOGIN THROTTLING IS PORTED FROM PERSONAL CRM (which ports it from Grocery,
+ * the sibling with auth_attempt_delay() factored out as a pure, tested
+ * function rather than left inline — see personal-cms/CLAUDE.md). Escalating
+ * delay plus a hard lockout window, both keyed to the client IP server-side in
+ * a `login_attempts` table, because a session-based counter protects nothing:
+ * an attacker just drops the cookie between guesses. */
 
 declare(strict_types=1);
 
@@ -44,7 +45,7 @@ function auth_start_session(): void
 
     session_set_cookie_params(array(
         // Browser-session cookie, not a persistent one: Phase 0's original
-        // decision, kept as-is (this pass changes code shape, not behavior).
+        // decision, kept as-is (unrelated to this pass).
         'lifetime' => 0,
         'path'     => '/',
         'httponly' => true,
@@ -61,69 +62,170 @@ function auth_start_session(): void
 function auth_is_logged_in(): bool
 {
     auth_start_session();
-    return !empty($_SESSION['user_id']);
+    return !empty($_SESSION['authed']);
 }
 
 /**
- * @return array{id:int,username:string}|null
- */
-function auth_current_user(): ?array
-{
-    if (!auth_is_logged_in()) {
-        return null;
-    }
-
-    return array(
-        'id'       => (int) $_SESSION['user_id'],
-        'username' => (string) ($_SESSION['username'] ?? ''),
-    );
-}
-
-/**
- * True once at least one user exists — i.e. the gate is usable at all.
+ * True once a password hash is configured — i.e. the gate is usable at all.
  *
  * Fails OPEN (returns false, which require_login_page() treats as "don't
- * gate") if the users table itself isn't there yet either — deploying this
- * code before running schema.sql should not be indistinguishable from a
- * crash, and querying a missing table would throw rather than degrade.
+ * gate") until config.php has a real 'password_hash' — matching every
+ * sibling: an unconfigured deploy is reachable by anyone who finds the URL
+ * rather than reachable by nobody, including Kathryn.
  */
 function auth_is_configured(): bool
 {
+    $hash = (string) cfg('password_hash', '');
+    return $hash !== '' && $hash !== 'CHANGE_ME';
+}
+
+/* ------------------------------------------------------- login throttling */
+
+/* A single password on the public internet needs more than a fixed delay, or
+ * an attacker gets unlimited guesses at whatever rate the server allows.
+ *
+ * Counting is keyed to the client address in the database, not the session —
+ * an attacker just drops the cookie, so session counters protect nothing. */
+
+const AUTH_WINDOW_MINUTES = 15;   // how far back failures are counted
+const AUTH_LOCK_AFTER     = 10;   // failures in that window before refusing
+const AUTH_SLOW_AFTER     = 3;    // failures before delays start escalating
+const AUTH_MAX_DELAY      = 4;    // seconds — cap so a request can't hang
+
+/**
+ * REMOTE_ADDR only, deliberately.
+ *
+ * X-Forwarded-For is trivially spoofed, and trusting it would let an attacker
+ * present a new address per request and bypass this entirely. The cost is
+ * that behind a proxy every visitor may share one address — which is why
+ * there is no permanent lockout below, only a window that always expires.
+ */
+function auth_client_ip(): string
+{
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    return is_string($ip) && $ip !== '' ? substr($ip, 0, 45) : 'unknown';
+}
+
+/**
+ * Throttle state for this client: recent failure count and, if locked out,
+ * how many seconds remain.
+ *
+ * Fails OPEN if the table is missing — deploying this code before running
+ * schema.sql should not lock Kathryn out of her own app. It logs instead.
+ *
+ * @return array{failures:int, blocked_for:int}
+ */
+function auth_throttle_state(): array
+{
+    $none = array('failures' => 0, 'blocked_for' => 0);
+
+    // Every timestamp comparison happens inside SQL, on MySQL's clock, so PHP
+    // and the database can never disagree about whether a lockout has expired.
     try {
-        $row = q('SELECT COUNT(*) AS c FROM users')->fetch();
-        return ((int) ($row['c'] ?? 0)) > 0;
+        $row = q(
+            'SELECT COUNT(*) AS failures,
+                    GREATEST(0, COALESCE(
+                      TIMESTAMPDIFF(SECOND, NOW(), MAX(attempted_at) + INTERVAL ? MINUTE), 0
+                    )) AS blocked_for
+               FROM login_attempts
+              WHERE ip = ?
+                AND succeeded = 0
+                AND attempted_at > NOW() - INTERVAL ? MINUTE',
+            array(AUTH_WINDOW_MINUTES, auth_client_ip(), AUTH_WINDOW_MINUTES)
+        )->fetch();
     } catch (Throwable $e) {
-        error_log('auth: could not check users table (run schema.sql?): ' . $e->getMessage());
-        return false;
+        error_log('auth: throttle unavailable (run schema.sql?): ' . $e->getMessage());
+        return $none;
+    }
+
+    $failures = (int) ($row['failures'] ?? 0);
+
+    // The window runs from the most recent failure, so hammering the lock
+    // keeps it shut rather than letting attempts leak through as it ages out.
+    return array(
+        'failures'    => $failures,
+        'blocked_for' => $failures >= AUTH_LOCK_AFTER ? (int) $row['blocked_for'] : 0,
+    );
+}
+
+/** Seconds this client must wait, or 0 when it may try. */
+function auth_blocked_for(): int
+{
+    return auth_throttle_state()['blocked_for'];
+}
+
+/**
+ * How long to stall this attempt, in seconds, given how many failures this
+ * address already has in the window.
+ *
+ * Baseline delay so a wrong password can't be timed, then escalation once the
+ * address starts looking like a guessing loop: 0.25s flat, then 0.5, 1, 2, 4,
+ * capped. An attacker's throughput collapses while one honest typo still
+ * costs nothing noticeable.
+ *
+ * Pulled out of auth_attempt_login() as a pure function so it can be tested
+ * without a database, a session or a real password — same reasoning
+ * personal-cms/CLAUDE.md gives for keeping this factored out.
+ */
+function auth_attempt_delay(int $failures): float
+{
+    if ($failures < AUTH_SLOW_AFTER) {
+        return 0.25;
+    }
+    return min(0.25 * (2 ** ($failures - AUTH_SLOW_AFTER + 1)), (float) AUTH_MAX_DELAY);
+}
+
+function auth_record_attempt(bool $succeeded): void
+{
+    try {
+        q(
+            'INSERT INTO login_attempts (ip, succeeded) VALUES (?, ?)',
+            array(auth_client_ip(), $succeeded ? 1 : 0)
+        );
+
+        // Clear this address's failures on success so one good login resets
+        // the counter, and prune old rows so the table can't grow unbounded.
+        if ($succeeded) {
+            q('DELETE FROM login_attempts WHERE ip = ? AND succeeded = 0', array(auth_client_ip()));
+        }
+        if (random_int(1, 20) === 1) {
+            q('DELETE FROM login_attempts WHERE attempted_at < NOW() - INTERVAL 30 DAY');
+        }
+    } catch (Throwable $e) {
+        error_log('auth: could not record attempt: ' . $e->getMessage());
     }
 }
 
 /**
- * Verify a login attempt and start the session. Returns success.
+ * Verify a password attempt and start the session. Returns success.
+ *
+ * Callers must check auth_blocked_for() first — this records the attempt and
+ * escalates its own delay, but does not enforce the lockout itself.
  */
-function auth_attempt_login(string $username, string $password): bool
+function auth_attempt_login(string $password): bool
 {
     auth_start_session();
 
-    $username = trim($username);
-    if ($username === '' || $password === '') {
+    if (!auth_is_configured() || $password === '') {
         return false;
     }
 
-    $user = q(
-        'SELECT id, username, password_hash FROM users WHERE username = ? LIMIT 1',
-        array($username)
-    )->fetch();
+    $hash = (string) cfg('password_hash', '');
 
-    if (!$user || !password_verify($password, $user['password_hash'])) {
+    usleep((int) round(auth_attempt_delay(auth_throttle_state()['failures']) * 1_000_000));
+
+    if (!password_verify($password, $hash)) {
+        auth_record_attempt(false);
         return false;
     }
+
+    auth_record_attempt(true);
 
     // Regenerate the session id on privilege change to prevent session
     // fixation.
     session_regenerate_id(true);
-    $_SESSION['user_id']  = (int) $user['id'];
-    $_SESSION['username'] = $user['username'];
+    $_SESSION['authed']   = true;
+    $_SESSION['login_at'] = time();
 
     return true;
 }
@@ -153,10 +255,10 @@ function auth_logout(): void
  * Gate an HTML screen. Called by every entry point in public/ except
  * login.php — every screen in this app is private.
  *
- * Fails OPEN when no user has been seeded yet (see auth_is_configured()).
- * That is deliberate, matching every sibling: someone who deploys this
- * without running tools/seed_user.php would otherwise be locked out of their
- * own app with no way in.
+ * Fails OPEN when no password has been configured yet (see
+ * auth_is_configured()). That is deliberate, matching every sibling: someone
+ * who deploys this without setting a hash would otherwise be locked out of
+ * their own app with no way in.
  */
 function require_login_page(): void
 {
@@ -193,9 +295,9 @@ function require_login_api(): void
 /**
  * Keep this app out of search results.
  *
- * NOT redundant with the gate: the gate fails open when no user is seeded
- * yet, and an unconfigured deploy is exactly when you least want a crawler
- * indexing anything. Called automatically by require_login_page().
+ * NOT redundant with the gate: the gate fails open when no password is
+ * configured yet, and an unconfigured deploy is exactly when you least want
+ * a crawler indexing anything. Called automatically by require_login_page().
  */
 function noindex(): void
 {

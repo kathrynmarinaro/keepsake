@@ -21,8 +21,9 @@ Every table below is one of three shapes:
    children of a row from group 1, so a second copy of the year would only
    ever risk drifting from the parent's.
 3. **Shared reference data, not year-scoped at all** — `geocode_cache`,
-   `users`. Neither is "content"; a lat/lon resolves to the same place name
-   regardless of which year asked, and a login isn't anyone's memory of 2024.
+   `login_attempts`. Neither is "content"; a lat/lon resolves to the same
+   place name regardless of which year asked, and a login attempt isn't
+   anyone's memory of 2024.
 
 `tools/verify-schema.php` proves this holds: it seeds two year_projects with
 one of everything each, confirms every group-1 and group-2 table resolves
@@ -31,10 +32,11 @@ a year_project cascades everywhere inside that year and nowhere outside it.
 
 ## Tables
 
-### `users` (auth, not year-scoped)
-One row per allowed login (`username`, `password_hash`). See
-`lib/auth.php` for why Keepsake keeps a real table here instead of the
-siblings' single `password_hash` config value.
+### `login_attempts` (auth, not year-scoped)
+No `users` table — the password itself lives in `config.php` as
+`password_hash`, matching every sibling app. `login_attempts` exists purely
+for login throttling: one row per attempt (`ip`, `succeeded`, `attempted_at`),
+pruned opportunistically. See `lib/auth.php` for the throttle curve.
 
 ### `year_projects`
 The root. One row per calendar year: `year` (unique), `subtitle`,
@@ -136,7 +138,7 @@ year_projects.cover_photo_id ─ ─ ─▶ photos.id           (pointer, not an
 year_projects.active_book_layout_id ─ ─ ─▶ book_layouts.id  (pointer, not an FK)
 
 geocode_cache                                    (standalone; not year-scoped)
-users                                            (standalone; not year-scoped)
+login_attempts                                   (standalone; not year-scoped)
 ```
 
 `──<` is one-to-many, `──1`/`──` is one-to-one-ish (a unique FK), `─ ─ ─▶` is

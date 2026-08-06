@@ -19,31 +19,30 @@
 
 -- ========================================================== AUTH ============
 
--- ----------------------------------------------------------------- users
+-- ----------------------------------------------------------------- login_attempts
 
--- One row per allowed login. Unlike the sibling apps (a single password_hash
--- living in config.php), Keepsake keeps a real table with a username —
--- Phase 0's own decision, kept deliberately through this pass's
--- reconciliation rather than replaced (see lib/auth.php for the reasoning).
--- Only one row is ever really expected to exist (Kathryn only — no
--- registration flow, per the brief), but a table costs nothing extra for a
--- single-user app and leaves room to outgrow it cleanly if that's ever
--- needed.
+-- No `users` table: Keepsake is one person, one password, and the password
+-- itself lives in config.php as 'password_hash' — matching every sibling app
+-- exactly (Phase 0 originally built a real users table with a username; that
+-- divergence has since been dropped on request, see lib/auth.php).
 --
--- Seed with: php tools/seed_user.php <username> <password>
-CREATE TABLE IF NOT EXISTS users (
-  id             INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  username       VARCHAR(190) NOT NULL,
-  password_hash  VARCHAR(255) NOT NULL,
-  created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
+-- login_attempts exists purely for throttling. One row per attempt, pruned
+-- opportunistically by auth_record_attempt(). Counting has to be keyed to the
+-- client address server-side: a session counter protects nothing, because an
+-- attacker simply discards the cookie between guesses. Shape matches the
+-- sibling apps exactly (ported from Personal CRM, which ports it from
+-- Grocery) — lib/auth.php's queries assume these column names.
+CREATE TABLE IF NOT EXISTS login_attempts (
+  id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  ip           VARCHAR(45)  NOT NULL,     -- 45 chars covers IPv6
+  succeeded    TINYINT(1)   NOT NULL DEFAULT 0,
+  attempted_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
 
-  -- Serves the login query and the seed script's upsert:
-  --   SELECT id, username, password_hash FROM users WHERE username = ?
-  --   INSERT ... ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)
-  UNIQUE KEY users_username_unique (username)
+  -- Serves auth_throttle_state():
+  --   SELECT COUNT(*) ... WHERE ip = ? AND succeeded = 0
+  --                         AND attempted_at > NOW() - INTERVAL ? MINUTE
+  KEY idx_ip_time (ip, attempted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
