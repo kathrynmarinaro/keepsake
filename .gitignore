@@ -1,0 +1,25 @@
+# Real config — never commit. config/config.php.example is the committed template.
+/config/config.php
+.env
+.env.*
+
+# Composer (not used yet, but reserved in case a future phase adds a dependency)
+/vendor/
+composer.lock
+
+# Uploaded content (photos etc. — introduced in Phase 2)
+/public/uploads/*
+!/public/uploads/.gitkeep
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Logs
+*.log
+/logs/*
+!/logs/.gitkeep
