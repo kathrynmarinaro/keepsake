@@ -101,6 +101,17 @@ function year_project_set_cover_photo(int $id, ?int $photoId): void
     q('UPDATE year_projects SET cover_photo_id = ? WHERE id = ?', array($photoId, $id));
 }
 
+/**
+ * Which generated layout Kathryn is working from (schema.sql:
+ * active_book_layout_id is "the one I'm working from", deliberately NOT
+ * "the highest version"). Set automatically only for a year's FIRST layout;
+ * after that it changes only when she picks a version by hand.
+ */
+function year_project_set_active_layout(int $id, ?int $layoutId): void
+{
+    q('UPDATE year_projects SET active_book_layout_id = ? WHERE id = ?', array($layoutId, $id));
+}
+
 /* --------------------------------------------------------------- quotes */
 
 /**
@@ -776,4 +787,255 @@ function event_group_split(int $sourceId, array $photoIds, string $newName): int
 function event_group_delete(int $id): void
 {
     q('DELETE FROM event_groups WHERE id = ?', array($id));
+}
+
+/* ------------------------------------------------------- book layout tables
+ *
+ * Phase 5's three tables (schema.sql's BOOK LAYOUT section): book_layouts ->
+ * book_pages -> book_page_photos. Plain CRUD only — every decision about WHAT
+ * a page should contain lives in lib/layout.php, the same split that keeps
+ * lib/grouping.php's clustering out of this file.
+ *
+ * VERSIONS ARE NEVER OVERWRITTEN (brief §4.5). There is deliberately no
+ * "replace this layout's pages" function: generating again means
+ * book_layout_create() and a new version, and reflowing means
+ * book_layout_delete_pages_from() inside one version. Those are the only two
+ * ways pages ever change, so there is no third path for a future caller to
+ * reach for by accident.
+ */
+
+/**
+ * A new layout for a year, at the next version number for that year.
+ *
+ * MAX(version)+1 read and written in two statements, exactly as schema.sql's
+ * comment on book_layouts.version describes. The read-then-write race is real
+ * but harmless: uniq_year_version makes the loser's INSERT fail rather than
+ * letting two layouts both call themselves version 4. Single-user app, one
+ * button, no transaction needed to make that safe — just an error the caller
+ * sees instead of silent duplication.
+ */
+function book_layout_create(int $yearProjectId): int
+{
+    $row = q(
+        'SELECT COALESCE(MAX(version), 0) + 1 AS next_version
+           FROM book_layouts WHERE year_project_id = ?',
+        array($yearProjectId)
+    )->fetch();
+
+    $version = $row === false ? 1 : max(1, (int) $row['next_version']);
+
+    q(
+        'INSERT INTO book_layouts (year_project_id, version) VALUES (?, ?)',
+        array($yearProjectId, $version)
+    );
+
+    return (int) db()->lastInsertId();
+}
+
+function book_layout_get(int $id): ?array
+{
+    $row = q('SELECT * FROM book_layouts WHERE id = ?', array($id))->fetch();
+    return $row ?: null;
+}
+
+/**
+ * A year's layouts, newest version first, each with the page counts that make
+ * one version comparable to another at a glance (brief §4.5: generation "can
+ * be run multiple times ... to preview/compare"). One query with correlated
+ * subqueries rather than N+1 — a year has a handful of versions, and the
+ * alternative is four extra round trips per row on public/layout.php.
+ */
+function book_layouts_for_year(int $yearProjectId): array
+{
+    return q(
+        "SELECT bl.*,
+                (SELECT COUNT(*) FROM book_pages bp
+                  WHERE bp.book_layout_id = bl.id) AS page_count,
+                (SELECT COUNT(*) FROM book_pages bp
+                  WHERE bp.book_layout_id = bl.id AND bp.page_type = 'photos') AS photo_pages,
+                (SELECT COUNT(*) FROM book_pages bp
+                  WHERE bp.book_layout_id = bl.id AND bp.page_type = 'text') AS text_pages,
+                (SELECT COUNT(*) FROM book_pages bp
+                  WHERE bp.book_layout_id = bl.id AND bp.page_type = 'snapshot') AS snapshot_pages,
+                (SELECT COUNT(*) FROM book_page_photos bpp
+                   JOIN book_pages bp2 ON bp2.id = bpp.book_page_id
+                  WHERE bp2.book_layout_id = bl.id) AS slot_count
+           FROM book_layouts bl
+          WHERE bl.year_project_id = ?
+          ORDER BY bl.version DESC",
+        array($yearProjectId)
+    )->fetchAll();
+}
+
+function book_layout_delete(int $id): void
+{
+    // book_pages (and through them book_page_photos) cascade — see schema.sql.
+    q('DELETE FROM book_layouts WHERE id = ?', array($id));
+
+    // active_book_layout_id is deliberately not a foreign key (schema.sql's
+    // comment: it would close a circular CREATE TABLE dependency), so nothing
+    // clears it for us — same cleanup photo_delete() does for cover_photo_id.
+    q('UPDATE year_projects SET active_book_layout_id = NULL WHERE active_book_layout_id = ?', array($id));
+}
+
+/**
+ * One generated interior page. $snapshotId is required for and permitted only
+ * on page_type='snapshot' — schema.sql has a CHECK saying so, and this
+ * function passes the caller's value straight through rather than second-
+ * guessing it, so a mistake surfaces as a constraint violation on the deploy
+ * that supports CHECK rather than as a page that renders blank.
+ */
+function book_page_create(int $layoutId, int $pageNumber, string $pageType, ?int $snapshotId = null): int
+{
+    if (!in_array($pageType, array('photos', 'text', 'snapshot'), true)) {
+        throw new InvalidArgumentException('bad page_type: ' . $pageType);
+    }
+
+    q(
+        'INSERT INTO book_pages (book_layout_id, page_number, page_type, snapshot_id)
+         VALUES (?, ?, ?, ?)',
+        array($layoutId, $pageNumber, $pageType, $snapshotId)
+    );
+
+    return (int) db()->lastInsertId();
+}
+
+/**
+ * One filled slot. $occupant is exactly one of photo_id / quote_id /
+ * anecdote_id — book_page_photos' CHECK enforces it in the database; this
+ * rejects it earlier, with a message that names the caller's mistake.
+ *
+ * @param array{photo_id?:int, quote_id?:int, anecdote_id?:int} $occupant
+ */
+function book_page_slot_create(int $pageId, int $slotNumber, array $occupant): int
+{
+    $columns = array('photo_id', 'quote_id', 'anecdote_id');
+    $values  = array();
+    $set     = 0;
+
+    foreach ($columns as $column) {
+        $id = isset($occupant[$column]) ? (int) $occupant[$column] : null;
+        if ($id !== null && $id > 0) {
+            $set++;
+        } else {
+            $id = null;
+        }
+        $values[] = $id;
+    }
+
+    if ($set !== 1) {
+        throw new InvalidArgumentException(
+            'a slot holds exactly one of photo_id/quote_id/anecdote_id, got ' . $set
+        );
+    }
+
+    q(
+        'INSERT INTO book_page_photos (book_page_id, slot_number, photo_id, quote_id, anecdote_id)
+         VALUES (?, ?, ?, ?, ?)',
+        array_merge(array($pageId, $slotNumber), $values)
+    );
+
+    return (int) db()->lastInsertId();
+}
+
+/**
+ * Every page of a layout in page order, each carrying its own 'slots' list in
+ * slot order. Two queries, not one per page: a full year's book is ~100 pages
+ * and every reader of this (reflow, the preview screen, Phase 6, Phase 7)
+ * wants all of them.
+ */
+function book_pages_for_layout(int $layoutId): array
+{
+    $pages = q(
+        'SELECT * FROM book_pages WHERE book_layout_id = ? ORDER BY page_number',
+        array($layoutId)
+    )->fetchAll();
+
+    $byId = array();
+    foreach ($pages as $index => $page) {
+        $pages[$index]['slots'] = array();
+        $byId[(int) $page['id']] = $index;
+    }
+
+    $slots = q(
+        'SELECT bpp.*
+           FROM book_page_photos bpp
+           JOIN book_pages bp ON bp.id = bpp.book_page_id
+          WHERE bp.book_layout_id = ?
+          ORDER BY bpp.book_page_id, bpp.slot_number',
+        array($layoutId)
+    )->fetchAll();
+
+    foreach ($slots as $slot) {
+        $index = $byId[(int) $slot['book_page_id']] ?? null;
+        if ($index !== null) {
+            $pages[$index]['slots'][] = $slot;
+        }
+    }
+
+    return $pages;
+}
+
+/**
+ * The same list, with each slot's actual content joined on — thumbnails and
+ * text for a preview screen, so it doesn't fetch a row per slot. Kept separate
+ * from book_pages_for_layout() because reflow and Phase 7's export want the
+ * ids and nothing else; this one is for anything that has to SHOW the page.
+ */
+function book_layout_pages_with_content(int $layoutId): array
+{
+    $pages = q(
+        'SELECT bp.*, s.type AS snapshot_type, s.entry_date AS snapshot_date
+           FROM book_pages bp
+           LEFT JOIN snapshots s ON s.id = bp.snapshot_id
+          WHERE bp.book_layout_id = ?
+          ORDER BY bp.page_number',
+        array($layoutId)
+    )->fetchAll();
+
+    $byId = array();
+    foreach ($pages as $index => $page) {
+        $pages[$index]['slots'] = array();
+        $byId[(int) $page['id']] = $index;
+    }
+
+    $slots = q(
+        'SELECT bpp.*,
+                p.thumb_path, p.original_path, p.width, p.height, p.caption, p.captured_at,
+                qu.quote_text, qu.who_said_it, qu.entry_date AS quote_date,
+                an.anecdote_text, an.entry_date AS anecdote_date
+           FROM book_page_photos bpp
+           JOIN book_pages bp ON bp.id = bpp.book_page_id
+           LEFT JOIN photos p ON p.id = bpp.photo_id
+           LEFT JOIN quotes qu ON qu.id = bpp.quote_id
+           LEFT JOIN anecdotes an ON an.id = bpp.anecdote_id
+          WHERE bp.book_layout_id = ?
+          ORDER BY bpp.book_page_id, bpp.slot_number',
+        array($layoutId)
+    )->fetchAll();
+
+    foreach ($slots as $slot) {
+        $index = $byId[(int) $slot['book_page_id']] ?? null;
+        if ($index !== null) {
+            $pages[$index]['slots'][] = $slot;
+        }
+    }
+
+    return $pages;
+}
+
+/**
+ * "Reflow from here"'s destructive half (brief §4.5): drop this layout's pages
+ * from $fromPageNumber onward, cascading to their slots, and leave everything
+ * before it untouched — including manual edits, which is the entire point.
+ *
+ * Scoped to ONE book_layout_id, so it can no more reach another version of the
+ * same year than it can another year (PLAN.md's year-isolation rule).
+ */
+function book_layout_delete_pages_from(int $layoutId, int $fromPageNumber): void
+{
+    q(
+        'DELETE FROM book_pages WHERE book_layout_id = ? AND page_number >= ?',
+        array($layoutId, max(1, $fromPageNumber))
+    );
 }
