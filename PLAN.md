@@ -6,6 +6,14 @@
 > git — so this file (plus the code and commit history) *is* the memory of
 > the project across usage-limit resets and multi-day work.
 
+> **⏸ PAUSED (as of 2026-08-06) after Phase 0.** Kathryn is going to get
+> access to `kathrynmarinaro/inspiration` and `kathrynmarinaro/personal-cms`
+> sorted out (either session repo access or pasted files — see "Suite
+> conventions" below for exactly what's needed) before work continues.
+> **Do not start Phase 1 until she says go.** If you're a future session
+> picking this up and there's no fresh instruction to proceed, ask first
+> rather than assuming the pause is over.
+
 ## How to resume
 
 1. Read the **Status Tracker** at the bottom of this file to see the last
