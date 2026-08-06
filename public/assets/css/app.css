@@ -1,0 +1,415 @@
+/*
+ * Keepsake — base stylesheet (STUB, pending real suite conventions).
+ *
+ * This is a PLACEHOLDER design system, not the final one. It was written
+ * without access to `kathrynmarinaro/inspiration` or
+ * `kathrynmarinaro/personal-cms` (repo access wasn't available in the
+ * Phase 0 session — see PLAN.md "Suite conventions"). Swap it for the real
+ * shared stylesheet when those repos are reachable. Specifically:
+ *
+ *   - Color tokens in :root below (--color-*) are invented placeholders —
+ *     replace with the suite's actual palette.
+ *   - Font stack (--font-sans) is a system-font fallback — replace if the
+ *     suite uses a specific webfont.
+ *   - Component classes (.button, .form-field, .notice, .badge, .year-card)
+ *     are generic and may duplicate classes the suite already has under
+ *     different names — reconcile naming once the sibling repos are
+ *     available rather than keeping two parallel systems.
+ *
+ * Everything is expressed as custom properties precisely so this swap is
+ * "change the :root block (+ a find/replace pass on a few component
+ * classes)" rather than a rewrite.
+ */
+
+:root {
+    /* Color tokens — placeholder palette (warm, neutral). */
+    --color-bg: #faf8f5;
+    --color-surface: #ffffff;
+    --color-surface-muted: #f1ede6;
+    --color-text: #2b2620;
+    --color-text-muted: #6b6459;
+    --color-border: #e3dccf;
+    --color-primary: #8a6d5c;
+    --color-primary-hover: #71574a;
+    --color-primary-contrast: #ffffff;
+    --color-accent: #c98a4b;
+    --color-danger: #b3452c;
+    --color-danger-bg: #fbe9e4;
+    --color-info: #3d6b7a;
+    --color-info-bg: #e6f0f2;
+    --color-success: #4c7a52;
+
+    /* Spacing scale. */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
+    --space-8: 3rem;
+
+    /* Type. */
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-size-base: 1rem;
+    --line-height-base: 1.5;
+
+    /* Misc. */
+    --radius-sm: 0.25rem;
+    --radius: 0.5rem;
+    --radius-lg: 0.75rem;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    --max-width: 60rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --color-bg: #1c1a17;
+        --color-surface: #262320;
+        --color-surface-muted: #2f2b26;
+        --color-text: #ede8e0;
+        --color-text-muted: #a89f92;
+        --color-border: #3a352e;
+        --color-primary: #c9a894;
+        --color-primary-hover: #d9bba9;
+        --color-primary-contrast: #1c1a17;
+        --color-accent: #d9a463;
+        --color-danger: #e0836a;
+        --color-danger-bg: #3a231e;
+        --color-info: #7fb2c2;
+        --color-info-bg: #1f2f33;
+        --color-success: #8fc199;
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+}
+
+/* A future theme toggle (if the suite has one) can force either palette
+   regardless of OS preference by stamping data-theme on <html>. */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+}
+:root[data-theme="light"] {
+    color-scheme: light;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+html {
+    color-scheme: light dark;
+}
+
+body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+    background: var(--color-bg);
+    color: var(--color-text);
+    -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+    line-height: 1.25;
+    margin: 0 0 var(--space-3);
+}
+
+p {
+    margin: 0 0 var(--space-3);
+}
+
+a {
+    color: var(--color-primary);
+}
+
+/* ---- Layout shell ---- */
+
+.app-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.site-header {
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+}
+
+.site-header__inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: var(--space-3) var(--space-4);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+}
+
+.site-header__brand {
+    font-weight: 700;
+    font-size: 1.125rem;
+    color: var(--color-text);
+    text-decoration: none;
+}
+
+.site-header__nav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    font-size: 0.9375rem;
+}
+
+.site-header__nav a {
+    color: var(--color-text-muted);
+    text-decoration: none;
+}
+
+.site-header__nav a:hover {
+    color: var(--color-text);
+}
+
+.site-header__logout {
+    margin: 0;
+}
+
+.link-button {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.link-button:hover {
+    color: var(--color-text);
+}
+
+.site-main {
+    flex: 1;
+    max-width: var(--max-width);
+    width: 100%;
+    margin: 0 auto;
+    padding: var(--space-5) var(--space-4) var(--space-8);
+}
+
+.site-footer {
+    border-top: 1px solid var(--color-border);
+    padding: var(--space-4);
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 0.8125rem;
+}
+
+.site-footer p {
+    margin: 0;
+}
+
+/* ---- Page header ---- */
+
+.page-header {
+    margin-bottom: var(--space-5);
+}
+
+.page-header__lede {
+    color: var(--color-text-muted);
+    max-width: 40rem;
+}
+
+/* ---- Notices ---- */
+
+.notice {
+    border-radius: var(--radius);
+    padding: var(--space-3) var(--space-4);
+    margin-bottom: var(--space-5);
+    font-size: 0.9375rem;
+}
+
+.notice--info {
+    background: var(--color-info-bg);
+    color: var(--color-info);
+}
+
+.notice--error {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+}
+
+/* ---- Badges ---- */
+
+.badge {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.badge--active {
+    background: var(--color-info-bg);
+    color: var(--color-info);
+}
+
+.badge--muted {
+    background: var(--color-surface-muted);
+    color: var(--color-text-muted);
+}
+
+/* ---- Year project grid (dashboard) ---- */
+
+.year-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    gap: var(--space-4);
+}
+
+.year-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    box-shadow: var(--shadow-sm);
+    min-height: 7rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.year-card--current {
+    border-color: var(--color-primary);
+}
+
+.year-card__year {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.year-card__hint {
+    margin: var(--space-2) 0 0;
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+}
+
+.year-card--add {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    border-style: dashed;
+    color: var(--color-text-muted);
+}
+
+.year-card__add-icon {
+    font-size: 1.75rem;
+    line-height: 1;
+}
+
+/* ---- Forms ---- */
+
+.form-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    font-size: 0.9375rem;
+}
+
+.form-field__label {
+    font-weight: 600;
+}
+
+.form-field input,
+.form-field textarea,
+.form-field select {
+    font: inherit;
+    padding: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+
+.form-field input:focus,
+.form-field textarea:focus,
+.form-field select:focus {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+}
+
+/* ---- Buttons ---- */
+
+.button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    font: inherit;
+    font-weight: 600;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.button--primary {
+    background: var(--color-primary);
+    color: var(--color-primary-contrast);
+}
+
+.button--primary:hover {
+    background: var(--color-primary-hover);
+}
+
+.button--block {
+    width: 100%;
+}
+
+/* ---- Auth (login) page ---- */
+
+.auth-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4);
+    background: var(--color-bg);
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 22rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    padding: var(--space-6);
+}
+
+.auth-card__brand {
+    margin-bottom: var(--space-1);
+}
+
+.auth-card__tagline {
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-5);
+}
+
+/* ---- Mobile-first breakpoints ----
+   Base styles above already target small screens; widen spacing slightly
+   on larger viewports rather than restructuring layout. */
+
+@media (min-width: 40rem) {
+    .site-main {
+        padding-top: var(--space-6);
+    }
+}
