@@ -423,12 +423,12 @@ have the detail.
 - [x] Phase 2 — Capture flow (mobile-first)
 - [x] Phase 3 — Review/browse (desktop)
 - [x] Phase 4 — Event grouping & geocoding
-- [ ] Phase 5 — Book layout engine
+- [x] Phase 5 — Book layout engine
 - [ ] Phase 6 — Page review UI
 - [ ] Phase 7 — PDF export
 - [ ] Phase 8 — Polish & open-source readiness
 
-**Last updated**: 2026-08-06 (Phase 2 complete, same session as Phase 0/1
+**Last updated**: 2026-08-06 (Phases 0-5 complete, one session. The entry below is Phase 2's; each later phase appends its own. Phase 2 complete, same session as Phase 0/1
 above. `public/capture.php` is one mobile screen, four accordion sections
 (quote/anecdote/snapshot/photos), all wired to new `public/api/*.php`
 endpoints backed by `lib/repo.php` (year-auto-assignment, brief §3),
@@ -689,3 +689,127 @@ populates itself; Phase 5 reads `photos.event_group_id`/`event_groups`
 (placed by `entry_date` into a group's range) and `snapshots` (always
 their own full-page template) to arrange pages. Per PLAN.md's Model
 Guidance section, consider running that phase's agent at `model: "opus"`.
+
+**Phase 5 complete (2026-08-06, run at `model: "opus"` per the Model
+Guidance section above).** `lib/layout.php` (new) is the auto-arrange engine
+of brief §4.3/§4.5, plus book-layout CRUD in `lib/repo.php`, a `layout`
+block of tunables in `config.example.php`, and a plain preview surface at
+`public/layout.php`.
+
+**Shape: a pipeline with pure decisions in the middle.**
+`layout_load_year_content()` (the one place inclusion rules apply) →
+`layout_plan()` (PURE — content in, ordered page specs out, no DB at all) →
+`layout_write_pages()`. `layout_generate()` runs all three against a new
+`book_layouts` row; `layout_reflow_from()` runs them again inside an
+existing one. Because the middle is pure, `tools/verify-layout.php` asserts
+on a whole book's shape without writing a row, and every scoring function
+can be fed synthetic tuning that isn't in any config file.
+
+**Day/close-timing sub-grouping reuses Phase 4's clustering rather than
+duplicating it.** `event_grouping_cluster_ungrouped()` was refactored into
+`event_grouping_cluster_by($rows, $sortKey, $distance, $threshold)` — one
+chain-clustering loop with the METRIC INJECTED. Phase 4 passes its calendar-
+day metric and keeps its exact semantics (`tools/verify-grouping.php` passes
+unmodified); Phase 5's `layout_subgroup_photos()` passes an elapsed-hours
+metric with a ~5h default. A single seconds-based threshold could not serve
+both: 07-01 00:01 and 07-04 23:59 are 3 calendar days apart (Phase 4: one
+event) but ~4.0 elapsed days. There is deliberately no separate calendar-day
+rule — a night's sleep clears 5 hours easily, so days separate themselves,
+and a party running 23:30→00:30 correctly stays on one page.
+
+**The heuristic, in the order it decides things** (all pure, all separately
+testable, per this phase's own delegate prompt): `layout_orientation()` maps
+a photo to portrait/landscape/**flex**, where flex is a wildcard covering
+square photos, photos with no stored dimensions (fail soft), and text cards.
+`layout_orientation_score()` scores a SET of orientations against a small
+table keyed by "<portraits>,<landscapes>" per page size — two portraits side
+by side or two landscapes stacked score 1.0, a portrait+landscape pair 0.45
+(no arrangement of those two avoids a dead corner on a square page), a 2+2
+four-up 0.92 (uniform rows), 3+1 0.60, and **a single photo 0.75,
+deliberately below a matched pair — that number is what keeps the engine out
+of the one-photo-per-page look brief §4 exists to avoid.**
+`layout_variety_penalty()` charges `repeat_penalty` per page in the
+immediately preceding RUN of the same size plus half that for other pages of
+that size still in the window, so the third 2-up in a row costs twice what
+the second did. `layout_page_score()` combines them with
+orientation_weight 1.0 (primary, per the brief) and density_weight 0.5
+(secondary). `layout_choose_page_size()` tries sizes in preference order
+2,3,4,1, ties keeping the earlier, and charges `orphan_page_penalty` against
+any size that would strand exactly one photo at the end of a group — a
+one-page lookahead rather than a real search, because it catches the case
+that actually happens and stays legible to retune.
+
+**Greedy in book order, not optimal per group, on purpose.** A DP could
+partition one page-group optimally, but the variety heuristic is a function
+of the pages already emitted ACROSS the book — event groups, full-page
+photos and snapshot pages interleaved — so per-group optimality optimises
+the wrong thing. Everything (page-groups, full-page photos, snapshots,
+standalone text) is merged into ONE chronological block list before any page
+is emitted, and the book is walked once in reading order.
+
+**Judgement calls worth Kathryn's eyes**, all commented where they live:
+- A **snapshot's hero photo is excluded from the loose photo flow** (it is
+  already on that snapshot's page). The **cover photo is NOT** excluded — the
+  cover isn't a `book_pages` row at all, and a cover reappearing inside a
+  photo book is ordinary.
+- **Full-page photo pages feed the variety history; snapshot and text pages
+  do not.** A run of full-page photos should push the next ordinary page away
+  from 1-up; a run of text pages is a different visual language.
+- **A text card is scored as a wildcard**, which in practice means a page
+  carrying one often takes fewer photos — a quote beside a single photo.
+  Intended, and flagged in the code with the lever to change it.
+- **A short text with no event and nothing within `text_attach_days` (2) gets
+  its own page.** If a first real draft comes back with too many one-quote
+  pages, widening that window is the first knob, not the last.
+- `active_book_layout_id` is claimed **only by a year's first layout** —
+  schema.sql is explicit that "newest" and "the one I'm working from" are
+  different facts, so regenerating never yanks the version being reviewed.
+
+**Reflow rests on one rule: everything on the retained pages is spoken for.**
+`layout_reflow_from($layoutId, $n)` collects the content used on pages 1..n-1
+(including a snapshot page's snapshot), re-plans the year excluding it, seeds
+the variety history from those pages' own sizes, then deletes and re-inserts
+from page n. Two consequences, both deliberate: a photo dragged onto page 2
+by hand cannot reappear on page 40, and a photo dragged OFF page 2 comes back
+into the flow rather than vanishing.
+
+**`public/layout.php` is the preview/compare surface and is deliberately not
+Phase 6.** Versions with their composition (pages, photo/text/snapshot split,
+filled slots), and one version inspected page by page — page type, slots in
+slot order, each photo's thumbnail and orientation, captions shown inline
+where they belong, text cards as cards. Two actions only: "Create book
+layout" and "Use this one", through new `public/api/book-layouts-create.php`
+and `-activate.php`. No spread rendering, no drag-and-drop, no cover/title
+selection, no reflow button — Phase 6 owns all four, and this markup expects
+to be replaced by it. Reached from a "Book layouts" link on `review.php` and
+a "Book" link on the dashboard for years that have one.
+
+**Exit criteria verified** by code trace plus `tools/verify-layout.php` (113
+checks: every pure function, then a synthetic 2024 with an event group split
+across four day/close-timing sub-groups, a full-page flag, a skip_for_book
+photo, a birthday snapshot with a hero photo, two short quotes, a >180-char
+anecdote and a far-away orphan quote). It proves the arrangement is not
+one-photo-per-page, page numbering is dense, every eligible photo appears
+exactly once, skipped photos and hero photos appear nowhere, regeneration
+INSERTs version 2 while version 1 stays byte-for-byte identical, and a
+simulated manual edit (a photo swapped directly in `book_page_photos` before
+page N) survives a reflow from N with every earlier page byte-for-byte
+untouched. `tools/verify-schema.php`, `verify-capture.php`,
+`verify-review.php` and `verify-grouping.php` all pass unmodified. The
+layout screen was additionally rendered end to end in a scratch script (not
+committed) against the SQLite harness, since this environment has no browser.
+
+**One CSS gap flagged, not silently worked around** (third time, same
+pattern as Phase 2's `capture.css` and Phase 3's `review.css`):
+`public/assets/layout.css` is a new, separate file — `styles.css` stays
+untouched and byte-identical to Personal CRM's — scoped to the page/slot
+markup this screen introduces. Given three phases have now needed one, the
+question of whether these three files should fold into `styles.css` (and
+from there back into the siblings) is worth answering in Phase 8 rather than
+being re-flagged a fourth time.
+
+Next: Phase 6's page review UI, which owns the visual spread-by-spread
+rendering, drag-and-drop, the "reflow from here" button (the logic is built
+and tested — `layout_reflow_from()`), and cover/title/subtitle selection.
+Phase 6 should expect to replace `public/layout.php`'s page markup entirely;
+the version list and the active-layout switch are the parts worth keeping.
