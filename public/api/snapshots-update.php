@@ -65,4 +65,11 @@ foreach ($templateFields as $field) {
 snapshot_update($id, $fields);
 
 $snapshot = snapshot_get($id);
+// Cast the two id-shaped columns explicitly rather than json_out()-ing the
+// raw PDO row: a MySQL/SQLite driver can hand back an int column as a
+// numeric STRING, and review.js compares year_project_id against a JS
+// Number to detect "this edit moved the entry to a different year" — a
+// stray "5" !== 5 there would misfire on every single save.
+$snapshot['id'] = (int) $snapshot['id'];
+$snapshot['year_project_id'] = (int) $snapshot['year_project_id'];
 json_out($snapshot);

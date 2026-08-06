@@ -71,11 +71,15 @@ photo_update($id, $fields);
 
 $photo = photo_get($id);
 json_out(array(
-    'id'             => $id,
-    'caption'        => $photo['caption'],
-    'location_text'  => $photo['location_text'],
-    'entry_date'     => substr((string) $photo['captured_at'], 0, 10),
-    'skip_for_book'  => (bool) $photo['skip_for_book'],
-    'full_page'      => (bool) $photo['full_page'],
-    'event_group_id' => $photo['event_group_id'] !== null ? (int) $photo['event_group_id'] : null,
+    'id'               => $id,
+    'caption'          => $photo['caption'],
+    'location_text'    => $photo['location_text'],
+    'entry_date'       => substr((string) $photo['captured_at'], 0, 10),
+    'skip_for_book'    => (bool) $photo['skip_for_book'],
+    'full_page'        => (bool) $photo['full_page'],
+    'event_group_id'   => $photo['event_group_id'] !== null ? (int) $photo['event_group_id'] : null,
+    // Lets a caller (review.js) notice a date edit moved this photo to a
+    // different year_project than the page it's currently displayed on —
+    // see photo_update()'s header for the re-resolve-on-date-change rule.
+    'year_project_id'  => (int) $photo['year_project_id'],
 ));
