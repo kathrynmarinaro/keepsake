@@ -50,4 +50,27 @@ return array(
      * PDF export or a future emailed link is likely to want it.
      */
     'base_url' => 'http://localhost:8000',
+
+    /* ---- uploads (Phase 2) ---------------------------------------------
+     * Config over hardcoding, per PLAN.md: a magic number buried in
+     * lib/imageproc.php would be invisible to Kathryn and to whoever else
+     * eventually reads this repo. Tune per host — a shared host with a tight
+     * memory_limit may need thumb_max lower than this default.
+     */
+    'uploads' => array(
+        // Hard ceiling per uploaded file. 25MB matches Inspiration Board's
+        // limit — generous for a modern phone photo (even an uncompressed
+        // HEIC burst frame), small enough that one runaway batch can't fill
+        // the disk unnoticed.
+        'max_bytes' => 25 * 1024 * 1024,
+
+        // Longest edge, in px, of the ONE derivative Keepsake generates per
+        // photo. Unlike Inspiration Board there is no separate "detail" copy
+        // — the crop tool works directly against the kept original (see
+        // lib/imageproc.php), so this only has to be good enough for a list/
+        // grid tile and the batch step-through's preview.
+        'thumb_max' => 480,
+
+        'webp_quality' => 82,
+    ),
 );

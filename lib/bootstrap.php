@@ -21,6 +21,12 @@ declare(strict_types=1);
 define('APP_ROOT', dirname(__DIR__));
 define('PUBLIC_DIR', APP_ROOT . '/public');
 
+// Where uploaded originals/thumbnails live, introduced in Phase 2. Same
+// naming and same "one constant, everything else derives a path through it"
+// shape as Inspiration Board's UPLOAD_DIR, so lib/imageproc.php's path
+// validation (imageproc_resolve_upload) can reuse that reasoning verbatim.
+define('UPLOAD_DIR', PUBLIC_DIR . '/uploads');
+
 $configFile = APP_ROOT . '/config.php';
 if (!is_file($configFile)) {
     http_response_code(500);
