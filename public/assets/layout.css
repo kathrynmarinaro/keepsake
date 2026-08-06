@@ -1,0 +1,83 @@
+/* Keepsake-specific components: Phase 5's generated-layout inspector
+ * (public/layout.php).
+ *
+ * =============================================================================
+ * WHY THIS FILE EXISTS, GIVEN "DON'T EDIT styles.css / DON'T ADD <style> OR
+ * INLINE style= — REPORT A MISSING COMPONENT INSTEAD":
+ * =============================================================================
+ * Same reasoning, and the same precedent, as public/assets/capture.css and
+ * review.css: styles.css is a byte-for-byte copy of Personal CRM's, and no
+ * sibling app has ever rendered a book page's slots. This is a NEW, SEPARATE
+ * file — styles.css itself stays untouched and byte-identical — scoped
+ * strictly to the classes public/layout.php introduces, and it is small on
+ * purpose because Phase 6 owns the real page-review UI and will almost
+ * certainly replace this screen's markup wholesale.
+ *
+ * Everything already covered by a house primitive gets no rule here and is
+ * used as-is: .card (every page and every version row), .pill/.pill.is-plain
+ * (page type, "active", the quote/anecdote tag), .cat-head/.cat-count (the two
+ * section headings), .row-between, .stack, .hint, .empty, .btn-primary/
+ * .btn-secondary/.link-btn, and .thumb (capture.css's photo primitive, reused
+ * exactly as review.php reuses it).
+ *
+ * Whether these rules belong here permanently or fold into styles.css is
+ * Kathryn's/Foundation's call, flagged the same way Phases 2 and 3 flagged
+ * theirs rather than decided silently here.
+ */
+
+/* Same width:100%-on-a-flex-item override capture.css and review.css already
+   apply for the identical reason: styles.css sizes buttons full-width for a
+   stacked form, and these sit in a row beside a link. */
+.version-actions .btn-secondary { width: auto; }
+
+/* The version being inspected, marked in the list above the pages. */
+.version-row.is-open { border-color: var(--teal); }
+
+/* ============ The page list ============
+ *
+ * One column of pages rather than a grid of them: this screen is read top to
+ * bottom in page order, and Phase 6 is where a real two-page spread view
+ * belongs.
+ */
+.book-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.book-page-head { margin-bottom: 10px; }
+
+/* Slots sit side by side in slot order, wrapping — a rough proxy for "what is
+   on this page", not an attempt to draw the page itself. */
+.page-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.slot {
+  flex: 1 1 140px;
+  min-width: 140px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: var(--surface);
+}
+.slot-photo { margin: 0; }
+.slot-photo .thumb {
+  aspect-ratio: 1;
+  margin-bottom: 6px;
+}
+.slot-photo figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.78rem;
+}
+.slot-caption { color: var(--ink); }
+
+/* A text card, deliberately looking different from a photo slot — that
+   difference is the thing being checked when reading this screen. */
+.slot-text { background: var(--teal-tint); }
+.slot-text p { margin: 6px 0; font-size: 0.85rem; }
+
+.slot-snapshot { background: var(--teal-tint); }

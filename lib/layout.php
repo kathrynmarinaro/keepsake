@@ -192,6 +192,14 @@ function layout_orientation(array $photo): string
  * split of them between portrait and landscape and keeping the best — a
  * square photo or a text card fills whichever hole the page has, which is the
  * whole point of calling it flexible.
+ *
+ * ONE KNOWN CONSEQUENCE, WORTH KNOWING BEFORE RETUNING: because a text card
+ * is a perfect partner for anything, a page carrying one tends to take FEWER
+ * photos than its neighbours — often a single photo beside the quote. That is
+ * the intended reading of "a quote occupies one of the page's slots" and it
+ * looks deliberate on the page, but if real drafts come back too sparse, the
+ * lever is to stop treating the card as a wildcard here (score it as a fixed
+ * portrait-shaped block) rather than to touch the photo rows above.
  */
 function layout_orientation_score(array $orientations): float
 {

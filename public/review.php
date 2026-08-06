@@ -338,6 +338,12 @@ function render_photo_cell(array $p): string
   <header class="screen-head">
     <h1><?= $project ? h((string) $project['year']) : 'Review' ?></h1>
     <div class="head-actions">
+      <?php if ($project !== null): ?>
+        <!-- Phase 5's generated layouts for this year. Review comes first —
+             skip-for-book, full-page flags and event groups all change what
+             the arrangement engine does — so this is a link out, not a tab. -->
+        <a class="link-btn" href="layout.php?year=<?= h((string) $project['year']) ?>">Book layouts</a>
+      <?php endif; ?>
       <a class="link-btn" href="index.php">Years</a>
     </div>
   </header>

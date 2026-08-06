@@ -114,6 +114,9 @@ function dashboard_status(int $yearProjectId): string
               <?= h($status) ?>
             </span>
             <a class="link-btn" href="review.php?year=<?= h((string) $project['year']) ?>">Open</a>
+            <?php if ($status === 'layout generated'): ?>
+              <a class="link-btn" href="layout.php?year=<?= h((string) $project['year']) ?>">Book</a>
+            <?php endif; ?>
           </div>
         </div>
       <?php endforeach; ?>
