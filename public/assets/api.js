@@ -19,10 +19,14 @@
  * retried into a list that disagrees with the database.
  */
 
-/* Must equal CSRF_HEADER_VALUE in lib/auth.php. If you change one, change the
-   other — there is no test that can catch this from the browser side. */
+/* Must equal the value require_same_origin() checks in lib/auth.php. If you
+   change one, change the other — there is no test that can catch this from
+   the browser side. 'Keepsake', not personal-cms's 'CRM' — this file was
+   ported byte-for-byte ahead of need in the Phase 0 reconciliation pass,
+   before Phase 2 introduced public/api/*.php and this constant started
+   mattering. */
 const CSRF_HEADER = 'X-Requested-With';
-const CSRF_VALUE  = 'CRM';
+const CSRF_VALUE  = 'Keepsake';
 
 /**
  * A failed request. `code` is the server's error string; `status` is the HTTP
@@ -123,6 +127,52 @@ export function apiGet(url, params, signal) {
 /** POST a JSON body. The workhorse — every write in this app is one of these. */
 export function apiPost(url, body, signal) {
   return request('POST', url, { body, signal });
+}
+
+/**
+ * multipart/form-data POST with upload progress — for
+ * public/api/photos-upload.php, the one endpoint that isn't JSON in, JSON
+ * out. XHR rather than fetch() purely because fetch has no upload-progress
+ * event; everything else about this (the CSRF header, same-origin
+ * credentials, ApiError on failure) matches request() above.
+ *
+ * @param {string} url
+ * @param {FormData} formData
+ * @param {(fraction: number) => void} [onProgress]
+ * @returns {Promise<object>} the parsed JSON body
+ */
+export function apiUpload(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader(CSRF_HEADER, CSRF_VALUE);
+
+    if (onProgress) {
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) { onProgress(e.loaded / e.total); }
+      });
+    }
+
+    xhr.addEventListener('load', () => {
+      let payload = null;
+      if (xhr.responseText !== '') {
+        try { payload = JSON.parse(xhr.responseText); } catch { payload = null; }
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload === null ? {} : payload);
+        return;
+      }
+
+      const code = payload && typeof payload.error === 'string' ? payload.error : null;
+      const detail = payload && typeof payload.detail === 'string' ? payload.detail : '';
+      reject(new ApiError(code, xhr.status, detail));
+    });
+
+    xhr.addEventListener('error', () => reject(new ApiError('network_unreachable', 0, 'No connection to the server.')));
+    xhr.send(formData);
+  });
 }
 
 /**

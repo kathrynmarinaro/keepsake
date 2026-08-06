@@ -303,3 +303,29 @@ function noindex(): void
 {
     header('X-Robots-Tag: noindex, nofollow');
 }
+
+/**
+ * CSRF guard for public/api/*.php's mutating endpoints (Phase 2 is this
+ * app's first batch of them). Ported exactly from Inspiration Board's
+ * lib/auth.php, with only the header value changed to be Keepsake-specific.
+ *
+ * A cross-origin form post cannot set a custom header without passing a CORS
+ * preflight this app never answers, so a fixed header value plus
+ * SameSite=Lax is sufficient for a single-user app — no CSRF token to
+ * generate, store or rotate. public/assets/api.js sends this header on every
+ * non-GET request; a hand-rolled fetch() that forgets gets 'csrf_check_failed'
+ * back rather than silently mutating data an attacker's page triggered.
+ *
+ * Every mutating public/api/*.php endpoint calls this alongside
+ * require_login_api() and require_method(...).
+ */
+function require_same_origin(): void
+{
+    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+    if (in_array($method, array('GET', 'HEAD', 'OPTIONS'), true)) {
+        return;
+    }
+    if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'Keepsake') {
+        json_error('csrf_check_failed', 403);
+    }
+}
