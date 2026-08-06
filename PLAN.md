@@ -49,17 +49,89 @@ like a sibling of those apps, not a new design.
   helper) so every later phase's agent can be pointed at this section
   instead of re-deriving it.
 
-*(To fill in during/after Phase 0 — leave the placeholders below until then.)*
+### Phase 0 outcome: sibling repos were unreachable — everything below is a placeholder
 
-- CSS/design tokens: `TBD`
-- Auth pattern (table names, session handling, login page): `TBD`
-- PHP/MySQL file/folder conventions: `TBD`
-- Upload/crop component to port from Inspiration Board: `TBD`
+Repo attachment to `kathrynmarinaro/inspiration` and `kathrynmarinaro/personal-cms`
+was attempted and failed in the Phase 0 session (tool unavailable in that
+environment), and Kathryn wasn't available mid-session to paste the shared
+stylesheet/component either. Per the fallback in this section's original
+instructions, Phase 0 **stubbed clean, conventional defaults instead of
+inventing a parallel design system it expects to keep** — every decision
+below is written to be cheaply swappable (CSS custom properties, one
+stylesheet file, a small Auth class with no callers outside itself) rather
+than something a future phase should build on top of as if it were final.
+
+**Before starting Phase 2** (which needs the Inspiration Board upload/crop
+component specifically), a future session should attach both sibling repos
+and do a reconciliation pass. Concretely, swap in:
+
+1. **Color tokens & font stack** — `public/assets/css/app.css`'s `:root`
+   block (`--color-*`, `--font-sans`) is an invented warm-neutral
+   placeholder palette. Replace with the suite's real tokens; every
+   component class in that file reads from custom properties, so this
+   should be a `:root` block swap, not a rewrite.
+2. **Login page markup/flow** — `src/views/login.php` +
+   `public/login.php` is a generic centered-card login form. If
+   RSS Reader / Personal CRM's login looks or behaves differently
+   (e.g. a different session-cookie strategy, a "remember me" option,
+   different field names/branding), match theirs instead.
+3. **PHP/MySQL file/folder conventions** — this build used
+   `public/` + `src/` (`lib/`, `views/`) + `config/` + `migrations/` +
+   `scripts/`, PDO (not mysqli), and a hand-rolled `migrations/*.sql` +
+   `scripts/migrate.php` runner (no framework). If the sibling apps use a
+   different layout, ORM/query style, or migration tool, either adopt
+   theirs here or explicitly confirm this layout is fine to diverge —
+   don't let Phase 1+ build on an orphaned convention.
+4. **Upload/crop/batch-caption component** — **not built at all in
+   Phase 0** (out of scope for this phase per PLAN.md, and it's the one
+   piece the brief is explicit should be ported, not rebuilt). Phase 2
+   must pull this from Inspiration Board directly rather than inventing a
+   new one.
+
+Everything else in Phase 0 (folder structure, config pattern, PDO wrapper,
+session auth, migration runner) is implementation, not design system, and
+is expected to stay regardless of what the sibling-repo reconciliation
+finds — only the four items above are explicitly provisional.
+
+- CSS/design tokens: **Placeholder** — see `public/assets/css/app.css`
+  `:root` block. Warm-neutral palette invented for this build; swap for
+  the suite's real tokens (item 1 above) before this app is considered
+  visually consistent with its siblings.
+- Auth pattern (table names, session handling, login page): **Mostly
+  final, login page markup is placeholder.** Session-based auth (PHP
+  native sessions, `httponly` + `SameSite=Lax` cookie, id regenerated on
+  login), single `users` table (`id`, `username`, `password_hash`,
+  timestamps) seeded via `scripts/seed_user.php`, guarded by
+  `Keepsake\Auth::requireLogin()`. This mechanism is a reasonable
+  suite-wide pattern candidate as-is; only the login page's HTML/CSS
+  (item 2 above) is flagged placeholder.
+- PHP/MySQL file/folder conventions: **Placeholder, pending sibling-repo
+  confirmation** (item 3 above) — see `README.md`'s "Folder structure"
+  section for the layout chosen and why. PDO over mysqli (named
+  parameters, exception-based errors); no Composer/framework yet.
+- Upload/crop component to port from Inspiration Board: **Not started —
+  explicitly deferred to Phase 2**, which depends on repo access this
+  session didn't have (item 4 above).
 
 ## Architecture decisions (fixed, don't relitigate per-phase)
 
 - **Stack**: PHP + MySQL, matching the suite. No framework beyond what the
   suite already uses (check sibling repos in Phase 0 and match).
+- **DB access — PDO, not mysqli** (decided in Phase 0, sibling repos
+  unreachable to confirm against — see Suite conventions above): named
+  parameters and a consistent exception-based error model. Wrapped in a
+  single small class, `Keepsake\Database` (`src/lib/Database.php`), so
+  switching to mysqli later — if a sibling-repo reconciliation pass finds
+  that's the suite convention — is a one-file change, not a rewrite.
+- **Folder layout** (decided in Phase 0, same caveat): `public/` as the
+  only web-exposed document root; `src/lib/` for PHP classes, `src/views/`
+  for plain-PHP templates; `config/` for `config.php.example` (committed)
+  and `config.php` (gitignored, real credentials); `migrations/` for
+  numbered `.sql` files applied by `scripts/migrate.php`; `scripts/` for
+  other CLI-only helpers (`seed_user.php`). No Composer/autoloader yet —
+  `src/bootstrap.php` does explicit `require`s; introduce Composer only
+  when a phase actually needs a package (e.g. Phase 2's EXIF reading or
+  Phase 7's PDF library).
 - **Config over hardcoding**: DB credentials, geocoding endpoint, tunable
   thresholds (event date-gap, ~180-char text-page threshold), trim size —
   all in a config file (e.g. `config.php` sourced from `.env` /
@@ -290,7 +362,7 @@ backfilled data.**
 Update this after every phase. Keep it terse — the phase sections above
 have the detail.
 
-- [ ] Phase 0 — Foundations & scaffolding
+- [x] Phase 0 — Foundations & scaffolding
 - [ ] Phase 1 — Data model & migrations
 - [ ] Phase 2 — Capture flow (mobile-first)
 - [ ] Phase 3 — Review/browse (desktop)
@@ -300,4 +372,9 @@ have the detail.
 - [ ] Phase 7 — PDF export
 - [ ] Phase 8 — Polish & open-source readiness
 
-**Last updated**: 2026-08-06 (plan created, no phases started yet)
+**Last updated**: 2026-08-06 (Phase 0 complete — folder structure, config,
+PDO DB helper, single-user session auth, base layout, placeholder
+dashboard. Sibling repos `kathrynmarinaro/inspiration` and
+`kathrynmarinaro/personal-cms` were unreachable this session, so CSS/login
+markup/upload-crop are stubbed placeholders — see "Suite conventions"
+above for the exact reconciliation list before Phase 2.)
