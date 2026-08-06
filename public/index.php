@@ -79,5 +79,15 @@ for ($year = $currentYear; $year >= 2020; $year--) {
     <?php endforeach; ?>
   </div>
 </main>
+
+<?php if (auth_is_logged_in()): ?>
+<!-- Two stops for now (this dashboard, Phase 2's capture screen) — Phase 3
+     is expected to grow this into the app's real tab set once review/browse
+     exists to put a third stop on. -->
+<nav class="tabbar">
+  <a href="index.php" class="is-active">Years</a>
+  <a href="capture.php">Add</a>
+</nav>
+<?php endif; ?>
 </body>
 </html>
