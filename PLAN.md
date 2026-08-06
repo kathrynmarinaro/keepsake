@@ -417,7 +417,7 @@ have the detail.
 
 - [x] Phase 0 — Foundations & scaffolding
 - [x] Phase 1 — Data model & migrations
-- [ ] Phase 2 — Capture flow (mobile-first)
+- [x] Phase 2 — Capture flow (mobile-first)
 - [ ] Phase 3 — Review/browse (desktop)
 - [ ] Phase 4 — Event grouping & geocoding
 - [ ] Phase 5 — Book layout engine
@@ -425,19 +425,43 @@ have the detail.
 - [ ] Phase 7 — PDF export
 - [ ] Phase 8 — Polish & open-source readiness
 
-**Last updated**: 2026-08-06 (Phase 1 complete, in the same session as the
-Phase 0 reconciliation pass above. `schema.sql` now holds year_projects,
-event_groups, photos, quotes, anecdotes, photo_text_bundles, snapshots,
-geocode_cache, book_layouts, book_pages and book_page_photos. Documented in
-`docs/SCHEMA.md`. Year isolation verified with `tools/verify-schema.php` —
-ported `test-harness.php` from personal-cms, seeded two year_projects with
-one of everything each, all checks pass, including for the tables that
-derive their year through a parent row instead of storing it, and including
-cascade-delete staying inside its own year. Auth was revisited right after:
-the `users` table is gone (single `password_hash` in config, no username,
-matching every sibling — see "Suite conventions" above), and login
-throttling is now ported from `personal-cms`'s `login_attempts` table/escalating-delay
-curve. Next: Phase 2's capture flow, which is also the point `PLAN.md`'s
-Suite Conventions section flagged as needing the Inspiration Board
-upload/crop component specifically — pull it from
-`kathrynmarinaro/inspiration` rather than building a new one.)
+**Last updated**: 2026-08-06 (Phase 2 complete, same session as Phase 0/1
+above. `public/capture.php` is one mobile screen, four accordion sections
+(quote/anecdote/snapshot/photos), all wired to new `public/api/*.php`
+endpoints backed by `lib/repo.php` (year-auto-assignment, brief §3),
+`lib/exif.php` (new work — date/GPS extraction, not a port; Inspiration
+Board only ever read EXIF orientation) and `lib/imageproc.php` (sniffing,
+one synchronous thumbnail, crop — adapted from Inspiration's, no queue, no
+separate "detail" copy since Keepsake crops the kept original directly).
+`public/assets/crop.js` is a close-to-verbatim port; `photo-batch.js` is a
+new module built to `annotate.js`'s session/move/render/close shape, with
+caption/location/date/crop fields instead of description/tags/URL.
+Exit criteria verified by code trace plus two test scripts, since this
+build environment has neither MySQL nor a browser (same constraint every
+phase so far has had): `tools/verify-capture.php` proves year-auto-
+assignment end to end — including a photo whose captured_at is a simulated
+EXIF date from 2019 landing in the 2019 year_project while every other
+check in the same run is dated 2026 — plus EXIF edge cases (uninitialized
+camera clock, malformed GPS fractions) and bundle-uniqueness enforcement;
+a scratch script (not committed) exercised the full upload→thumbnail→crop
+pipeline against both a GD-generated JPEG and a real EXIF+GPS-bearing one
+(built with Python's piexif) to confirm `lib/imageproc.php`/`lib/exif.php`
+work end to end, not just in isolation. Both `tools/verify-schema.php` and
+`tools/verify-capture.php` pass.
+
+**One gap flagged, not silently worked around**: the stylesheet Keepsake
+inherited (Personal CRM's, byte-for-byte) has zero photo/crop-related
+classes — no sibling before Inspiration Board ever needed any, and
+Inspiration's own cropper CSS lives inside *its* monolithic styles.css, not
+a portable module. Rather than leave the crop tool non-functional or hack
+around it with inline `style=`/`<style>` blocks, `public/assets/capture.css`
+is a new, separate file — `styles.css` itself is untouched and still
+byte-identical to Personal CRM's — scoped strictly to classes this phase's
+own JS (`crop.js`/`photo-batch.js`/`photo-picker.js`) introduces. Whether
+these rules belong here permanently or should fold into `styles.css` (and
+from there back into Inspiration Board) is Kathryn's/Foundation's call; see
+that file's header and this phase's session report for the full reasoning.
+
+Next: Phase 3's desktop review/browse screens — full edit on every field
+captured here, the skip_for_book/full_page toggles this phase deliberately
+left alone, and event-group review once Phase 4 exists to populate it.)
