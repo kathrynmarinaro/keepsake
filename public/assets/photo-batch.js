@@ -43,7 +43,16 @@ export function openBatch(photos, { onDone } = {}) {
   render();
 }
 
-function close() {
+/**
+ * Flush whatever is on screen before tearing the panel down — matching
+ * annotate.js's close(), which does the same. "Skip all"/"Done" ends the
+ * batch immediately, but the card on screen may hold an edit nobody pressed
+ * Next on yet, and abandoning that silently would be worse than the extra
+ * round trip.
+ */
+async function close() {
+  await persist();
+
   const el = document.getElementById('photo-batch-root');
   const callback = session?.onDone;
   session = null;
