@@ -6,13 +6,14 @@
 > git — so this file (plus the code and commit history) *is* the memory of
 > the project across usage-limit resets and multi-day work.
 
-> **⏸ PAUSED (as of 2026-08-06) after Phase 0.** Kathryn is going to get
-> access to `kathrynmarinaro/inspiration` and `kathrynmarinaro/personal-cms`
-> sorted out (either session repo access or pasted files — see "Suite
-> conventions" below for exactly what's needed) before work continues.
-> **Do not start Phase 1 until she says go.** If you're a future session
-> picking this up and there's no fresh instruction to proceed, ask first
-> rather than assuming the pause is over.
+> **▶ RESUMED (as of 2026-08-06).** The sibling repos `kathrynmarinaro/inspiration`
+> and `kathrynmarinaro/personal-cms` were reachable this session (checked out
+> locally alongside this one), and the reconciliation pass this file's pause
+> note called for is done — see "Suite conventions" below for what changed.
+> Phase 1 proceeded immediately afterward, on explicit instruction to do both
+> in one session; see the Status Tracker at the bottom for where that landed.
+> If you're a future session picking this up mid-phase, `git log --oneline`
+> is more current than this prose.
 
 ## How to resume
 
@@ -63,113 +64,125 @@ like a sibling of those apps, not a new design.
   helper) so every later phase's agent can be pointed at this section
   instead of re-deriving it.
 
-### Phase 0 outcome: sibling repos were unreachable — everything below is a placeholder
+### Phase 0 outcome, reconciled: sibling repos read and matched
 
-Repo attachment to `kathrynmarinaro/inspiration` and `kathrynmarinaro/personal-cms`
-was attempted and failed in the Phase 0 session (tool unavailable in that
-environment), and Kathryn wasn't available mid-session to paste the shared
-stylesheet/component either. Per the fallback in this section's original
-instructions, Phase 0 **stubbed clean, conventional defaults instead of
-inventing a parallel design system it expects to keep** — every decision
-below is written to be cheaply swappable (CSS custom properties, one
-stylesheet file, a small Auth class with no callers outside itself) rather
-than something a future phase should build on top of as if it were final.
+`kathrynmarinaro/inspiration` and `kathrynmarinaro/personal-cms` were both
+reachable in this session (checked out locally alongside this repo) and read
+in full — `personal-cms` as primary reference (it documents itself as a
+verbatim port of Grocery, "the newest of the suite"), `inspiration` as a
+secondary cross-check. Phase 0's placeholders were replaced with the real
+suite conventions, not adapted or re-themed:
 
-**Before starting Phase 2** (which needs the Inspiration Board upload/crop
-component specifically), a future session should attach both sibling repos
-and do a reconciliation pass. Concretely, swap in:
+1. **The house stylesheet, adopted verbatim.** `public/assets/css/app.css`
+   (the invented warm-neutral palette) is deleted, along with the now-empty
+   `css/` directory. `public/assets/styles.css` is a byte-for-byte copy of
+   `personal-cms/public/assets/styles.css` (verified with `diff`). Every
+   `<link>` now points at `assets/styles.css` via the `asset()` helper. No
+   `<style>` blocks, no structural inline `style=`, and the file itself is
+   not edited — matching every sibling.
+2. **The four other shared JS modules, ported ahead of need.** `api.js`,
+   `inline-edit.js`, `swipe.js`, `reorder.js` and `menu.js` are copied
+   verbatim from `personal-cms/public/assets/` into
+   `public/assets/`. None are wired up yet — Phase 1 has no swipeable rows or
+   inline-editable text — but they cost one file each to have sitting ready,
+   the same reasoning `personal-cms/CLAUDE.md` gives for porting `reorder.js`
+   before gift ideas needed it.
+3. **Login page markup/flow, matched to Personal CRM's shape**, not copied
+   wholesale: Personal CRM's login is a single site-wide password with no
+   username, stored as `password_hash` directly in `config.php`. Keepsake
+   keeps a real `username` + `password_hash` **table** instead (Phase 0's own
+   decision) — see item 6 below and `lib/auth.php`'s header comment for why
+   that one piece was deliberately *not* replaced. Everything else about the
+   login screen (markup, `.login-*` classes, the safe-redirect guard, failing
+   open when unconfigured) now matches the sibling pattern.
+4. **Function-based `lib/`, not classes.** `src/lib/Database.php`
+   (`Keepsake\Database`) and `src/lib/Auth.php` (`Keepsake\Auth`) are gone.
+   `lib/bootstrap.php` + `lib/db.php` + `lib/auth.php` now hold plain
+   functions (`db()`, `q()`, `cfg()`, `auth_*()`, `h()`, `asset()`,
+   `fatal_error()`, `json_out()`/`json_error()`/`json_body()`,
+   `require_method()`), ported from `personal-cms`'s copies of the same
+   files with two things deliberately **not** carried over: the
+   `MYSQL_ATTR_INIT_COMMAND` timezone pin and `fmt_date()`, both flagged in
+   `personal-cms/CLAUDE.md` as *that app's own* divergence from the rest of
+   the suite (born from reach-out/birthday due-date arithmetic Keepsake
+   doesn't do). `db()` does carry the CLI-only PDO test override — see item 7.
+5. **No separate views layer.** `src/views/dashboard.php`, `src/views/login.php`
+   and `src/views/partials/{header,footer}.php` are gone. `public/index.php`
+   and `public/login.php` are now the templates directly, each a full
+   `<!doctype html>`…`</html>` document with inline `<?= h($x) ?>` markup, the
+   same shape as `personal-cms/public/index.php`.
+6. **`config.example.php` at the repo root**, not `config/config.php.example`.
+   `lib/bootstrap.php` loads `APP_ROOT . '/config.php'`. README and this file
+   updated to match.
+7. **One `schema.sql` at the repo root, no migrations directory.**
+   `migrations/001_create_users_table.sql` and `scripts/migrate.php` are
+   gone; the `users` table now lives directly in `schema.sql`, written
+   `CREATE TABLE IF NOT EXISTS` so re-applying the file is always safe — no
+   runner needed, matching `personal-cms/schema.sql` and
+   `inspiration/schema.sql`.
+8. **`scripts/` renamed to `tools/`.** `seed_user.php` moved and rewritten
+   against the new `lib/`, behavior unchanged (upsert by username, CLI-only).
+   No `apply-schema.php` was added: neither sibling has one either — both
+   just document `mysql -u root <db> < schema.sql` in prose, so Keepsake does
+   the same rather than inventing a new pattern (README's Setup section).
 
-1. **The house stylesheet, adopted verbatim, not re-themed.** Every
-   sibling app in the suite (Grocery, Personal CRM, Inspiration Board)
-   ships `public/assets/styles.css` as a byte-for-byte identical copy —
-   personal-cms's `CLAUDE.md` says so explicitly ("a verbatim copy of
-   Grocery's, token for token"), and it's Foundation-owned and complete in
-   every sibling: no `<style>` blocks, no inline `style=` for structural
-   markup, no editing the stylesheet itself. Keepsake's Phase 0 instead
-   invented its own placeholder file at `public/assets/css/app.css` with a
-   warm-neutral `:root` palette — that whole file needs to be **replaced by
-   a copy of the real house stylesheet at the matching path**
-   (`public/assets/styles.css`), not patched by swapping in real color
-   values under Keepsake's own filename/structure. Once the real file is in
-   place, markup should be written against its existing classes the same
-   way the siblings do — if a screen needs something the stylesheet doesn't
-   have, that's a gap to report, not a reason to add local CSS.
-2. **Login page markup/flow** — `src/views/login.php` +
-   `public/login.php` is a generic centered-card login form. If
-   RSS Reader / Personal CRM's login looks or behaves differently
-   (e.g. a different session-cookie strategy, a "remember me" option,
-   different field names/branding), match theirs instead.
-3. **PHP/MySQL file/folder conventions** — this build used
-   `public/` + `src/` (`lib/`, `views/`) + `config/` + `migrations/` +
-   `scripts/`, PDO (not mysqli), and a hand-rolled `migrations/*.sql` +
-   `scripts/migrate.php` runner (no framework). If the sibling apps use a
-   different layout, ORM/query style, or migration tool, either adopt
-   theirs here or explicitly confirm this layout is fine to diverge —
-   don't let Phase 1+ build on an orphaned convention.
-4. **Upload/crop/batch-caption component** — **not built at all in
-   Phase 0** (out of scope for this phase per PLAN.md, and it's the one
-   piece the brief is explicit should be ported, not rebuilt). Phase 2
-   must pull this from Inspiration Board directly rather than inventing a
-   new one.
-
-Everything else in Phase 0 (folder structure, config pattern, PDO wrapper,
-session auth, migration runner) is implementation, not design system, and
-is expected to stay regardless of what the sibling-repo reconciliation
-finds — only the four items above are explicitly provisional.
-
-- CSS/design tokens: **Placeholder, and not just the tokens.** The whole
-  file at `public/assets/css/app.css` (warm-neutral palette invented for
-  this build) needs to be replaced with a verbatim copy of the house
-  stylesheet from `public/assets/styles.css` in the sibling repos (item 1
-  above) — Keepsake should end up with the same file, at the same path,
-  as every other app in the suite, not a themed variant of its own.
-- Auth pattern (table names, session handling, login page): **Mostly
-  final, login page markup is placeholder.** Session-based auth (PHP
-  native sessions, `httponly` + `SameSite=Lax` cookie, id regenerated on
-  login), single `users` table (`id`, `username`, `password_hash`,
-  timestamps) seeded via `scripts/seed_user.php`, guarded by
-  `Keepsake\Auth::requireLogin()`. This mechanism is a reasonable
-  suite-wide pattern candidate as-is; only the login page's HTML/CSS
-  (item 2 above) is flagged placeholder.
-- PHP/MySQL file/folder conventions: **Placeholder, pending sibling-repo
-  confirmation** (item 3 above) — see `README.md`'s "Folder structure"
-  section for the layout chosen and why. PDO over mysqli (named
-  parameters, exception-based errors); no Composer/framework yet.
-- Upload/crop component to port from Inspiration Board: **Not started —
-  explicitly deferred to Phase 2**, which depends on repo access this
-  session didn't have (item 4 above).
+**One deliberate non-adoption, flagged rather than silently decided:**
+Keepsake keeps its own `users` table (`id`, `username`, `password_hash`)
+instead of switching to the siblings' single `password_hash` value in
+`config.php`. The task that drove this reconciliation pass was explicit that
+auth *semantics* should be preserved through the code-shape rewrite, and a
+real table was Phase 0's considered choice, not an oversight — a username
+costs nothing extra for a single-user app, and it's orthogonal to the
+function-vs-class question the rest of this pass exists to fix. What *was*
+adopted from the siblings: **the gate now fails open** when no user is
+seeded yet (`auth_is_configured()`), matching every sibling's "an
+unconfigured deploy must not be able to lock you out of your own app"
+stance — Phase 0 hadn't implemented that at all. Login throttling
+(`personal-cms`'s escalating-delay curve and `login_attempts` table) was
+**not** ported in this pass — flagged in `lib/auth.php` as worth adding
+before this app is reachable on the open internet, but out of scope for a
+pass whose job was code shape, not new behavior.
 
 ## Architecture decisions (fixed, don't relitigate per-phase)
 
-- **Stack**: PHP + MySQL, matching the suite. No framework beyond what the
-  suite already uses (check sibling repos in Phase 0 and match).
-- **DB access — PDO, not mysqli** (decided in Phase 0, sibling repos
-  unreachable to confirm against — see Suite conventions above): named
-  parameters and a consistent exception-based error model. Wrapped in a
-  single small class, `Keepsake\Database` (`src/lib/Database.php`), so
-  switching to mysqli later — if a sibling-repo reconciliation pass finds
-  that's the suite convention — is a one-file change, not a rewrite.
-- **Folder layout** (decided in Phase 0, same caveat): `public/` as the
-  only web-exposed document root; `src/lib/` for PHP classes, `src/views/`
-  for plain-PHP templates; `config/` for `config.php.example` (committed)
-  and `config.php` (gitignored, real credentials); `migrations/` for
-  numbered `.sql` files applied by `scripts/migrate.php`; `scripts/` for
-  other CLI-only helpers (`seed_user.php`). No Composer/autoloader yet —
-  `src/bootstrap.php` does explicit `require`s; introduce Composer only
-  when a phase actually needs a package (e.g. Phase 2's EXIF reading or
-  Phase 7's PDF library).
+- **Stack**: PHP + MySQL, matching the suite. No framework — confirmed
+  against both sibling repos in the Phase 1 reconciliation pass; neither uses
+  one.
+- **DB access — PDO, not mysqli**, confirmed: both `personal-cms` and
+  `inspiration` use PDO with named parameters and `PDO::ERRMODE_EXCEPTION`.
+  `lib/db.php` holds a single `db(): PDO` function (module-level `static`,
+  not a class) plus `q($sql, $params): PDOStatement`, matching both siblings
+  exactly.
+- **Folder layout, confirmed against both siblings**: `public/` is the only
+  web-exposed document root. `lib/` (not `src/lib/`) holds plain-function PHP
+  at the repo root, one level above `public/`. There is no `views/`
+  directory — `public/*.php` files are the templates directly. `config.php`
+  (gitignored) and `config.example.php` (committed) live at the repo root,
+  next to `lib/`, not in a `config/` subdirectory. `schema.sql` is a single
+  file at the repo root; there is no `migrations/` directory and no migration
+  runner. `tools/` (not `scripts/`) holds CLI-only helpers. No
+  Composer/autoloader yet — `lib/bootstrap.php` does explicit `require`s;
+  introduce Composer only when a phase actually needs a package (e.g. Phase
+  2's EXIF reading or Phase 7's PDF library).
+- **Testability without MySQL, ported from the siblings' pattern**: `db()`
+  carries a CLI-only override (`$GLOBALS['keepsake_pdo_override']`) so
+  `tools/test-harness.php` can install an in-memory SQLite database built
+  from `schema.sql`, the same mechanism `personal-cms/tools/test-harness.php`
+  uses. Unreachable over HTTP — gated on `PHP_SAPI === 'cli'` and a
+  `$GLOBALS` key nothing in a request can set.
 - **Config over hardcoding**: DB credentials, geocoding endpoint, tunable
   thresholds (event date-gap, ~180-char text-page threshold), trim size —
-  all in a config file (e.g. `config.php` sourced from `.env` /
-  `config.php.example` committed instead). No secrets committed, ever —
-  `.gitignore` must exclude the real config file from commit 1.
+  all in `config.php`, sourced from the committed `config.example.php`
+  template. No secrets committed, ever — `.gitignore` excludes `/config.php`
+  from commit 1.
 - **Repo is public-eventually**: keep this in mind for naming, comments, and
   file layout, but don't let it slow down the initial build — it's a
   should, not a blocker, per the brief.
 - **Year-project isolation**: every table that holds content carries a
   `year_project_id` (or derives it from date), and regenerating one year's
-  book layout must never touch another year's rows. Bake this into the
-  schema from Phase 1, not bolted on later.
+  book layout must never touch another year's rows. Baked into the schema
+  starting with Phase 1 (see that section below for how each table resolves
+  its year), not bolted on later.
 - **Trim size / print specs**: 8.5"×8.5", bleed/margins compatible with both
   Lulu and Mixam — confirm exact bleed values (likely 0.125" bleed, ~0.5"
   safety margin, but verify against both services' current spec sheets)
