@@ -6,9 +6,9 @@ only). Part of Kathryn's self-hosted app suite (RSS Reader, Grocery, Personal
 CRM, Inspiration Board, Book Tracker, Workout Generator) — same PHP/MySQL
 stack, same design system, same auth pattern.
 
-See `keepsake-brief.md` for the full product brief and `PLAN.md` for the
-phased build plan and current status — **read `PLAN.md` first** if you're
-picking this project back up.
+See `keepsake-brief.md` for the full product brief, `PLAN.md` for the phased
+build plan and current status, and `docs/SCHEMA.md` for the database schema
+— **read `PLAN.md` first** if you're picking this project back up.
 
 ## Folder structure
 
@@ -44,8 +44,13 @@ config.php          Real config with DB credentials. Gitignored, never
 
 tools/               CLI-only helper scripts (not web-accessible).
   seed_user.php       Creates/updates an allowed login.
-  test-harness.php    (Phase 1+) Translates schema.sql into an in-memory
-                       SQLite database for testing without MySQL.
+  test-harness.php    Translates schema.sql into an in-memory SQLite
+                       database for testing without MySQL.
+  verify-schema.php   Loads schema.sql via test-harness.php and verifies
+                       year-project isolation with a real insert.
+
+docs/
+  SCHEMA.md           Table-by-table schema reference.
 ```
 
 Why this layout: `public/` as the only web-exposed directory keeps app code
@@ -82,6 +87,9 @@ conventions" section for what changed and why.
    ```
    `schema.sql` is idempotent (`CREATE TABLE IF NOT EXISTS` throughout), so
    re-running it after a later `git pull` that added tables is always safe.
+   No MySQL available? `php tools/verify-schema.php` applies the same file
+   to an in-memory SQLite database and checks it end to end, including
+   year-project isolation — see `docs/SCHEMA.md`.
 4. Seed an allowed login:
    ```
    php tools/seed_user.php <username> <password>
