@@ -1,5 +1,5 @@
-# Real config — never commit. config/config.php.example is the committed template.
-/config/config.php
+# Real config — never commit. config.example.php is the committed template.
+/config.php
 .env
 .env.*
 
