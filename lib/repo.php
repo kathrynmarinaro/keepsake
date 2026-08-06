@@ -58,6 +58,49 @@ function year_project_get_or_create(string $date): int
     return (int) $row['id'];
 }
 
+/**
+ * Every year_projects row, newest first — Phase 3's dashboard (public/index.php).
+ * No filtering: a year with zero content simply never got a row in the first
+ * place (year_project_get_or_create() is the only thing that inserts one), so
+ * "every row that exists" and "every year worth showing" are the same list —
+ * see PLAN.md/this phase's report for why no placeholder rows are synthesized
+ * for years with nothing captured yet.
+ */
+function year_project_list(): array
+{
+    return q('SELECT * FROM year_projects ORDER BY year DESC')->fetchAll();
+}
+
+function year_project_get(int $id): ?array
+{
+    $row = q('SELECT * FROM year_projects WHERE id = ?', array($id))->fetch();
+    return $row ?: null;
+}
+
+function year_project_get_by_year(int $year): ?array
+{
+    $row = q('SELECT * FROM year_projects WHERE year = ?', array($year))->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Brief §4.6: "An optional subtitle field is available for editing during
+ * the pre-layout content review step" — the book title page's subtitle.
+ * Empty string is stored as NULL, matching every other optional text field
+ * in this file (photo_update()'s caption/location_text).
+ */
+function year_project_update_subtitle(int $id, ?string $subtitle): void
+{
+    $subtitle = ($subtitle === null || trim($subtitle) === '') ? null : trim($subtitle);
+    q('UPDATE year_projects SET subtitle = ? WHERE id = ?', array($subtitle, $id));
+}
+
+/** Manual cover-photo pick (brief §4.6: "not auto-selected"). NULL clears it. */
+function year_project_set_cover_photo(int $id, ?int $photoId): void
+{
+    q('UPDATE year_projects SET cover_photo_id = ? WHERE id = ?', array($photoId, $id));
+}
+
 /* --------------------------------------------------------------- quotes */
 
 /**
@@ -76,6 +119,62 @@ function quote_create(array $data): int
     return (int) db()->lastInsertId();
 }
 
+function quote_get(int $id): ?array
+{
+    $row = q('SELECT * FROM quotes WHERE id = ?', array($id))->fetch();
+    return $row ?: null;
+}
+
+/** All quotes for a year, chronological — Phase 3's timeline/grid view. */
+function quotes_for_year(int $yearProjectId): array
+{
+    return q(
+        'SELECT * FROM quotes WHERE year_project_id = ? ORDER BY entry_date, id',
+        array($yearProjectId)
+    )->fetchAll();
+}
+
+/**
+ * Partial update, following photo_update()'s exact pattern: only keys
+ * present in $fields are touched, and changing entry_date RE-RESOLVES
+ * year_project_id (brief §3: "the auto-assigned year is editable") rather
+ * than leaving the quote's year stale after its date moves.
+ *
+ * @param array{quote_text?:string, who_said_it?:string, entry_date?:string} $fields
+ */
+function quote_update(int $id, array $fields): void
+{
+    $sets   = array();
+    $values = array();
+
+    if (array_key_exists('quote_text', $fields)) {
+        $sets[]   = 'quote_text = ?';
+        $values[] = $fields['quote_text'];
+    }
+    if (array_key_exists('who_said_it', $fields)) {
+        $sets[]   = 'who_said_it = ?';
+        $values[] = $fields['who_said_it'];
+    }
+    if (array_key_exists('entry_date', $fields) && $fields['entry_date'] !== '') {
+        $sets[]   = 'entry_date = ?';
+        $values[] = $fields['entry_date'];
+        $sets[]   = 'year_project_id = ?';
+        $values[] = year_project_get_or_create($fields['entry_date']);
+    }
+
+    if ($sets === array()) {
+        return;
+    }
+
+    $values[] = $id;
+    q('UPDATE quotes SET ' . implode(', ', $sets) . ' WHERE id = ?', $values);
+}
+
+function quote_delete(int $id): void
+{
+    q('DELETE FROM quotes WHERE id = ?', array($id));
+}
+
 /* ------------------------------------------------------------ anecdotes */
 
 /**
@@ -91,6 +190,56 @@ function anecdote_create(array $data): int
         array($yearId, $data['anecdote_text'], $data['entry_date'])
     );
     return (int) db()->lastInsertId();
+}
+
+function anecdote_get(int $id): ?array
+{
+    $row = q('SELECT * FROM anecdotes WHERE id = ?', array($id))->fetch();
+    return $row ?: null;
+}
+
+/** All anecdotes for a year, chronological — Phase 3's timeline/grid view. */
+function anecdotes_for_year(int $yearProjectId): array
+{
+    return q(
+        'SELECT * FROM anecdotes WHERE year_project_id = ? ORDER BY entry_date, id',
+        array($yearProjectId)
+    )->fetchAll();
+}
+
+/**
+ * Same partial-update / re-resolve-year-on-date-change shape as
+ * quote_update()/photo_update().
+ *
+ * @param array{anecdote_text?:string, entry_date?:string} $fields
+ */
+function anecdote_update(int $id, array $fields): void
+{
+    $sets   = array();
+    $values = array();
+
+    if (array_key_exists('anecdote_text', $fields)) {
+        $sets[]   = 'anecdote_text = ?';
+        $values[] = $fields['anecdote_text'];
+    }
+    if (array_key_exists('entry_date', $fields) && $fields['entry_date'] !== '') {
+        $sets[]   = 'entry_date = ?';
+        $values[] = $fields['entry_date'];
+        $sets[]   = 'year_project_id = ?';
+        $values[] = year_project_get_or_create($fields['entry_date']);
+    }
+
+    if ($sets === array()) {
+        return;
+    }
+
+    $values[] = $id;
+    q('UPDATE anecdotes SET ' . implode(', ', $sets) . ' WHERE id = ?', $values);
+}
+
+function anecdote_delete(int $id): void
+{
+    q('DELETE FROM anecdotes WHERE id = ?', array($id));
 }
 
 /* ------------------------------------------------------------- snapshots */
@@ -146,6 +295,93 @@ function snapshot_create(array $data): int
     return (int) db()->lastInsertId();
 }
 
+function snapshot_get(int $id): ?array
+{
+    $row = q('SELECT * FROM snapshots WHERE id = ?', array($id))->fetch();
+    return $row ?: null;
+}
+
+/** All snapshots for a year, chronological — Phase 3's timeline/grid view. */
+function snapshots_for_year(int $yearProjectId): array
+{
+    return q(
+        'SELECT * FROM snapshots WHERE year_project_id = ? ORDER BY entry_date, id',
+        array($yearProjectId)
+    )->fetchAll();
+}
+
+/**
+ * Partial update, same shape as quote_update()/anecdote_update()/
+ * photo_update(): only keys present in $fields are touched, entry_date
+ * re-resolves year_project_id.
+ *
+ * NO `type` KEY HERE ON PURPOSE. Changing a snapshot's template (birthday <->
+ * school_year) after the fact would mean deciding what to do with the OTHER
+ * template's now-orphaned fields, and Section 2.3's fixed-template design
+ * gives no reason a saved entry would ever need to switch — the review UI
+ * offers the type-appropriate fields for whichever template the row was
+ * already created as, matching snapshot_create()'s own invariant (only the
+ * owning template's columns are ever written) rather than re-deriving it
+ * here differently.
+ *
+ * @param array{
+ *   entry_date?:string, hero_photo_id?:?int, notes?:?string,
+ *   age?:?int, height?:?string, grade?:?string, school?:?string,
+ *   teacher?:?string, favorite_color?:?string, dream_job?:?string,
+ *   favorite_class?:?string
+ * } $fields
+ */
+function snapshot_update(int $id, array $fields): void
+{
+    $existing = snapshot_get($id);
+    if ($existing === null) {
+        return;
+    }
+
+    $sets   = array();
+    $values = array();
+
+    if (array_key_exists('entry_date', $fields) && $fields['entry_date'] !== '') {
+        $sets[]   = 'entry_date = ?';
+        $values[] = $fields['entry_date'];
+        $sets[]   = 'year_project_id = ?';
+        $values[] = year_project_get_or_create($fields['entry_date']);
+    }
+    if (array_key_exists('hero_photo_id', $fields)) {
+        $sets[]   = 'hero_photo_id = ?';
+        $values[] = ($fields['hero_photo_id'] === null || $fields['hero_photo_id'] === '')
+            ? null : (int) $fields['hero_photo_id'];
+    }
+    if (array_key_exists('notes', $fields)) {
+        $sets[]   = 'notes = ?';
+        $values[] = ($fields['notes'] === null || $fields['notes'] === '') ? null : (string) $fields['notes'];
+    }
+
+    // Only this row's own template's fields are ever settable — the same
+    // invariant snapshot_create() keeps, applied on the way back in. A field
+    // belonging to the OTHER template sent by a confused/hostile client is
+    // silently ignored rather than allowed to write across templates.
+    $allowed = $existing['type'] === 'birthday' ? SNAPSHOT_BIRTHDAY_FIELDS : SNAPSHOT_SCHOOL_YEAR_FIELDS;
+    foreach ($allowed as $field) {
+        if (array_key_exists($field, $fields)) {
+            $sets[]   = $field . ' = ?';
+            $values[] = ($fields[$field] === null || $fields[$field] === '') ? null : $fields[$field];
+        }
+    }
+
+    if ($sets === array()) {
+        return;
+    }
+
+    $values[] = $id;
+    q('UPDATE snapshots SET ' . implode(', ', $sets) . ' WHERE id = ?', $values);
+}
+
+function snapshot_delete(int $id): void
+{
+    q('DELETE FROM snapshots WHERE id = ?', array($id));
+}
+
 /* ----------------------------------------------------------------- photos */
 
 /**
@@ -190,8 +426,9 @@ function photo_get(int $id): ?array
 }
 
 /**
- * Batch-step / review edits: caption, manually-typed location text, and a
- * date correction. Only the keys present in $fields are touched.
+ * Batch-step / review edits: caption, manually-typed location text, a date
+ * correction, the two book-inclusion flags (brief §2.4), and manual
+ * event-group assignment. Only the keys present in $fields are touched.
  *
  * Brief §3: "The auto-assigned year is editable, in case a date correction
  * needs to move an entry into a different year-project" — so changing
@@ -199,7 +436,21 @@ function photo_get(int $id): ?array
  * year_project_get_or_create() every *_create() function uses, rather than
  * leaving the photo's year stale after its date moves.
  *
- * @param array{caption?:?string, location_text?:?string, captured_at?:string} $fields
+ * skip_for_book/full_page were Phase 2's own note as "Phase 3's desktop
+ * review screen, not this phase's" (see photos-update.php's original
+ * header) — extended onto this SAME function, following its own established
+ * partial-update pattern, rather than a separate function for just two
+ * columns.
+ *
+ * event_group_id is Phase 4's column to populate automatically once its
+ * grouping engine exists; until then this is how Phase 3's manual
+ * event-group review UI assigns/reassigns a photo to a group (or clears it,
+ * via null) — the same column, the same partial-update discipline.
+ *
+ * @param array{
+ *   caption?:?string, location_text?:?string, captured_at?:string,
+ *   skip_for_book?:bool, full_page?:bool, event_group_id?:?int
+ * } $fields
  */
 function photo_update(int $id, array $fields): void
 {
@@ -220,6 +471,19 @@ function photo_update(int $id, array $fields): void
         $sets[]   = 'year_project_id = ?';
         $values[] = year_project_get_or_create($fields['captured_at']);
     }
+    if (array_key_exists('skip_for_book', $fields)) {
+        $sets[]   = 'skip_for_book = ?';
+        $values[] = $fields['skip_for_book'] ? 1 : 0;
+    }
+    if (array_key_exists('full_page', $fields)) {
+        $sets[]   = 'full_page = ?';
+        $values[] = $fields['full_page'] ? 1 : 0;
+    }
+    if (array_key_exists('event_group_id', $fields)) {
+        $sets[]   = 'event_group_id = ?';
+        $values[] = ($fields['event_group_id'] === null || $fields['event_group_id'] === '')
+            ? null : (int) $fields['event_group_id'];
+    }
 
     if ($sets === array()) {
         return;
@@ -227,6 +491,35 @@ function photo_update(int $id, array $fields): void
 
     $values[] = $id;
     q('UPDATE photos SET ' . implode(', ', $sets) . ' WHERE id = ?', $values);
+}
+
+/**
+ * Deletes the row only — NOT the files on disk. Called from
+ * public/api/photos-delete.php, which removes original_path/thumb_path
+ * itself only after this commits, the same "commit the row first, clean up
+ * files after" order photos-crop.php already uses, so a crash between the
+ * two leaves an orphaned file rather than a row pointing at nothing.
+ */
+function photo_delete(int $id): void
+{
+    q('DELETE FROM photos WHERE id = ?', array($id));
+
+    // year_projects.cover_photo_id is deliberately NOT a real foreign key
+    // (schema.sql's comment: avoiding a circular CREATE TABLE dependency
+    // between photos and year_projects), so nothing at the database level
+    // clears it when the photo it points at is deleted. Do it here instead
+    // of leaving a dangling id a later page render would have to guard
+    // against.
+    q('UPDATE year_projects SET cover_photo_id = NULL WHERE cover_photo_id = ?', array($id));
+}
+
+/** All photos for a year, chronological — Phase 3's timeline/grid view. */
+function photos_for_year(int $yearProjectId): array
+{
+    return q(
+        'SELECT * FROM photos WHERE year_project_id = ? ORDER BY captured_at, id',
+        array($yearProjectId)
+    )->fetchAll();
 }
 
 /** Overwrite original_path/thumb_path/width/height after a crop. */
@@ -269,3 +562,208 @@ function photos_recent(int $limit = 24): array
  * is photos.caption, typed directly during upload; a quote or anecdote is
  * always a standalone, dated entry. See schema.sql's comment on
  * photos.caption for the removed photo_text_bundles table's history. */
+
+/* ------------------------------------------------------------- event_groups
+ *
+ * Phase 4's date-gap/geocoding engine hasn't run yet (see PLAN.md), so this
+ * table is expected to be empty or hold only whatever's created by hand
+ * through the functions below for Phase 3's review UI. Nothing here runs
+ * date-gap detection or reverse geocoding — that's Phase 4's job, reusing
+ * these same rows and this same is_manual_name flag to know which groups its
+ * own auto-naming pass is allowed to touch.
+ */
+
+/**
+ * A year's event groups, chronological, each carrying its own photo count —
+ * a single query rather than N+1, since the review screen always needs the
+ * count to render "12 photos" next to a group without a photo grid open.
+ */
+function event_groups_for_year(int $yearProjectId): array
+{
+    return q(
+        'SELECT eg.*, COUNT(p.id) AS photo_count
+           FROM event_groups eg
+           LEFT JOIN photos p ON p.event_group_id = eg.id
+          WHERE eg.year_project_id = ?
+          GROUP BY eg.id
+          ORDER BY eg.start_date, eg.id',
+        array($yearProjectId)
+    )->fetchAll();
+}
+
+function event_group_get(int $id): ?array
+{
+    $row = q('SELECT * FROM event_groups WHERE id = ?', array($id))->fetch();
+    return $row ?: null;
+}
+
+/**
+ * Manual creation — brief §5.2 says Kathryn can "rename, merge, split
+ * auto-detected groups", but Phase 4 (the auto-detector) hasn't run yet, so
+ * this is the only way a group exists to review against before then. Created
+ * with is_manual_name = 1 unconditionally: every field on a hand-made group
+ * is a manual decision, not something a future auto-naming pass should ever
+ * overwrite.
+ *
+ * @param array{
+ *   year_project_id:int, name:string, start_date:string, end_date:string,
+ *   location_name?:?string
+ * } $data
+ * @return int the new event_groups id
+ */
+function event_group_create(array $data): int
+{
+    q(
+        'INSERT INTO event_groups
+            (year_project_id, name, start_date, end_date, location_name, is_manual_name)
+         VALUES (?, ?, ?, ?, ?, 1)',
+        array(
+            $data['year_project_id'],
+            $data['name'],
+            $data['start_date'],
+            $data['end_date'],
+            (isset($data['location_name']) && $data['location_name'] !== '') ? $data['location_name'] : null,
+        )
+    );
+    return (int) db()->lastInsertId();
+}
+
+/**
+ * Rename only — the manual override brief §4.1 requires ("Kathryn can rename
+ * any group"). Sets is_manual_name so a later run of Phase 4's auto-naming
+ * pass skips this group's `name` (it may still refresh start_date/end_date/
+ * location_name — see schema.sql's comment on the column).
+ */
+function event_group_rename(int $id, string $name): void
+{
+    q(
+        'UPDATE event_groups SET name = ?, is_manual_name = 1 WHERE id = ?',
+        array($name, $id)
+    );
+}
+
+/**
+ * Recomputes start_date/end_date from current member photos. Called after
+ * any membership change (merge, split, manual reassignment via
+ * photo_update()'s event_group_id) so the group's displayed date range never
+ * goes stale. A group left with zero members keeps its last known range
+ * rather than being reset to something meaningless — there's nothing to
+ * derive a range FROM at that point, and the group itself is not deleted
+ * just because it's momentarily empty (a split leaves the source group
+ * exactly this way until it's given new members or removed by hand).
+ */
+function event_group_recompute_dates(int $id): void
+{
+    $row = q(
+        'SELECT MIN(captured_at) AS min_d, MAX(captured_at) AS max_d
+           FROM photos WHERE event_group_id = ?',
+        array($id)
+    )->fetch();
+
+    if ($row === false || $row['min_d'] === null) {
+        return;
+    }
+
+    q(
+        'UPDATE event_groups SET start_date = ?, end_date = ? WHERE id = ?',
+        array(substr((string) $row['min_d'], 0, 10), substr((string) $row['max_d'], 0, 10), $id)
+    );
+}
+
+/**
+ * Merge one or more source groups into a target group: every photo pointing
+ * at a source group is reassigned to the target, the source groups are
+ * deleted, and the target's date range is recomputed over its new,
+ * larger membership. The target's own name/location are left untouched —
+ * brief §4.1's manual override is "rename OR merge", not "merging silently
+ * renames" — Kathryn renames afterward if the merged name should change.
+ *
+ * Both sides must belong to the SAME year_project: merging across years
+ * would silently move photos between year-project pools, which is exactly
+ * what the isolation rule (PLAN.md "Architecture decisions") exists to
+ * prevent. A source id that fails this check (wrong year, or doesn't exist)
+ * is skipped rather than aborting the whole merge — fail soft, per house
+ * style: a bad id in the list shouldn't block merging the good ones.
+ */
+function event_group_merge(array $sourceIds, int $targetId): void
+{
+    $target = event_group_get($targetId);
+    if ($target === null) {
+        return;
+    }
+
+    foreach ($sourceIds as $sourceId) {
+        $sourceId = (int) $sourceId;
+        if ($sourceId === $targetId) {
+            continue;
+        }
+        $source = event_group_get($sourceId);
+        if ($source === null || (int) $source['year_project_id'] !== (int) $target['year_project_id']) {
+            continue;
+        }
+
+        q('UPDATE photos SET event_group_id = ? WHERE event_group_id = ?', array($targetId, $sourceId));
+        q('DELETE FROM event_groups WHERE id = ?', array($sourceId));
+    }
+
+    event_group_recompute_dates($targetId);
+}
+
+/**
+ * Split: move the given photos (which must currently belong to $sourceId)
+ * out into a brand new group, and recompute both groups' date ranges
+ * afterward. Returns the new group's id.
+ *
+ * The new group always gets is_manual_name = 1 via event_group_create() —
+ * a split is, definitionally, a human deciding these photos don't belong
+ * together with the rest, which is exactly the kind of naming decision nothing
+ * automated should later overwrite.
+ *
+ * Only photos that actually belong to $sourceId are moved — a photo id from
+ * somewhere else in the list (wrong group, wrong year, deleted) is silently
+ * skipped rather than failing the whole split, same fail-soft reasoning as
+ * event_group_merge().
+ */
+function event_group_split(int $sourceId, array $photoIds, string $newName): int
+{
+    $source = event_group_get($sourceId);
+    if ($source === null) {
+        throw new InvalidArgumentException('unknown source event group: ' . $sourceId);
+    }
+
+    $newId = event_group_create(array(
+        'year_project_id' => (int) $source['year_project_id'],
+        'name'            => $newName,
+        // Placeholder range, corrected by the recompute below the moment
+        // membership exists — event_group_create() has no members to derive
+        // one from yet, the same reason event_group_recompute_dates() leaves
+        // a still-empty group's range untouched instead of guessing.
+        'start_date'      => $source['start_date'],
+        'end_date'        => $source['end_date'],
+        'location_name'   => $source['location_name'],
+    ));
+
+    foreach ($photoIds as $photoId) {
+        $photoId = (int) $photoId;
+        $photo = photo_get($photoId);
+        if ($photo === null || (int) $photo['event_group_id'] !== $sourceId) {
+            continue;
+        }
+        q('UPDATE photos SET event_group_id = ? WHERE id = ?', array($newId, $photoId));
+    }
+
+    event_group_recompute_dates($sourceId);
+    event_group_recompute_dates($newId);
+
+    return $newId;
+}
+
+/**
+ * Deletes the group itself, not its photos — event_group_id is
+ * ON DELETE SET NULL (schema.sql: "deleting a group ... must never delete
+ * the PHOTOS in it"), so this is an "ungroup", not a bulk photo delete.
+ */
+function event_group_delete(int $id): void
+{
+    q('DELETE FROM event_groups WHERE id = ?', array($id));
+}

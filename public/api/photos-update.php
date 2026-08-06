@@ -1,10 +1,15 @@
 <?php
-/* POST /api/photos-update.php   { id, caption?, location_text?, entry_date? }
+/* POST /api/photos-update.php
+ *   { id, caption?, location_text?, entry_date?,
+ *     skip_for_book?, full_page?, event_group_id? }
  *
- * Used by the batch step-through (public/assets/photo-batch.js) to set a
- * photo's caption/location and correct its date after upload — brief §2.4's
- * "editable" fields, minus crop (see photos-crop.php) and skip_for_book/
- * full_page, which are Phase 3's desktop review screen, not this phase's.
+ * Used by Phase 2's batch step-through (public/assets/photo-batch.js) to set
+ * a photo's caption/location and correct its date after upload, AND by
+ * Phase 3's desktop review screen (public/assets/review.js) for the same
+ * fields plus the two book-inclusion flags and manual event-group
+ * assignment — brief §2.4's "editable" fields, minus crop (see
+ * photos-crop.php, a separate endpoint because a crop rewrites image files,
+ * not just columns).
  *
  * `entry_date` is a bare Y-m-d, matching the <input type=date> it comes
  * from. photos.captured_at is a DATETIME (brief: time-of-day matters for
@@ -51,13 +56,26 @@ if (array_key_exists('entry_date', $body) && is_string($body['entry_date']) && $
     $time = substr((string) $photo['captured_at'], 10) ?: ' 00:00:00';
     $fields['captured_at'] = $body['entry_date'] . $time;
 }
+if (array_key_exists('skip_for_book', $body)) {
+    $fields['skip_for_book'] = (bool) $body['skip_for_book'];
+}
+if (array_key_exists('full_page', $body)) {
+    $fields['full_page'] = (bool) $body['full_page'];
+}
+if (array_key_exists('event_group_id', $body)) {
+    $fields['event_group_id'] = ($body['event_group_id'] === null || $body['event_group_id'] === '')
+        ? null : (int) $body['event_group_id'];
+}
 
 photo_update($id, $fields);
 
 $photo = photo_get($id);
 json_out(array(
-    'id'            => $id,
-    'caption'       => $photo['caption'],
-    'location_text' => $photo['location_text'],
-    'entry_date'    => substr((string) $photo['captured_at'], 0, 10),
+    'id'             => $id,
+    'caption'        => $photo['caption'],
+    'location_text'  => $photo['location_text'],
+    'entry_date'     => substr((string) $photo['captured_at'], 0, 10),
+    'skip_for_book'  => (bool) $photo['skip_for_book'],
+    'full_page'      => (bool) $photo['full_page'],
+    'event_group_id' => $photo['event_group_id'] !== null ? (int) $photo['event_group_id'] : null,
 ));
