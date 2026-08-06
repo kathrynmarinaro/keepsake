@@ -47,11 +47,17 @@ like a sibling of those apps, not a new design.
   upload/crop/batch-caption UI, which Section 2.4/5.1 of the brief says to
   reuse directly rather than reinvent.
 - **Action for Phase 0**: attempt to attach those two repos to the working
-  session (`add_repo` tool) and copy/adapt the relevant CSS, auth
-  scaffolding, and upload/crop JS. If repo access isn't available in a given
-  session, ask Kathryn to paste the shared stylesheet and the Inspiration
-  Board upload/crop component before starting Phase 0 — don't invent a
-  parallel design system from scratch, since that creates rework later.
+  session (`add_repo` tool). The CSS is a **verbatim copy, not an adaptation**
+  — `public/assets/styles.css` is identical byte-for-byte across every
+  sibling app, so it gets copied into Keepsake at that same path unmodified,
+  the same way Personal CRM copied it from Grocery. Auth scaffolding and the
+  upload/crop JS may need real adaptation (Keepsake's own tables, its own
+  callback wiring) — the CSS does not; treat it as Foundation-owned and
+  complete the moment it's copied in. If repo access isn't available in a
+  given session, ask Kathryn to paste the shared stylesheet and the
+  Inspiration Board upload/crop component before starting Phase 0 — don't
+  invent a parallel design system from scratch, since that creates rework
+  later.
 - Once conventions are confirmed, record the concrete decisions here
   (color tokens, layout grid, auth table/session pattern, file upload
   helper) so every later phase's agent can be pointed at this section
@@ -73,11 +79,21 @@ than something a future phase should build on top of as if it were final.
 component specifically), a future session should attach both sibling repos
 and do a reconciliation pass. Concretely, swap in:
 
-1. **Color tokens & font stack** — `public/assets/css/app.css`'s `:root`
-   block (`--color-*`, `--font-sans`) is an invented warm-neutral
-   placeholder palette. Replace with the suite's real tokens; every
-   component class in that file reads from custom properties, so this
-   should be a `:root` block swap, not a rewrite.
+1. **The house stylesheet, adopted verbatim, not re-themed.** Every
+   sibling app in the suite (Grocery, Personal CRM, Inspiration Board)
+   ships `public/assets/styles.css` as a byte-for-byte identical copy —
+   personal-cms's `CLAUDE.md` says so explicitly ("a verbatim copy of
+   Grocery's, token for token"), and it's Foundation-owned and complete in
+   every sibling: no `<style>` blocks, no inline `style=` for structural
+   markup, no editing the stylesheet itself. Keepsake's Phase 0 instead
+   invented its own placeholder file at `public/assets/css/app.css` with a
+   warm-neutral `:root` palette — that whole file needs to be **replaced by
+   a copy of the real house stylesheet at the matching path**
+   (`public/assets/styles.css`), not patched by swapping in real color
+   values under Keepsake's own filename/structure. Once the real file is in
+   place, markup should be written against its existing classes the same
+   way the siblings do — if a screen needs something the stylesheet doesn't
+   have, that's a gap to report, not a reason to add local CSS.
 2. **Login page markup/flow** — `src/views/login.php` +
    `public/login.php` is a generic centered-card login form. If
    RSS Reader / Personal CRM's login looks or behaves differently
@@ -101,10 +117,12 @@ session auth, migration runner) is implementation, not design system, and
 is expected to stay regardless of what the sibling-repo reconciliation
 finds — only the four items above are explicitly provisional.
 
-- CSS/design tokens: **Placeholder** — see `public/assets/css/app.css`
-  `:root` block. Warm-neutral palette invented for this build; swap for
-  the suite's real tokens (item 1 above) before this app is considered
-  visually consistent with its siblings.
+- CSS/design tokens: **Placeholder, and not just the tokens.** The whole
+  file at `public/assets/css/app.css` (warm-neutral palette invented for
+  this build) needs to be replaced with a verbatim copy of the house
+  stylesheet from `public/assets/styles.css` in the sibling repos (item 1
+  above) — Keepsake should end up with the same file, at the same path,
+  as every other app in the suite, not a themed variant of its own.
 - Auth pattern (table names, session handling, login page): **Mostly
   final, login page markup is placeholder.** Session-based auth (PHP
   native sessions, `httponly` + `SameSite=Lax` cookie, id regenerated on

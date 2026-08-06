@@ -1,6 +1,6 @@
 # Keepsake — Project Brief
 
-**Part of Kathryn's self-hosted app suite.** Reuses the suite's established CSS design system, layout conventions, mobile-first responsive patterns, PHP/MySQL file structure, and auth pattern (login page, consistent with RSS Reader and Personal CRM).
+**Part of Kathryn's self-hosted app suite.** Reuses the suite's established CSS design system, layout conventions, mobile-first responsive patterns, PHP/MySQL file structure, and auth pattern (login page, consistent with RSS Reader and Personal CRM). The CSS is not "reuse the tokens" — it's **use the house stylesheet itself**: every sibling app (Grocery, Personal CRM, Inspiration Board) carries `public/assets/styles.css` as a verbatim, byte-for-byte copy of the same file. Keepsake's copy should be pulled in the same way, at the same path, not reinvented or re-themed.
 
 ## Purpose
 
