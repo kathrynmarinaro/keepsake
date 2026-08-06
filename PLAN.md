@@ -422,7 +422,7 @@ have the detail.
 - [x] Phase 1 — Data model & migrations
 - [x] Phase 2 — Capture flow (mobile-first)
 - [x] Phase 3 — Review/browse (desktop)
-- [ ] Phase 4 — Event grouping & geocoding
+- [x] Phase 4 — Event grouping & geocoding
 - [ ] Phase 5 — Book layout engine
 - [ ] Phase 6 — Page review UI
 - [ ] Phase 7 — PDF export
@@ -576,3 +576,116 @@ Next: Phase 4's event-grouping/geocoding engine, which will populate
 geocoding) — the manual create/rename/merge/split UI built this phase
 should need no changes to keep working once real auto-detected groups
 start showing up alongside hand-made ones.
+
+**Phase 4 complete (2026-08-06, same session as Phases 0-3 above).**
+`lib/geocode.php` (new) and `lib/grouping.php` (new) implement the engine
+described in brief §4.1/§7; nothing in Phase 3's manual create/rename/
+merge/split UI needed to change to accommodate it, as hoped.
+
+**The join-existing-vs-new heuristic** (isolated in `lib/grouping.php`,
+documented in that file's own header): ungrouped photos are clustered
+among *themselves* first, by pure date-gap distance
+(`event_grouping_cluster_ungrouped()`). Each resulting cluster's date range
+is then tested against every existing group in the year
+(`event_grouping_find_join_target()` / `event_grouping_range_gap_days()`,
+0 if the ranges overlap) — if the closest existing group is within the
+gap threshold, the *whole cluster* joins it (extending the range via
+Phase 3's `event_group_recompute_dates()`) instead of spawning a duplicate
+group for the same trip; otherwise the cluster becomes a new group.
+Clustering-then-testing-the-cluster (rather than deciding photo-by-photo)
+is what keeps one gap-connected run of ungrouped photos from being split
+across two different fates. Ties (a cluster equidistant between two
+existing groups) break toward the earlier-starting group, then the lower
+id — deterministic but arbitrary, flagged in the code as exactly the kind
+of thing brief §7/§8 expects to need retuning once Kathryn has real
+backfilled data (e.g. whether the gap threshold itself should vary by trip
+length is an open item there, not decided here).
+
+**`skip_for_book` photos participate in auto-grouping.** Brief §4.2 scopes
+`skip_for_book` to book *inclusion* only, and says nothing about
+organizational grouping; excluding skipped photos from clustering would
+mean toggling that flag could silently remove a group's only GPS reading,
+or leave a skipped photo permanently ungrouped. Documented in
+`lib/grouping.php`'s own header rather than agonized over further.
+
+**Auto-naming** (`event_grouping_format_name()`/`format_date_range()`/
+`resolve_location()`): date range + location, e.g. `"Jul 4–6 · Myrtle
+Beach, South Carolina"`, matching schema.sql's own example on
+`event_groups.name`; falls back to the date range alone when no member
+photo has GPS. Location comes from the first (chronologically earliest)
+GPS-bearing member photo, reverse-geocoded — not an average of every
+member's coordinates (a multi-stop trip's centroid can land in the ocean
+between two coastal stops) and not every GPS photo tried in turn (would
+multiply rate-limited Nominatim calls for one group's name). `is_manual_name`
+(Phase 3's schema/flag) is respected exactly as documented on that column:
+once Kathryn renames a group, `name` is frozen, but `location_name` and the
+date range still refresh on a later extend.
+
+**Two trigger points, one function** (PLAN.md: "there is no queue/cron in
+this app"), both calling `lib/grouping.php`'s `event_grouping_run()`: (a)
+`public/api/photos-upload.php`, automatically at the end of a batch, scoped
+to whichever year_project_id(s) that batch actually touched (derived from
+each created photo's `entry_date`) — a grouping failure is caught and
+logged, never surfaced as an upload failure, since Kathryn's already
+watched the upload itself succeed; (b) a new "Group photos" button on
+`public/review.php`'s Groups view, calling new
+`public/api/event-groups-auto.php`, for re-running over whatever's
+currently ungrouped (after a manual ungroup, or a date correction that
+moved a photo into the year). Neither caller re-implements any clustering
+logic of its own.
+
+**Manual override stays authoritative, verified, not just asserted**: every
+DB-touching function in `lib/grouping.php` filters on `event_group_id IS
+NULL`, so a photo already in a group — by a prior auto-run, a manual
+assignment, or a merge/split — is never read or reassigned by a later run;
+`tools/verify-grouping.php` proves this directly (a second run with
+nothing newly ungrouped changes zero rows) and proves the escape hatch (a
+manually-cleared `event_group_id` becomes eligible again on the next run).
+
+**What the Nominatim-blocked sandbox meant for testing**: this build
+environment's outbound-HTTPS proxy returns a 403 for
+`nominatim.openstreetmap.org` (an organizational egress policy — the same
+category of constraint as "no MySQL"/"no browser" every earlier phase
+documented and built around rather than fought). `lib/geocode.php` isolates
+the one function that actually calls the network,
+`geocode_http_fetch()` — written straight off Nominatim's documented
+reverse-geocoding contract, but it has never made a real call against the
+real API in any session that built it. Its own header flags this
+explicitly, the same way `lib/exif.php`'s header flags what Phase 2
+couldn't exercise. `tools/verify-grouping.php` substitutes a stub response
+via a CLI-only override (`$GLOBALS['keepsake_geocode_fetch_override']`,
+same shape as `lib/db.php`'s SQLite override) and proves everything
+*around* that one function directly: the cache is consulted before any
+"network" call and written after one, the rate limiter's logic, the
+response-parsing (`geocode_parse_response()`, pure, fed synthetic JSON
+bodies), and the whole clustering/naming/join heuristic end to end. What
+this does **not** prove: that Nominatim's real response shape matches what
+`geocode_parse_response()` expects, that the real endpoint accepts the
+built URL, or that the User-Agent header actually satisfies Nominatim's
+policy checker. A future session — or Kathryn, on a real host where
+Nominatim isn't blocked — should sanity-check one real request (and
+replace the placeholder contact email in `config.php`) before trusting
+this blind.
+
+**No CSS gap this phase.** The "Group photos" button and its surrounding
+copy reuse existing classes (`.card`, `.btn-secondary`, `.hint`) exactly as
+they already render elsewhere on `review.php` — no new markup shape was
+needed, so `review.css` (Phase 3's flagged-but-separate file) is unchanged.
+
+**Exit criteria verified** by code trace plus `tools/verify-grouping.php`
+(48 checks: pure clustering/range-gap heuristic, cache-before-network/
+write-after-fetch, one-trip-one-group and two-trips-two-groups against the
+SQLite harness, the join-vs-new decision at exactly the gap threshold, the
+already-grouped/re-eligible-after-ungroup invariants, naming with and
+without GPS, and `is_manual_name`'s split protection), plus a clean
+unmodified re-run of `tools/verify-schema.php`, `tools/verify-capture.php`
+and `tools/verify-review.php` — Phase 3's group rename/merge/split and
+every earlier phase's own checks still pass with zero changes to those
+scripts.
+
+Next: Phase 5's book layout engine — the hard part. `event_groups` now
+populates itself; Phase 5 reads `photos.event_group_id`/`event_groups`
+(date range + `skip_for_book`/`full_page`) plus `quotes`/`anecdotes`
+(placed by `entry_date` into a group's range) and `snapshots` (always
+their own full-page template) to arrange pages. Per PLAN.md's Model
+Guidance section, consider running that phase's agent at `model: "opus"`.
