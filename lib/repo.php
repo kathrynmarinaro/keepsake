@@ -264,24 +264,8 @@ function photos_recent(int $limit = 24): array
     )->fetchAll();
 }
 
-/* ---------------------------------------------------------- text bundles */
-
-/**
- * Bundle a quote or anecdote onto a photo as its caption (brief §2.5) —
- * exactly one of $quoteId/$anecdoteId, matching the CHECK in schema.sql.
- * Throws on a photo or text entry that's already bundled (their UNIQUE
- * keys) rather than silently rebundling — the caller (public/api/*.php)
- * turns that into a clean error response.
- */
-function photo_text_bundle_create(int $photoId, ?int $quoteId, ?int $anecdoteId): int
-{
-    if (($quoteId === null) === ($anecdoteId === null)) {
-        throw new InvalidArgumentException('exactly one of quote_id/anecdote_id must be set');
-    }
-
-    q(
-        'INSERT INTO photo_text_bundles (photo_id, quote_id, anecdote_id) VALUES (?, ?, ?)',
-        array($photoId, $quoteId, $anecdoteId)
-    );
-    return (int) db()->lastInsertId();
-}
+/* No photo_text_bundle_create(): a quote/anecdote is never attached to a
+ * photo as its caption. Kathryn's call — a photo's only caption mechanism
+ * is photos.caption, typed directly during upload; a quote or anecdote is
+ * always a standalone, dated entry. See schema.sql's comment on
+ * photos.caption for the removed photo_text_bundles table's history. */

@@ -1,10 +1,10 @@
 <?php
 /* POST /api/anecdotes.php
- *   { anecdote_text, entry_date, photo_id? }
+ *   { anecdote_text, entry_date }
  *
  * Quick-add (brief §2.2). Same shape as quotes.php minus who_said_it — see
- * that file's header for the year-assignment and bundling notes, which
- * apply here identically.
+ * that file's header for the year-assignment rule and the "never a photo's
+ * caption" note, which apply here identically.
  */
 
 declare(strict_types=1);
@@ -30,15 +30,4 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
 
 $id = anecdote_create(array('anecdote_text' => $text, 'entry_date' => $date));
 
-$bundled = false;
-$photoId = isset($body['photo_id']) && $body['photo_id'] !== '' ? (int) $body['photo_id'] : null;
-if ($photoId !== null) {
-    try {
-        photo_text_bundle_create($photoId, null, $id);
-        $bundled = true;
-    } catch (Throwable $e) {
-        error_log('anecdotes: bundling failed: ' . $e->getMessage());
-    }
-}
-
-json_out(array('id' => $id, 'bundled' => $bundled), 201);
+json_out(array('id' => $id), 201);

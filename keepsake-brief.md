@@ -59,10 +59,12 @@ Snapshot entries always render as a dedicated full page in the book, using a con
 - "Skip for book" toggle (available in desktop review view) — excludes a photo from the book layout without deleting it. Default state for every uploaded photo is **included** (Kathryn only uploads photos she intends to use).
 - Optional: "make this a full page" flag — marks a photo as a standout that should get its own full page in the layout rather than being grouped with others.
 
-### 2.5 Photo + Text Bundle
-- A photo and a text entry (quote/anecdote) can be submitted together as one linked unit.
-- When bundled this way, the text renders as a **caption on that specific photo** in the book layout (not as its own separate slot).
-- Standalone text entries (not bundled with a photo) instead occupy their own slot/page in the layout (see Section 4.3).
+### 2.5 Photo Captions vs. Standalone Text
+*(Revised after Phase 2 — the original brief described a photo+quote/anecdote "bundle"; Kathryn clarified the model below instead, and Phase 2's implementation was updated to match. Kept here rather than silently edited so the reasoning survives.)*
+
+- A photo's caption is typed **directly during photo upload/capture** — it's the photo's own `caption` field (Section 2.4), nothing more.
+- A Quote or Anecdote is **always a standalone, dated entry**. It is never attached to a specific photo as that photo's caption. Its date is what lets it land near related photos in the book layout (see Section 4.3) — proximity by date, not a link to one photo.
+- There is no "bundle" content type distinct from the above: a photo's caption and a quote/anecdote's date are two separate mechanisms, not one submitted-together unit.
 
 ---
 
@@ -98,9 +100,9 @@ Within an event group, the app further sub-groups photos by **day / close timing
 - **Orientation matching** as the primary driver — pairing portrait/landscape photos in combinations that look good together (e.g., two portraits side by side, a landscape pair stacked, etc.).
 - **Intentional visual variety** as a secondary influence — the algorithm should avoid monotonous repetition (e.g., not ten 2-up spreads in a row) by varying page density (1, 2, 3, or 4 photos per page) across the book, informed by both orientation matching and a rhythm/variety heuristic.
 - **Manually flagged "full page" photos** always get their own dedicated page, breaking out of the grouping logic at that point.
-- **Standalone text entries** (quotes/anecdotes not bundled with a photo) that fall within an event's date range occupy one of the page's slots, styled distinctly (e.g., a card treatment) rather than as a photo.
+- **Quotes/anecdotes** that fall within an event's date range (by their `entry_date`) occupy one of the page's slots, styled distinctly (e.g., a card treatment) rather than as a photo. A quote/anecdote is always placed this way — see 2.5's revision — never as a photo's caption.
   - If a standalone text entry exceeds **~180 characters** (tunable default), it gets a full page of its own instead of sharing a slot. This threshold should be treated as a starting point to adjust after seeing a real draft.
-- **Photo+text bundles**: the text renders as a caption on its attached photo, within that photo's existing slot — not a separate slot.
+- **A photo's typed caption** (2.4/2.5) renders inline with that photo, within its existing slot — this isn't a separate content type competing for a slot, just text attached to the photo occupying it.
 - **Snapshot entries** always render as their own dedicated full-page template (see 2.3), regardless of surrounding event grouping.
 
 ### 4.4 Manual Adjustment (Fallback)

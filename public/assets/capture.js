@@ -7,6 +7,12 @@ import { showSnackbar } from './swipe.js';
 import { openPhotoPicker } from './photo-picker.js';
 import { openBatch } from './photo-batch.js';
 
+/* NOTE: openPhotoPicker() has one caller left in this file —
+ * attachSnapshotForm()'s manual hero-photo selection (brief §2.3). A quote
+ * or anecdote is never attached to a photo (Kathryn's call — see
+ * public/api/quotes.php's header for the history), so attachQuickAddForm()
+ * below no longer offers a photo picker at all. */
+
 /** Today, as the browser sees it — brief §3: every date defaults to today. */
 function today() {
   const d = new Date();
@@ -17,27 +23,16 @@ function today() {
 /* -------------------------------------------------------- quote/anecdote */
 
 /**
- * Wires a quick-add form (quote or anecdote) that optionally bundles a
- * photo. Both forms share this shape exactly (brief §2.1/§2.2/§2.5); only
- * the endpoint and the text field's name differ.
+ * Wires a quick-add form (quote or anecdote): text + date, nothing else.
+ * Both forms share this shape exactly (brief §2.1/§2.2); only the endpoint
+ * and the text field's name differ. No photo attachment here — a quote or
+ * anecdote is always standalone (see the note above this function).
  */
 function attachQuickAddForm(form, { endpoint, textField, extra = () => ({}) }) {
   const dateInput = form.querySelector('[name="entry_date"]');
   dateInput.value = today();
 
-  const pickBtn = form.querySelector('[data-act="pick-photo"]');
-  const chosenEl = form.querySelector('[data-role="photo-chosen"]');
   const errorEl = form.querySelector('[data-role="error"]');
-  let photoId = null;
-
-  pickBtn?.addEventListener('click', async () => {
-    const photo = await openPhotoPicker({ title: 'Attach a photo' });
-    if (!photo) { return; }
-    photoId = photo.id;
-    chosenEl.textContent = `Attached: photo #${photo.id}`;
-    chosenEl.hidden = false;
-    pickBtn.textContent = 'Change photo';
-  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -49,7 +44,6 @@ function attachQuickAddForm(form, { endpoint, textField, extra = () => ({}) }) {
     const body = {
       [textField]: text,
       entry_date: dateInput.value || today(),
-      photo_id: photoId,
       ...extra(form),
     };
 
@@ -67,9 +61,6 @@ function attachQuickAddForm(form, { endpoint, textField, extra = () => ({}) }) {
     showSnackbar('Saved.');
     form.reset();
     dateInput.value = today();
-    photoId = null;
-    chosenEl.hidden = true;
-    pickBtn.textContent = 'Attach a photo (optional)';
   });
 }
 

@@ -1,14 +1,15 @@
 /* Recent-photos picker: pick one already-uploaded photo to attach to
  * something else.
  *
- * Two callers, one module (brief §2.3/§2.5):
- *   - the quick-add quote/anecdote form's optional "attach to a photo"
- *     bundling step
- *   - a snapshot's hero-photo selector ("Kathryn selects manually" —
- *     brief §2.3 — not auto-pulled)
+ * One caller today: a snapshot's hero-photo selector ("Kathryn selects
+ * manually" — brief §2.3 — not auto-pulled). An earlier version also backed
+ * the quick-add quote/anecdote form's photo-bundling step; that was removed
+ * on request — a quote/anecdote is never attached to a photo (see
+ * public/api/quotes.php's header) — leaving this module in place since the
+ * hero-photo use case still needs it.
  *
- * Both are "pick one of what I recently captured", not a full year-browsing
- * gallery — that's Phase 3's review/browse screen, not this one. Shares its
+ * "Pick one of what I recently captured", not a full year-browsing gallery
+ * — that's Phase 3's review/browse screen, not this one. Shares its
  * open/close Promise shape with crop.js's openCropper() for the same reason:
  * one predictable pattern for "a full-screen picker resolves to a value or
  * null", not a bespoke callback wiring per caller.

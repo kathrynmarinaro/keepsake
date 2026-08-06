@@ -56,9 +56,8 @@
  *   VALUES(col) inside that clause             -> excluded.col
  *
  * Also handled, because schema.sql leans on it for the invariants that would
- * otherwise be application discipline (photo_text_bundles' and
- * book_page_photos' "exactly one of these FKs is set", book_pages'
- * page_type/snapshot_id pairing):
+ * otherwise be application discipline (book_page_photos' "exactly one of
+ * these FKs is set", book_pages' page_type/snapshot_id pairing):
  *
  *   table-level CHECK (...)                    kept as written — SQLite
  *                                               supports CHECK natively, so
@@ -362,10 +361,10 @@ function harness_translate_statement(string $statement): array
          * reminder_sends (reminder_id, due_date) are the tables this guard
          * was written for — a composite primary key making a uniqueness rule
          * the database's job rather than the application's. Keepsake's
-         * schema.sql has no composite primary key today (photo_text_bundles
-         * and book_page_photos get the same "exactly one of these" job done
-         * with a surrogate id plus UNIQUE keys and a CHECK instead), so this
-         * branch is currently inert here. Left in rather than trimmed: the
+         * schema.sql has no composite primary key today (book_page_photos
+         * gets the same "exactly one of these" job done with a surrogate id
+         * plus UNIQUE keys and a CHECK instead), so this branch is currently
+         * inert here. Left in rather than trimmed: the
          * day a future table needs a real composite key, the harness already
          * enforces MySQL's stricter NOT NULL rule instead of silently
          * relaxing it. */

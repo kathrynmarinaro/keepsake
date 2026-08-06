@@ -55,8 +55,8 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 -- what makes "regenerate 2024's book" a query that can never touch a 2023 or
 -- 2026 row by construction, not by careful WHERE-clause discipline.
 --
--- CHECK CONSTRAINTS ARE USED IN A FEW PLACES BELOW (photo_text_bundles,
--- book_page_photos, book_pages) to make the database enforce an invariant
+-- CHECK CONSTRAINTS ARE USED IN A FEW PLACES BELOW (book_page_photos,
+-- book_pages) to make the database enforce an invariant
 -- that would otherwise be "every caller has to remember it" — same reasoning
 -- as Personal CRM's reminder_sends composite key. This assumes MySQL 8.0.16+
 -- or MariaDB 10.2.1+, both of which enforce CHECK; older versions parse and
@@ -238,11 +238,13 @@ CREATE TABLE IF NOT EXISTS photos (
   -- regardless of which event it lands in, or none at all.
   location_text    VARCHAR(190) NULL,
 
-  -- Brief §2.4's plain caption field. NOT the same mechanism as a
-  -- photo_text_bundle (below): this is free text typed directly onto the
-  -- photo; a bundle is a whole separate quote/anecdote row, with its own
-  -- who-said-it and its own life as a piece of content, that HAPPENS to
-  -- render as this photo's caption in the book layout.
+  -- Brief §2.4/§2.5: the ONLY captioning mechanism a photo has, typed
+  -- directly during upload (see public/assets/photo-batch.js). A quote or
+  -- anecdote is never a photo's caption — it's always its own standalone,
+  -- dated entry (see quotes/anecdotes above); an earlier design had a
+  -- separate photo_text_bundles table for linking one to a photo as a
+  -- caption, and that was removed on request rather than left as dead
+  -- schema — see keepsake-brief.md §2.5 and PLAN.md for the history.
   caption          TEXT NULL,
 
   -- Default TRUE (included) on every upload — brief §2.4: "Kathryn only
@@ -342,65 +344,6 @@ CREATE TABLE IF NOT EXISTS anecdotes (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
--- --------------------------------------------------------- photo_text_bundles
-
--- Brief §2.5: a photo and a quote/anecdote submitted together so the text
--- renders as THAT PHOTO'S CAPTION in the layout instead of occupying its own
--- slot. This table's mere EXISTENCE for a given quote/anecdote is what
--- distinguishes a bundle from a standalone entry — there is no `is_bundled`
--- flag on quotes/anecdotes to keep in sync with this table separately.
---
--- NO year_project_id COLUMN, DELIBERATELY — the one exception to this
--- schema's "every content table gets its own column" default. A bundle row
--- cannot exist without photo_id, and photos.year_project_id is already
--- authoritative and non-nullable, so a second copy here could only ever
--- either duplicate that value or (worse) drift from it after an edit moves
--- the photo to a different year. Year isolation for this table is the
--- UNAMBIGUOUS DERIVATION the isolation rule allows as an alternative to a
--- column: join through photo_id.
---
--- Enforcing "exactly one of quote_id / anecdote_id" is a CHECK rather than
--- two nullable foreign keys left to application discipline, for the same
--- reason Personal CRM's reminder_sends primary key is a composite: this is
--- the entire content of what makes a bundle valid, and the database should
--- refuse to store one that doesn't make sense rather than trust every future
--- caller to remember.
-CREATE TABLE IF NOT EXISTS photo_text_bundles (
-  id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
-
-  photo_id      INT UNSIGNED NOT NULL,
-  quote_id      INT UNSIGNED NULL,
-  anecdote_id   INT UNSIGNED NULL,
-
-  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-  PRIMARY KEY (id),
-
-  -- One bundle per photo (brief: the text becomes "a caption" — singular —
-  -- on that photo) and one bundle per text entry (a quote used as a caption
-  -- once cannot also be a standalone page elsewhere).
-  UNIQUE KEY uniq_photo (photo_id),
-  UNIQUE KEY uniq_quote (quote_id),
-  UNIQUE KEY uniq_anecdote (anecdote_id),
-
-  CHECK (
-    (quote_id IS NOT NULL AND anecdote_id IS NULL) OR
-    (quote_id IS NULL AND anecdote_id IS NOT NULL)
-  ),
-
-  -- All three CASCADE: deleting either side of a bundle removes the bundle
-  -- row itself (the surviving side just goes back to being unbundled), and
-  -- deleting the photo removes a bundle that no longer has anything to
-  -- caption.
-  CONSTRAINT fk_ptb_photo FOREIGN KEY (photo_id)
-    REFERENCES photos(id) ON DELETE CASCADE,
-  CONSTRAINT fk_ptb_quote FOREIGN KEY (quote_id)
-    REFERENCES quotes(id) ON DELETE CASCADE,
-  CONSTRAINT fk_ptb_anecdote FOREIGN KEY (anecdote_id)
-    REFERENCES anecdotes(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-
 -- ------------------------------------------------------------------ snapshots
 
 -- Brief §2.3: two fixed templates (birthday, school year), both with a set
@@ -411,10 +354,10 @@ CREATE TABLE IF NOT EXISTS photo_text_bundles (
 -- table joined 1:1 back to a base row would be more indirection than the
 -- data justifies. The `type` column is what a screen reads to know which
 -- fields to show; there is deliberately NO cross-field CHECK forcing the
--- other template's columns to NULL (unlike photo_text_bundles' CHECK
--- above) — that would be one more thing to get exactly right for six
--- columns' worth of low-stakes optional data, for a constraint whose only
--- job is catching a bug the UI already prevents by only ever showing one
+-- other template's columns to NULL (unlike book_page_photos' CHECK below)
+-- — that would be one more thing to get exactly right for six columns'
+-- worth of low-stakes optional data, for a constraint whose only job is
+-- catching a bug the UI already prevents by only ever showing one
 -- template's fields at a time.
 CREATE TABLE IF NOT EXISTS snapshots (
   id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -474,8 +417,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
 -- dataset-caching pattern the brief points at (free-exercise-db, the
 -- Hugging Face GroceryList dataset in the sibling apps).
 --
--- NO year_project_id COLUMN — and unlike photo_text_bundles above, NOT
--- because it derives from one either. This table is INFRASTRUCTURE, not
+-- NO year_project_id COLUMN — and unlike book_pages below, NOT because it
+-- derives from one either. This table is INFRASTRUCTURE, not
 -- CONTENT: the isolation rule in PLAN.md protects Kathryn's own captured
 -- material from leaking across years, and a lat/lon-to-place-name mapping is
 -- neither hers nor year-specific — the coffee shop on the corner resolves to
@@ -557,10 +500,10 @@ CREATE TABLE IF NOT EXISTS book_layouts (
 -- ----------------------------------------------------------------- book_pages
 
 -- One row per generated interior page. NO year_project_id COLUMN: derives
--- unambiguously through book_layout_id -> book_layouts.year_project_id, the
--- same reasoning as photo_text_bundles above — a page cannot exist without
--- a layout, and a layout's year never changes underneath it (regenerating
--- makes a new book_layouts row rather than repointing an old one).
+-- unambiguously through book_layout_id -> book_layouts.year_project_id — a
+-- page cannot exist without a layout, and a layout's year never changes
+-- underneath it (regenerating makes a new book_layouts row rather than
+-- repointing an old one).
 CREATE TABLE IF NOT EXISTS book_pages (
   id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
   book_layout_id   INT UNSIGNED NOT NULL,
@@ -612,16 +555,18 @@ CREATE TABLE IF NOT EXISTS book_pages (
 -- everything they need is snapshot_id on book_pages itself). The name is
 -- inherited from the brief's table list; despite it, a slot here is usually
 -- a photo but occasionally a standalone text card (see page_type='photos'
--- above) — same "exactly one of three" CHECK pattern as photo_text_bundles,
--- for the same reason.
+-- above) — hence the "exactly one of three" CHECK below (photo_id XOR
+-- quote_id XOR anecdote_id), enforcing that a slot is a photo OR a
+-- standalone quote-as-text-card OR a standalone anecdote-as-text-card,
+-- never more than one.
 --
 -- NO year_project_id COLUMN: derives through book_page_id -> book_pages ->
 -- book_layouts.year_project_id.
 --
--- NO CAPTION COLUMN. A photo slot's caption (if any) comes from either
--- photos.caption or a linked photo_text_bundles row — both already resolve
--- from photo_id alone, so duplicating either one here would just be a third
--- place the same text could go stale.
+-- NO CAPTION COLUMN. A photo slot's caption (if any) comes from photos.caption
+-- alone — the only captioning mechanism a photo has (see photos.caption
+-- above) — so duplicating it here would just be a second place the same
+-- text could go stale.
 CREATE TABLE IF NOT EXISTS book_page_photos (
   id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
   book_page_id  INT UNSIGNED NOT NULL,

@@ -9,10 +9,10 @@
  *   2. Two year_projects, each with its own photo/quote/anecdote/event_group/
  *      snapshot/book_layout, and a query scoped to year A's id never returns
  *      year B's rows, for every table that carries year_project_id directly.
- *   3. The two tables that DERIVE their year instead of storing it
- *      (photo_text_bundles via photo_id, book_pages/book_page_photos via
- *      book_layout_id) resolve to the right year through the join, so the
- *      derivation this schema leans on instead of a column actually holds.
+ *   3. The tables that DERIVE their year instead of storing it (book_pages/
+ *      book_page_photos, via book_layout_id) resolve to the right year
+ *      through the join, so the derivation this schema leans on instead of
+ *      a column actually holds.
  *
  * Usage:
  *   php tools/verify-schema.php
@@ -73,8 +73,6 @@ $pdo->exec("INSERT INTO snapshots (year_project_id, type, entry_date, age, heigh
             VALUES ($yearA, 'birthday', '2024-04-15', 6, '3ft 9in')");
 $snapshotA = (int) $pdo->lastInsertId();
 
-$pdo->exec("INSERT INTO photo_text_bundles (photo_id, quote_id) VALUES ($photoA, $quoteA)");
-
 $pdo->exec("INSERT INTO book_layouts (year_project_id, version) VALUES ($yearA, 1)");
 $layoutA = (int) $pdo->lastInsertId();
 
@@ -107,8 +105,6 @@ $pdo->exec("INSERT INTO snapshots (year_project_id, type, entry_date, grade, sch
             VALUES ($yearB, 'school_year', '2025-08-25', '1st grade', 'Lincoln Elementary')");
 $snapshotB = (int) $pdo->lastInsertId();
 
-$pdo->exec("INSERT INTO photo_text_bundles (photo_id, anecdote_id) VALUES ($photoB, $anecdoteB)");
-
 $pdo->exec("INSERT INTO book_layouts (year_project_id, version) VALUES ($yearB, 1)");
 $layoutB = (int) $pdo->lastInsertId();
 
@@ -131,32 +127,6 @@ foreach (array('event_groups', 'photos', 'quotes', 'anecdotes', 'snapshots', 'bo
 }
 
 echo "\nChecking tables that DERIVE year_project_id instead of storing it...\n";
-
-// photo_text_bundles derives through photo_id -> photos.year_project_id.
-$bundleYears = $pdo->query(
-    "SELECT ptb.id, p.year_project_id
-       FROM photo_text_bundles ptb
-       JOIN photos p ON p.id = ptb.photo_id"
-)->fetchAll();
-check('photo_text_bundles: every bundle resolves to a year via its photo', count($bundleYears) === 2);
-foreach ($bundleYears as $row) {
-    check(
-        "photo_text_bundles id={$row['id']} resolves to a year that is A or B, not both/neither",
-        in_array((int) $row['year_project_id'], array($yearA, $yearB), true)
-    );
-}
-$bundleYearASet = $pdo->query(
-    "SELECT COUNT(*) FROM photo_text_bundles ptb
-       JOIN photos p ON p.id = ptb.photo_id
-      WHERE p.year_project_id = $yearA"
-)->fetchColumn();
-$bundleYearBSet = $pdo->query(
-    "SELECT COUNT(*) FROM photo_text_bundles ptb
-       JOIN photos p ON p.id = ptb.photo_id
-      WHERE p.year_project_id = $yearB"
-)->fetchColumn();
-check('photo_text_bundles: year A has exactly one bundle scoped to it', (int) $bundleYearASet === 1);
-check('photo_text_bundles: year B has exactly one bundle scoped to it', (int) $bundleYearBSet === 1);
 
 // book_pages / book_page_photos derive through book_layout_id.
 $pagesA = $pdo->query(

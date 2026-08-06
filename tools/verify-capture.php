@@ -32,11 +32,13 @@
  *   6. photo_update() changing captured_at (brief: "the auto-assigned year
  *      is editable") re-resolves year_project_id, moving the photo's row to
  *      a different year_projects id.
- *   7. photo_text_bundle_create() enforces "exactly one of quote_id/
- *      anecdote_id" (lib/repo.php's own guard) AND the database's UNIQUE
- *      constraints (schema.sql) — a second bundle attempt on an
- *      already-bundled photo is rejected by SQLite with foreign_keys/UNIQUE
- *      enforcement ON, the same as MySQL would.
+ *
+ * NOT CHECKED HERE: photo+text bundling. An earlier version of this app had
+ * a photo_text_bundle_create() that attached a quote/anecdote to a photo as
+ * its caption; that mechanism was removed on request (see
+ * public/api/quotes.php's header) — a quote/anecdote is always standalone,
+ * and a photo's only caption is photos.caption, typed during upload — so
+ * there is nothing left here to test.
  *
  * Usage:
  *   php tools/verify-capture.php
@@ -209,35 +211,6 @@ $afterYpId = (int) $pdo->query("SELECT year_project_id FROM photos WHERE id = $e
 $afterYear = (int) $pdo->query("SELECT year FROM year_projects WHERE id = $afterYpId")->fetchColumn();
 check('date correction changed year_project_id', $beforeYpId !== $afterYpId);
 check('the new year_project is actually 2020', $afterYear === 2020);
-
-/* ========================================================== text bundles */
-
-echo "\nphoto_text_bundle_create(): exactly-one-of, application-level...\n";
-try {
-    photo_text_bundle_create($fallbackPhotoId, null, null);
-    check('rejects neither quote_id nor anecdote_id set', false);
-} catch (InvalidArgumentException $e) {
-    check('rejects neither quote_id nor anecdote_id set', true);
-}
-try {
-    photo_text_bundle_create($fallbackPhotoId, $q1, $a1);
-    check('rejects BOTH quote_id and anecdote_id set', false);
-} catch (InvalidArgumentException $e) {
-    check('rejects BOTH quote_id and anecdote_id set', true);
-}
-
-echo "\nphoto_text_bundle_create(): database-enforced uniqueness (schema.sql, foreign_keys ON)...\n";
-photo_text_bundle_create($fallbackPhotoId, null, $a1);
-check(
-    'first bundle on this photo succeeded',
-    (int) $pdo->query("SELECT COUNT(*) FROM photo_text_bundles WHERE photo_id = $fallbackPhotoId")->fetchColumn() === 1
-);
-try {
-    photo_text_bundle_create($fallbackPhotoId, $q2, null);
-    check('a second bundle on an already-bundled photo is rejected (uniq_photo)', false);
-} catch (Throwable $e) {
-    check('a second bundle on an already-bundled photo is rejected (uniq_photo)', true);
-}
 
 echo "\n";
 if ($failures > 0) {

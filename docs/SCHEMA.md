@@ -15,11 +15,11 @@ Every table below is one of three shapes:
    `quotes`, `anecdotes`, `snapshots`, `book_layouts`. These are rows Kathryn
    (or an algorithm acting on her behalf) creates independently; nothing else
    could carry the year for them.
-2. **Derives its year unambiguously through a parent** — `photo_text_bundles`
-   (via `photo_id`), `book_pages` and `book_page_photos` (via `book_layout_id`,
-   one or two joins up to `book_layouts.year_project_id`). These are always
-   children of a row from group 1, so a second copy of the year would only
-   ever risk drifting from the parent's.
+2. **Derives its year unambiguously through a parent** — `book_pages` and
+   `book_page_photos` (via `book_layout_id`, one or two joins up to
+   `book_layouts.year_project_id`). These are always children of a row from
+   group 1, so a second copy of the year would only ever risk drifting from
+   the parent's.
 3. **Shared reference data, not year-scoped at all** — `geocode_cache`,
    `login_attempts`. Neither is "content"; a lat/lon resolves to the same
    place name regardless of which year asked, and a login attempt isn't
@@ -58,7 +58,8 @@ derived from these, not stored separately), `captured_at` (DATETIME — EXIF
 date+time or submission time, editable; time-of-day matters for Phase 5's
 day/close-timing sub-grouping), `gps_lat`/`gps_lon`, `location_text`
 (manually typed, independent of the event group's `location_name`),
-`caption`, `skip_for_book` (default included), `full_page`, `event_group_id`
+`caption` (the ONLY captioning mechanism a photo has, typed during upload —
+see below), `skip_for_book` (default included), `full_page`, `event_group_id`
 (nullable, `SET NULL` on group delete).
 
 ### `quotes`
@@ -70,13 +71,13 @@ defaults to submission date, editable).
 `year_project_id`, `anecdote_text`, `entry_date`. Same shape as `quotes`
 minus `who_said_it` — an anecdote has no speaker attribution.
 
-### `photo_text_bundles`
-Junction that turns a quote or anecdote into a photo's caption instead of a
-standalone entry. `photo_id` (unique), exactly one of `quote_id` /
-`anecdote_id` (unique each, enforced by a `CHECK`). No `year_project_id` —
-derived through `photo_id`. A quote/anecdote's presence *in this table* is
-what makes it "bundled"; there's no flag on `quotes`/`anecdotes` to keep in
-sync separately.
+**No `photo_text_bundles` table.** An earlier version of this schema had
+one — a junction turning a quote or anecdote into a photo's caption instead
+of a standalone entry. Removed on request: a quote or anecdote is never
+attached to a photo. `entry_date` is the only thing that relates a
+quote/anecdote to nearby photos (Phase 5's layout groups by date), and a
+photo's only caption mechanism is its own `caption` column, typed directly
+during upload.
 
 ### `snapshots`
 One table for both templates (`type` = `birthday` or `school_year`).
@@ -112,9 +113,8 @@ for `page_type = 'text'`). `book_page_id`, `slot_number` (1–4, `CHECK`-ed),
 exactly one of `photo_id` / `quote_id` / `anecdote_id` (`CHECK`-ed — a slot
 is usually a photo, occasionally a short standalone text card sharing the
 page per brief §4.3). No caption column: a photo slot's caption comes from
-`photos.caption` or a `photo_text_bundles` row, both already resolvable from
-`photo_id` alone. No `year_project_id` — derived through `book_page_id` →
-`book_layout_id`.
+`photos.caption` alone. No `year_project_id` — derived through
+`book_page_id` → `book_layout_id`.
 
 ## Relationships (text form)
 
@@ -125,9 +125,6 @@ year_projects (1) ──< quotes
 year_projects (1) ──< anecdotes
 year_projects (1) ──< snapshots ──> photos (hero_photo_id, nullable, SET NULL)
 year_projects (1) ──< book_layouts
-
-photos (1) ──1 photo_text_bundles ──1 quotes    (exactly one of these two)
-                                  └─1 anecdotes
 
 book_layouts (1) ──< book_pages ──> snapshots (nullable, only page_type='snapshot')
 book_pages (1) ──< book_page_photos ──> photos    (exactly one of these three)

@@ -301,16 +301,19 @@ explicitly in Section 7 as "the most novel/complex piece" needing
 iteration.
 **Depends on**: Phase 4
 **Delegate prompt**: "Implement the auto-arrange algorithm per Section 4.3
-of the brief: within each event group, sub-group photos by day/close
-timing; arrange onto pages using orientation-matching as primary driver,
-with a variety heuristic that varies page density (1–4 photos) so the book
-doesn't monotonously repeat one layout; manually flagged 'full page'
-photos always get their own page; standalone text entries in an event's
-date range occupy a page slot as a styled card unless they exceed the
-tunable ~180-character threshold (then they get a full page); photo+text
-bundles render the text as a caption within the photo's existing slot, not
-a separate slot; snapshot entries always get their fixed full-page
-template regardless of surrounding grouping. Persist layout as versioned
+of the brief (revised — read the current version, not just this summary):
+within each event group, sub-group photos by day/close timing; arrange onto
+pages using orientation-matching as primary driver, with a variety
+heuristic that varies page density (1–4 photos) so the book doesn't
+monotonously repeat one layout; manually flagged 'full page' photos always
+get their own page; quotes/anecdotes in an event's date range occupy a page
+slot as a styled card unless they exceed the tunable ~180-character
+threshold (then they get a full page) — a quote/anecdote is ALWAYS placed
+this way, by date, never as a photo's caption; a photo's own typed caption
+(photos.caption) renders inline within that photo's existing slot, which
+isn't a separate content type competing for a slot; snapshot entries always
+get their fixed full-page template regardless of surrounding grouping.
+Persist layout as versioned
 records (Phase 1's book_layouts/pages/page_photos tables) so regenerating
 never destroys a prior version, 'reflow from here' can regenerate
 everything downstream of a page without touching earlier pages, and local
@@ -442,8 +445,8 @@ phase so far has had): `tools/verify-capture.php` proves year-auto-
 assignment end to end — including a photo whose captured_at is a simulated
 EXIF date from 2019 landing in the 2019 year_project while every other
 check in the same run is dated 2026 — plus EXIF edge cases (uninitialized
-camera clock, malformed GPS fractions) and bundle-uniqueness enforcement;
-a scratch script (not committed) exercised the full upload→thumbnail→crop
+camera clock, malformed GPS fractions); a scratch script (not committed)
+exercised the full upload→thumbnail→crop
 pipeline against both a GD-generated JPEG and a real EXIF+GPS-bearing one
 (built with Python's piexif) to confirm `lib/imageproc.php`/`lib/exif.php`
 work end to end, not just in isolation. Both `tools/verify-schema.php` and
@@ -464,4 +467,23 @@ that file's header and this phase's session report for the full reasoning.
 
 Next: Phase 3's desktop review/browse screens — full edit on every field
 captured here, the skip_for_book/full_page toggles this phase deliberately
-left alone, and event-group review once Phase 4 exists to populate it.)
+left alone, and event-group review once Phase 4 exists to populate it.
+
+**Follow-up after Phase 2 landed: the photo+text bundling feature was
+removed.** Kathryn clarified the model directly: a photo's caption is typed
+during upload (`photos.caption`, unchanged), and a quote/anecdote is ALWAYS
+a standalone, dated entry — never attached to a specific photo as its
+caption. This invalidated `photo_text_bundles` (Phase 1's table for linking
+a quote/anecdote to a photo as a caption) entirely, since nothing will ever
+write to it under the corrected model. Removed rather than left as dead
+schema: `schema.sql`'s `photo_text_bundles` table and every comment
+referencing it, `lib/repo.php`'s `photo_text_bundle_create()`, the
+`photo_id` parameter and bundling logic in `public/api/quotes.php` and
+`anecdotes.php`, the "Attach a photo" control on both quick-add forms in
+`public/capture.php`/`capture.js`, and the corresponding test block in
+`tools/verify-capture.php` (both test scripts re-run clean afterward).
+`public/assets/photo-picker.js` stays — its other caller, a snapshot's
+manual hero-photo selection, is unaffected. `keepsake-brief.md` §2.5 and
+§4.3, and Phase 5's delegate prompt above, are rewritten to match — Phase 5
+hasn't run yet, so this matters for its own future correctness, not just
+as a historical record.)

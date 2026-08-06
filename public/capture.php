@@ -58,11 +58,6 @@ require_login_page();
           <span>Date</span>
           <input type="date" name="entry_date" required>
         </label>
-        <div class="field">
-          <span>Photo</span>
-          <button type="button" class="btn-ghost" data-act="pick-photo">Attach a photo (optional)</button>
-          <p class="hint" data-role="photo-chosen" hidden></p>
-        </div>
         <p class="field-err" data-role="error"></p>
         <button type="submit" class="btn-primary">Add quote</button>
       </form>
@@ -81,11 +76,6 @@ require_login_page();
           <span>Date</span>
           <input type="date" name="entry_date" required>
         </label>
-        <div class="field">
-          <span>Photo</span>
-          <button type="button" class="btn-ghost" data-act="pick-photo">Attach a photo (optional)</button>
-          <p class="hint" data-role="photo-chosen" hidden></p>
-        </div>
         <p class="field-err" data-role="error"></p>
         <button type="submit" class="btn-primary">Add anecdote</button>
       </form>

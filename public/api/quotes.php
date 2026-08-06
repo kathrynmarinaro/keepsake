@@ -1,16 +1,17 @@
 <?php
 /* POST /api/quotes.php
- *   { quote_text, who_said_it, entry_date, photo_id? }
+ *   { quote_text, who_said_it, entry_date }
  *
  * Quick-add (brief §2.1). year_project_id is resolved from entry_date by
  * lib/repo.php's quote_create() — see that file's header for the
  * year-auto-assignment rule this implements.
  *
- * `photo_id`, if present, bundles this quote onto an already-uploaded photo
- * as its caption instead of leaving it standalone (brief §2.5) — the
- * "optional photo+text bundling at submission time" the capture flow offers
- * from the quick-add side; public/assets/photo-picker.js is what supplies
- * this id from the client.
+ * NO photo_id. A quote is never attached to a photo as its caption — it's
+ * always a standalone, dated entry; entry_date is what lets it land near
+ * related photos in the book layout (Phase 5), not a link to one specific
+ * photo. If a photo needs a caption, that's typed directly during upload
+ * (photos.caption, see public/assets/photo-batch.js) — a separate mechanism
+ * this endpoint has nothing to do with.
  */
 
 declare(strict_types=1);
@@ -40,18 +41,4 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
 
 $id = quote_create(array('quote_text' => $text, 'who_said_it' => $who, 'entry_date' => $date));
 
-$bundled = false;
-$photoId = isset($body['photo_id']) && $body['photo_id'] !== '' ? (int) $body['photo_id'] : null;
-if ($photoId !== null) {
-    try {
-        photo_text_bundle_create($photoId, $id, null);
-        $bundled = true;
-    } catch (Throwable $e) {
-        // The quote is already saved — a bad photo_id (already bundled,
-        // doesn't exist) degrades to "saved as a standalone entry" rather
-        // than losing what was typed. Fail soft, per PLAN.md's conventions.
-        error_log('quotes: bundling failed: ' . $e->getMessage());
-    }
-}
-
-json_out(array('id' => $id, 'bundled' => $bundled), 201);
+json_out(array('id' => $id), 201);
