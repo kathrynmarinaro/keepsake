@@ -199,4 +199,66 @@ return array(
          */
         'orphan_page_penalty' => 0.35,
     ),
+
+    /* ---- PDF export (Phase 7, brief §5.5) -------------------------------
+     * Printer-agnostic on purpose (brief §5.5: "the same PDF should be
+     * uploadable to multiple print-on-demand services"): every number below
+     * came from actually reading Lulu's and Mixam's own current spec pages
+     * (checked 2026-08-06), not assumed, per PLAN.md's explicit instruction
+     * that print specs change over time. See lib/pdfexport.php's
+     * pdf_export_geometry() for how these combine into the actual PDF page
+     * size mPDF is told to render.
+     */
+    'export' => array(
+
+        /* Trim size in inches — brief §5.5's own spec: "8.5 x 8.5". Both
+         * printers offer this as a standard square softcover trim, so
+         * there's no printer-specific adjustment needed here.
+         */
+        'trim_width_in'  => 8.5,
+        'trim_height_in' => 8.5,
+
+        /* Bleed, in inches, added to EACH of the four edges — the exported
+         * PDF page is trim + 2×bleed on both dimensions (8.75in x 8.75in at
+         * the defaults above). THE TWO PRINTERS AGREE EXACTLY HERE, no
+         * reconciliation needed:
+         *   - Lulu: "trimming tolerance is 0.125 in/3.175 mm", and Lulu's
+         *     own 8.5x8.5 interior template ships sized at 8.75in x 8.75in —
+         *     exactly trim + 2x0.125in. (Lulu Help Center, "What is Full
+         *     Bleed?", https://help.lulu.com/en/support/solutions/articles/64000255584-what-is-full-bleed-;
+         *     Lulu Book Creation Guide, https://assets.lulu.com/media/guides/en/lulu-book-creation-guide.pdf)
+         *   - Mixam: "All print items... require a 0.125in bleed area
+         *     outside your trim line... every file must include a 0.125in
+         *     bleed." (Mixam Support, "Full Bleed Printing Explained",
+         *     https://mixam.com/support/bleed; corroborated by Mixam's own
+         *     digest-size worked example, 5.5x8.5 trim -> 5.75x8.75 file,
+         *     the same 0.125in-per-edge math.)
+         */
+        'bleed_in' => 0.125,
+
+        /* Safety margin, in inches, measured IN FROM THE TRIM EDGE (not the
+         * outer bleed edge) — keep text, faces, anything you'd mind losing,
+         * inside this. THE TWO PRINTERS DO NOT QUITE AGREE HERE, and this
+         * app renders one page at a time with no separate inner/outer-edge
+         * treatment for a bound gutter, so this takes the LARGER, more
+         * conservative of the two rather than trying to vary margin by which
+         * edge is which:
+         *   - Lulu: flat 0.5in everywhere — "Important images and text
+         *     should be kept 0.5in from the trimmed edge." (Lulu Book
+         *     Creation Guide, as above.)
+         *   - Mixam: a smaller 0.25in "quiet area" for ordinary content, but
+         *     a separate, larger 0.5in "gutter margin" specifically for the
+         *     bound/spine edge of a softcover interior page. (Mixam Support,
+         *     "Print File Setup Guide", https://mixam.com/support/filesetup.)
+         * One uniform 0.5in clears both: it matches Lulu's number on every
+         * edge, and it's AT LEAST as conservative as Mixam's on every edge
+         * too (more generous than Mixam's 0.25in quiet area, exactly equal
+         * to Mixam's own 0.5in gutter number on the one edge that matters
+         * most). See lib/pdfexport.php's header and the Phase 7 session
+         * report for the full reasoning — this is the one place brief/
+         * PLAN.md's "verify against both services' spec sheets" turned up a
+         * real disagreement to reconcile, not just a number to confirm.
+         */
+        'safety_margin_in' => 0.5,
+    ),
 );
