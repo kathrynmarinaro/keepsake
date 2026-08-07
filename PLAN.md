@@ -6,14 +6,17 @@
 > git — so this file (plus the code and commit history) *is* the memory of
 > the project across usage-limit resets and multi-day work.
 
-> **▶ RESUMED (as of 2026-08-06).** The sibling repos `kathrynmarinaro/inspiration`
-> and `kathrynmarinaro/personal-cms` were reachable this session (checked out
-> locally alongside this one), and the reconciliation pass this file's pause
-> note called for is done — see "Suite conventions" below for what changed.
-> Phase 1 proceeded immediately afterward, on explicit instruction to do both
-> in one session; see the Status Tracker at the bottom for where that landed.
-> If you're a future session picking this up mid-phase, `git log --oneline`
-> is more current than this prose.
+> **✔ ALL EIGHT PHASES COMPLETE (as of 2026-08-07).** Phase 8's polish and
+> open-source-readiness pass closed out the build — secret scan clean across
+> full git history, every brief-flagged tunable confirmed present and
+> documented, year-project isolation spot-checked through Phases 4-6's write
+> paths, `capture.css`/`review.css`/`layout.css` folded into `styles.css`
+> (`public/assets/` now holds exactly one CSS file, per every sibling's
+> convention), the Phase 6 emptied-page gap fixed and tested, and a real
+> top-level README written for a public-GitHub audience. See the Status
+> Tracker's Phase 8 entry at the bottom for the full account, and this file's
+> "How to resume" section below still applies if further work ever picks this
+> back up — `git log --oneline` is more current than any prose here.
 
 ## How to resume
 
@@ -450,7 +453,7 @@ have the detail.
 - [x] Phase 5 — Book layout engine
 - [x] Phase 6 — Page review UI
 - [x] Phase 7 — PDF export
-- [ ] Phase 8 — Polish & open-source readiness
+- [x] Phase 8 — Polish & open-source readiness
 
 **Last updated**: 2026-08-06 (Phases 0-5 complete, one session. The entry below is Phase 2's; each later phase appends its own. Phase 2 complete, same session as Phase 0/1
 above. `public/capture.php` is one mobile screen, four accordion sections
@@ -1053,3 +1056,169 @@ pass or for Kathryn directly, not acted on here: whether the safety-margin
 reconciliation above (uniform 0.5in rather than a spine-aware gutter) is
 worth revisiting if a specific printer ever gets chosen as the primary
 target.
+
+**Phase 8 complete (2026-08-07, this session) — all eight phases done.**
+Every item in this phase's own section above, plus both explicit
+instructions added after it (the CSS consolidation, done as its own
+instructed sub-task), plus the optional emptied-page fix. In commit order:
+
+**1. Secret scan across full git history — clean, no-op.** `git log --all -p`
+over the entire history (not just `HEAD`, and not just a spot-check),
+grepped for bcrypt-shaped hash literals, API-key/token/private-key patterns,
+and `config.php` ever being added — zero hits beyond `CHANGE_ME` placeholders
+and `make-hash.php`'s own instructional prose. `config.php` has never once
+been committed, confirmed directly rather than trusted from every prior
+phase's incremental spot-check. Nothing to commit for this item; folded into
+this note instead of an empty commit.
+
+**2. Tunable-value audit — all three brief-named values confirmed present
+and documented, plus the ones Sections 2-4 implied.** Cross-checked
+`config.example.php` against brief §7's explicit list line by line rather
+than trusting the prior phases' own claims: `grouping.gap_days` (3),
+`layout.text_page_chars` (180), and `export.trim_width_in`/
+`trim_height_in`/`bleed_in`/`safety_margin_in` (8.5/8.5/0.125/0.5) all
+exist, each with its reasoning documented inline (the safety-margin one
+carries the Lulu/Mixam citation trail Phase 7 already worked out). Beyond the
+three named ones, `layout`'s other seven values (`subgroup_gap_hours`,
+`text_attach_days`, `orientation_weight`/`density_weight`,
+`density_preference`, the three `variety_*` values, `orphan_page_penalty`)
+and `geocode.min_interval_seconds` are also real config, not hardcoded —
+Section 4.3/§7's "will likely need iteration" instruction applied to the
+whole heuristic, not just the two numbers the brief happened to name. Also a
+no-op commit-wise; the audit found nothing missing to add.
+
+**3. Year-project isolation spot-check — holds, confirmed by tracing code,
+not re-derived from `docs/SCHEMA.md`'s own claims.** Read
+`lib/grouping.php`'s `event_grouping_run()` (scoped to one
+`year_project_id` on both the ungrouped-photo query and the existing-group
+join candidates), `lib/repo.php`'s `event_group_merge()`/`_split()` (merge
+refuses a source group from a different year; split only ever moves photos
+that already belong to the source group, which is already year-scoped),
+`lib/layout.php`'s `layout_generate()`/`layout_reflow_from()`/
+`layout_load_year_content()` (every query filters on `year_project_id`;
+reflow reads its layout's year off the layout row itself, never a caller-
+supplied value), and confirmed the Phase 6 note's claim about
+`book_page_slot_swap()`/`book_page_slot_move()` directly in the current code
+— both still refuse any pair of slots whose pages don't share a
+`book_layout_id`, which transitively enforces same-year since a layout
+belongs to exactly one year. No hole found; nothing to fix here.
+
+**4. TODO grep — still clean.** A full-repo grep for `TODO` (excluding
+`vendor/`) turns up nothing in application code, same as the last phase
+found. `PLAN.md`'s own prose (this phase's delegate instructions, quoted
+above) is the only place the string appears, which isn't a real TODO.
+
+**5. CSS consolidation — done, on the explicit instruction quoted at the top
+of this phase's own section.** `capture.css`, `review.css` and `layout.css`
+are folded into `public/assets/styles.css` as three clearly-headed sections,
+the three files are deleted, and every `<link>` in `public/capture.php`/
+`review.php`/`layout.php` is updated to match — `public/assets/` now holds
+exactly one CSS file. `styles.css`'s own header no longer claims
+byte-for-byte parity with Personal CRM's copy; it explains plainly why that
+claim is now stale (Keepsake is the first app in the suite with
+photo/crop/layout needs) and points at this note. Nothing was pushed back
+into `kathrynmarinaro/personal-cms` or `kathrynmarinaro/inspiration` — see
+"Worth Kathryn's eyes" below.
+
+**Class survival checked mechanically, not visually — no browser in this
+environment.** Every selector `capture.css` and `review.css` defined was
+grepped against the merged file: zero missing, both carried over verbatim.
+`layout.css` was different, and this is flagged here rather than smoothed
+over: **8 of its 13 classes were already fully dead before this phase
+touched anything.** Phase 6 rebuilt `public/layout.php`'s page rendering
+under new `ks-`-prefixed class names (`.ks-book`/`.ks-slots`/`.ks-slot`/etc.)
+and never added CSS for any of them — its own session note above says "CSS
+was correctly NOT touched here," which was true of the *file* but left that
+screen's spread/grid layout with no styling underneath the renamed markup,
+undetected until this phase actually grepped the old names
+(`.book-pages`/`.page-slots`/`.slot`/`.slot-photo`/`.slot-caption`/
+`.slot-text`/`.slot-snapshot`) against current `public/*.php` and
+`public/assets/*.js` and found zero real hits. Rather than carry dead CSS
+forward under a literal reading of "don't drop anything," they're replaced
+with working rules under the names the markup actually uses now, restoring
+the spread-by-spread rendering Phase 6's own header describes but which had
+no CSS behind it — `.version-row`/`.is-open`/`.version-actions`, the two
+classes Phase 6 kept using unchanged, carry forward as-is. Documented inline
+in `styles.css`'s own layout section header, not just here.
+
+**6. Top-level README rewritten — full pass, not a patch.** Covers what the
+app does and why, a walkthrough of all four real screens, the complete
+current folder structure (every `lib/*.php` file, every one of the nine
+`tools/*.php` scripts including the five added since the old README was last
+touched, `public/api/`, and the Composer dependency Phase 7 introduced),
+updated requirements (Composer now required; `exif`/`gd`/`mbstring`
+extensions; Imagick preferred for HEIC), every brief-flagged tunable in one
+place, a testing section naming all seven `verify-*.php` scripts, and a
+closing section flagging what a stranger cloning this repo would trip over
+(no LICENSE file yet, `lib/geocode.php`'s real Nominatim call has never run
+in this sandbox, nothing here has ever been exercised in a real browser).
+
+**7. Optional: the Phase 6 emptied-page gap — fixed, not just documented.**
+`lib/repo.php`'s new `book_page_delete_and_renumber()`, called by
+`book_page_slot_move()` whenever a cross-page move drains the SOURCE page to
+zero filled slots (no photos AND no text card — a page still carrying a lone
+text card is left alone, exactly as before). Renumbers every later page in
+the same `book_layout_id`, ascending, so `book_pages.uniq_layout_page` is
+never hit mid-renumber. `book_page_slot_move()`'s own boolean return
+contract is unchanged (every existing `=== true`/`=== false` caller, this
+file's own included, keeps working); the new `public/api/
+book-page-slots-move.php` response field `page_deleted` is determined by the
+endpoint itself (captures the source page id before the call, checks it's
+gone after), and `public/assets/layout.js` reloads instead of DOM-patching
+when it's true — a page vanishing and everything after it renumbering is a
+structural change, matching the "structural changes reload" rule this screen
+and `review.js` already establish for delete/merge/split/reflow.
+`tools/verify-page-review.php` gained a dedicated synthetic layout (built
+directly through the repo layer for exact control over page shape) proving
+the drain-delete-renumber path end to end, including that a TEXT page type
+renumbers correctly alongside photo pages, that a mixed photo+text-card page
+survives losing its photo, and that same-page reordering never triggers
+deletion.
+
+**Testability**: all seven `tools/verify-*.php` scripts were re-run after
+every commit in this phase (not just once at the end) — `verify-schema`,
+`verify-capture`, `verify-review`, `verify-grouping`, `verify-layout`,
+`verify-page-review` (with its new Phase 8 checks), and `verify-export` all
+pass clean. `composer validate` passes; every `.php` file in the repo passes
+`php -l`; `public/assets/layout.js` passes `node --check`.
+
+**Exit criteria verified**: a fresh-clone dry run was walked by hand
+(`composer install`, `cp config.example.php config.php`,
+`php tools/verify-schema.php` standing in for a real `mysql ... < schema.sql`
+since this environment has no MySQL server, `php tools/make-hash.php` — all
+work as the rewritten README describes); the secret scan above is clean; the
+README is a real walkthrough, not a stub; `public/assets/` contains exactly
+`styles.css` and nothing else; every class the three deleted files defined
+was either carried forward verbatim or knowingly, visibly replaced (item 5
+above) — checked mechanically by grep, not by eye, since there is no browser
+in this build environment to click through and confirm visually, the same
+constraint every phase since Phase 2 has documented and worked around rather
+than fought.
+
+**Worth Kathryn's eyes, now that the whole build is done:**
+- **Whether the photo/crop/layout CSS vocabulary Keepsake grew (the cropper,
+  the photo grid, the book-page spread/slot layout) is worth backporting
+  into `kathrynmarinaro/personal-cms` and `kathrynmarinaro/inspiration`'s
+  shared house system.** Not done here, per this phase's own explicit
+  instruction not to push it back unilaterally — purely a suggestion.
+- **No LICENSE file exists yet.** `composer.json` says `"license":
+  "proprietary"`. Worth a decision before this repo actually goes public,
+  not urgent before then.
+- **`lib/geocode.php`'s reverse-geocoding call has never run against the
+  real Nominatim API in any session that built this app** — this sandbox's
+  egress policy blocks it outright, and every phase that touched geocoding
+  said so rather than papering over it. Worth one real sanity-check (and
+  swapping in a real contact email over the `CHANGE_ME@example.com`
+  placeholder) before trusting it on a live deploy.
+- **The Phase 6 CSS gap this phase found and fixed** (item 5 above) is a
+  good example of why "the session that wrote a note about its own work"
+  isn't the same as verifying that work — worth keeping in mind for any
+  future phase-style build in this suite: a claim like "CSS was correctly
+  NOT touched here" needs a class-by-class grep against current markup to
+  actually confirm, not just a memory of not having opened the file.
+- **Nothing in this app has ever been exercised in a real browser or against
+  real MySQL.** Every one of the eight phases worked around that constraint
+  carefully and documented it every time, and the `verify-*.php` suite is
+  genuinely thorough — but a first real end-to-end run (upload a real photo
+  batch, generate a real layout, drag a photo, export a real PDF, open it)
+  is still worth doing before trusting this with 2020-2026's actual photos.
