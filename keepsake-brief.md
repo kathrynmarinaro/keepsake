@@ -181,3 +181,18 @@ Within an event group, the app further sub-groups photos by **day / close timing
 
 - Public-facing companion content (not applicable here — noted in suite-level backlog for Book Tracker, not Keepsake).
 - Whether the date-gap threshold for event detection needs to differ by trip type (e.g., a multi-week vacation vs. a single day out) — to be evaluated after real usage.
+- **Chunked photo upload.** The upload flow is deliberately synchronous —
+  one request, no queue (see `lib/imageproc.php`'s header for why: there's
+  no vision/color pipeline here to defer work for, unlike Inspiration
+  Board). The tradeoff, found in real post-launch use: a big batch is one
+  long-running request that has to stay open end to end, and a dropped
+  connection or a server timeout partway through loses the *whole* batch,
+  not just whichever photo was slow. The current mitigation is process,
+  not code — a UI hint recommending ~10-15 photos per batch and a
+  `beforeunload` warning against navigating away mid-upload
+  (`public/assets/capture.js`). If batches keep needing to be larger than
+  that's comfortable for, the real fix is splitting one large upload into
+  several smaller sequential requests client-side, so a failure partway
+  through only costs the current chunk — not a rewrite of the "no queue"
+  decision itself, which was made for a different reason (nothing to defer
+  processing for) and still holds regardless of how the transfer is split.

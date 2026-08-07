@@ -38,7 +38,30 @@ require_login_page();
     no need to pick a year first.
   </p>
 
+  <!-- Photos first and open by default: this is what gets added most —
+       Kathryn's own usage, not a guess (see PLAN.md's post-launch note). -->
   <details class="accordion" open>
+    <summary class="accordion-head">Photos</summary>
+    <div class="accordion-body">
+      <p class="hint">
+        Choose one or more. Each one lands in its year automatically from its
+        own date (EXIF, or today if it doesn't have one) — you'll caption,
+        place and crop each right after.
+      </p>
+      <p class="hint">
+        Uploading a lot at once? <strong>10&ndash;15 photos per batch</strong>
+        works best — a single request that runs long risks timing out and
+        losing the whole batch. Not a hard limit; just what tends to go
+        smoothly. <strong>Keep this page open</strong> until the upload
+        finishes — leaving or closing the tab mid-upload cancels it.
+      </p>
+      <label class="btn-secondary" for="photo-file-input">Choose photos&hellip;</label>
+      <input type="file" id="photo-file-input" class="sr-only" accept="image/*" multiple>
+      <p class="hint" id="photo-upload-status" hidden></p>
+    </div>
+  </details>
+
+  <details class="accordion">
     <summary class="accordion-head">Quote</summary>
     <div class="accordion-body">
       <form class="stack" id="quote-form" data-form="quote">
@@ -131,20 +154,6 @@ require_login_page();
         <p class="field-err" data-role="error"></p>
         <button type="submit" class="btn-primary">Add snapshot</button>
       </form>
-    </div>
-  </details>
-
-  <details class="accordion">
-    <summary class="accordion-head">Photos</summary>
-    <div class="accordion-body">
-      <p class="hint">
-        Choose one or more. Each one lands in its year automatically from its
-        own date (EXIF, or today if it doesn't have one) — you'll caption,
-        place and crop each right after.
-      </p>
-      <label class="btn-secondary" for="photo-file-input">Choose photos&hellip;</label>
-      <input type="file" id="photo-file-input" class="sr-only" accept="image/*" multiple>
-      <p class="hint" id="photo-upload-status" hidden></p>
     </div>
   </details>
 </main>

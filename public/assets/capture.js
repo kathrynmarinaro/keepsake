@@ -157,6 +157,22 @@ function describeRejections(rejected) {
     : `${rejected.length} photos skipped — "${first.name}" ${why}.`;
 }
 
+/**
+ * Native "leave this page?" confirmation while an upload is in flight.
+ *
+ * There's no queue (see lib/imageproc.php's header) — the request has to
+ * stay open for the whole batch, so navigating away or closing the tab
+ * mid-upload cancels it outright and loses whatever hadn't been saved yet.
+ * This doesn't stop that, it just stops it happening BY ACCIDENT: the
+ * browser's own prompt is the one thing here that survives even if this
+ * whole page's JS somehow locked up.
+ */
+function warnBeforeUnloadDuring(promise) {
+  const onBeforeUnload = (e) => { e.preventDefault(); };
+  window.addEventListener('beforeunload', onBeforeUnload);
+  return promise.finally(() => window.removeEventListener('beforeunload', onBeforeUnload));
+}
+
 function attachPhotoUpload() {
   const input = document.getElementById('photo-file-input');
   const status = document.getElementById('photo-upload-status');
@@ -174,9 +190,20 @@ function attachPhotoUpload() {
 
     let result;
     try {
-      result = await apiUpload('api/photos-upload.php', form, (frac) => {
-        status.textContent = `Uploading… ${Math.round(frac * 100)}%`;
-      });
+      result = await warnBeforeUnloadDuring(
+        apiUpload('api/photos-upload.php', form, (frac) => {
+          // The progress event tracks BYTES SENT, not work done — it hits
+          // 100% the instant the browser finishes transmitting, which is
+          // well before the server has read EXIF, made a thumbnail and
+          // written a row for every photo in the batch (all synchronous,
+          // no queue — see photos-upload.php's own header). Without this
+          // split, the status line freezes at "100%" for however long that
+          // server-side pass takes and looks stuck rather than working.
+          status.textContent = frac < 1
+            ? `Uploading… ${Math.round(frac * 100)}%`
+            : 'Upload complete — processing photos…';
+        })
+      );
     } catch (err) {
       status.hidden = true;
       showSnackbar(
