@@ -1,0 +1,21 @@
+# Deny-all, same as lib/.htaccess and for a sharper reason.
+#
+# These scripts are CLI utilities that run OUTSIDE the gate — they never
+# call require_login_page(), because a shell has no session. tools/make-
+# hash.php in particular turns any string into a valid login password
+# hash; reachable over HTTP, that is a free hash-oracle for anyone who
+# finds the URL, letting them mint a working login without ever touching
+# config.php.
+#
+# Each script also refuses to run unless PHP_SAPI is 'cli' (see
+# make-hash.php's own header), so this is the second of two locks rather
+# than the only one. Neither is redundant: this file needs no PHP module
+# at all and survives a misconfigured Apache; the SAPI check survives a
+# misconfigured or missing .htaccess.
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order allow,deny
+  Deny from all
+</IfModule>

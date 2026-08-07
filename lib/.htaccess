@@ -1,0 +1,13 @@
+# Deny-all. Every file in here is a PHP function library required by
+# public/*.php entry points — nothing in lib/ is ever supposed to be
+# requested directly, and several of these functions assume constants
+# (APP_ROOT, PUBLIC_DIR) that only lib/bootstrap.php defines, so a direct
+# hit would fatal at best and leak a stack trace with a real file path at
+# worst.
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order allow,deny
+  Deny from all
+</IfModule>

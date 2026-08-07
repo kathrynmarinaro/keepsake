@@ -1,0 +1,110 @@
+# =====================================================================
+# Keepsake — document-root shim
+# ---------------------------------------------------------------------
+# Ported from Personal CRM's .htaccess (same reasoning, same fix) — see
+# that file's own header for the long version. Short version: if Hostinger
+# points your (sub)domain at THIS folder rather than letting you set the
+# document root to .../keepsake/public directly, then without this file:
+#
+#   1. the domain root is a 403, because there's no index here; and
+#   2. lib/, tools/, schema.sql, composer.json, composer.lock, config.php
+#      and every .md file are all fetchable over HTTP. Anything not
+#      executed as PHP is served as plain text, so schema.sql (your full
+#      database structure) reads out in a browser, and config.php is one
+#      PHP misconfiguration away from printing your database password.
+#
+# This rewrites every request down into public/ and denies the things
+# that must never be served.
+#
+# BETTER OPTION IF IT EVER BECOMES AVAILABLE: if hPanel lets you set the
+# document root directly to .../keepsake/public, do that instead and
+# delete this file. lib/, tools/, config.php etc. then sit genuinely
+# outside the served tree rather than being denied inside it — stronger,
+# because it doesn't depend on mod_rewrite/mod_authz being enabled. This
+# file is the fallback for when that setting is locked, matching Personal
+# CRM's own note on the same tradeoff.
+# =====================================================================
+
+DirectoryIndex index.php
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Send /public/... back to the clean URL so the app has ONE address.
+  # Matched on THE_REQUEST (the literal request line), untouched by
+  # internal rewrites — testing REQUEST_URI here would match this rule's
+  # own output and loop.
+  RewriteCond %{THE_REQUEST} \s/+public/(\S*) [NC]
+  RewriteRule ^ /%1 [R=301,L]
+
+  # Loop guard: the rewrite engine re-runs after an internal rewrite, and
+  # REQUEST_URI still holds the ORIGINAL path on that pass, so a condition
+  # on it never goes false. Testing the rule pattern is what terminates it.
+  RewriteRule ^public/ - [L]
+
+  # Unconditional, deliberately — the idiomatic
+  #   RewriteCond %{REQUEST_FILENAME} !-f
+  # guard is actively HARMFUL here: config.php DOES exist as a file, so
+  # that guard would serve it instead of rewriting it away.
+  RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# Make the browser CHECK whether a script or stylesheet changed, instead of
+# assuming it didn't. asset() cache-busts entry-point links with ?v=<mtime>,
+# but the ES modules those pages import are literal, unversioned URLs, so
+# this is the backstop for everything asset() doesn't touch directly.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(js|css)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
+
+# mod_alias, not mod_rewrite — .git survives an FTP/file-manager upload
+# more often than anyone expects, and a readable .git/config is a
+# credential leak. The FilesMatch rules below can't cover it: they match
+# the final path segment, so /.git/config looks like the filename "config".
+# .well-known is excluded because Let's Encrypt renewal lives there.
+RedirectMatch 404 ^/\.(?!well-known)
+
+# Everything below needs NO modules, and that is the point: every rewrite
+# above sits inside <IfModule mod_rewrite.c>. If that module is ever
+# unavailable the rewrites silently do nothing and these files start being
+# served as plain text — config.php among them — so the deny below does
+# not depend on the rewrite working at all.
+
+<FilesMatch "^config\.php$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+# schema.sql (your database structure), composer.json/composer.lock
+# (dependency manifest — not secret, but no reason to serve it), every
+# .md file (PLAN.md and keepsake-brief.md carry more build history than
+# you'd want a stranger reading first), and *.example.php (the config
+# TEMPLATE — not itself a secret, but there's no reason it's fetchable).
+<FilesMatch "\.(sql|md|json|lock|example\.php)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+<FilesMatch "^\.">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>

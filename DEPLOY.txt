@@ -1,0 +1,104 @@
+KEEPSAKE — DEPLOY CHECKLIST (Hostinger file manager)
+=====================================================
+
+PHP 8.4 + MySQL, no build step on the server — mPDF is pre-installed into
+this bundle's vendor/ folder, so nothing needs Composer or SSH to run.
+
+Rebuild this bundle any time with:
+    composer install --no-dev --optimize-autoloader
+    php tools/build-deploy.php
+
+Long-form reasoning for every decision below lives in the repo, in
+PLAN.md and docs/SCHEMA.md. This file is the checklist.
+
+
+FILE LAYOUT
+-----------
+
+Upload the CONTENTS of this bundle (not the folder itself) into
+public_html/ or wherever your (sub)domain's document root points, e.g.
+public_html/keepsake/ :
+
+    .htaccess       the document-root shim. MUST be present (see below)
+    config.php      you create this in step 2
+    schema.sql
+    composer.json, composer.lock
+    lib/            includes lib/.htaccess
+    tools/          includes tools/.htaccess and make-hash.php
+    vendor/         mPDF, pre-installed — do NOT delete this to "clean up"
+    public/         the app's public files, including public/uploads/
+
+  >> Turn on SHOW HIDDEN FILES before and after uploading, in Hostinger's
+     file manager (usually a toggle or a "..." menu option). There are
+     THREE .htaccess files: ./  lib/  tools/ . Miss one and the site
+     still works perfectly while schema.sql or config.php is downloadable.
+  >> If hPanel lets you set this (sub)domain's document root directly to
+     .../keepsake/public, do that instead of using the shim — stronger,
+     because it doesn't depend on any Apache module being enabled. Read
+     the comment at the top of .htaccess for the tradeoff either way.
+  >> Delete Hostinger's default index.html placeholder if present — it
+     will otherwise be served instead of the app.
+
+
+1. DATABASE
+-----------
+
+  [ ] hPanel -> Databases -> create database + user
+      >> Hostinger prefixes both with your account id: u123456_keepsake
+  [ ] hPanel -> phpMyAdmin -> Import -> schema.sql
+      Creates all tables, seeds nothing (no default content). Every table
+      uses CREATE TABLE IF NOT EXISTS, so re-importing a later schema.sql
+      after an update is always safe.
+
+
+2. CONFIG
+---------
+
+  [ ] Rename config.example.php -> config.php
+  [ ] Fill the db block. Host stays 'localhost'
+  [ ] php tools/make-hash.php -> paste the printed hash as 'password_hash'
+      >> DO THIS BEFORE POINTING A DOMAIN AT THE APP. Left as CHANGE_ME
+         the gate FAILS OPEN and every screen is public — deliberate (an
+         app with no hash set can't authenticate anyone, so refusing
+         entry outright would lock YOU out with no way back in), but it
+         means an unconfigured deploy really is a public one. Set it
+         first.
+      >> Needs PHP on the command line. Hostinger's file manager has no
+         terminal — use hPanel's "SSH Access" if your plan includes it,
+         or run tools/make-hash.php locally (same PHP version, 8.4+) and
+         paste the result in; the hash doesn't need to be generated ON
+         the server, only the config value needs to end up there.
+  [ ] Optional: set 'base_url' to your real domain (e.g.
+      'https://keepsake.example.com') — nothing needs it yet, but a
+      future emailed link or the PDF export's own internal links will.
+  [ ] Optional: replace 'geocode.user_agent's placeholder email with a
+      real one before Phase 4's location-naming feature runs against the
+      live Nominatim service for the first time (see that block's own
+      comment in config.php for why).
+
+
+3. FIRST LOGIN
+---------------
+
+  [ ] Visit your domain. You should land on the login screen.
+  [ ] Log in with the password you hashed in step 2.
+  [ ] From "Add", capture one quote or upload one photo to confirm the
+      database write path works end to end.
+  [ ] From "Years" -> open that year -> "Book layouts" -> "Create book
+      layout" -> "Export PDF" to confirm mPDF (vendor/) is working. If
+      this 500s, the most likely cause is vendor/ not having uploaded
+      completely — check its file count against what build-deploy.php
+      printed when it built this bundle.
+
+
+4. ONGOING
+----------
+
+  [ ] Keep uploads/ backed up. public/uploads/original/ holds your only
+      full-resolution copies — schema.sql and a database export cover
+      everything else, but photo files are not stored in the database
+      and must be backed up separately (Hostinger's own backup feature,
+      or an occasional manual download of public/uploads/).
+  [ ] No cron, no scheduled task of any kind — every feature (grouping,
+      geocoding, layout generation, export) runs on-demand from a button
+      you click, never in the background. Nothing to configure here.

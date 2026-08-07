@@ -3,13 +3,21 @@
 .env
 .env.*
 
-# Composer (not used yet, but reserved in case a future phase adds a dependency)
+# Composer (Phase 7: mPDF). composer.lock IS committed, deliberately, unlike
+# a typical library's .gitignore — this is an application, not a package
+# others require, so pinning exact dependency versions is what makes
+# `composer install` reproducible instead of "whatever's newest today".
 /vendor/
-composer.lock
 
 # Uploaded content (photos etc. — introduced in Phase 2)
 /public/uploads/*
 !/public/uploads/.gitkeep
+
+# tools/build-deploy.php's own output — rebuild any time, never commit the
+# bundle itself (it embeds a 240MB-before-filtering vendor/ tree and has no
+# reason to live in git history).
+/keepsake-deploy/
+/keepsake-deploy.zip
 
 # OS / editor cruft
 .DS_Store
