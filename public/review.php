@@ -295,29 +295,84 @@ function render_entry_photo(array $p, array $eventGroups): string
     return ob_get_clean();
 }
 
-/** The photo-grid overview cell — read-mostly, the two flag toggles live. */
-function render_photo_cell(array $p): string
+/**
+ * The photo-grid overview cell — SAME element as the edit accordion, not a
+ * separate read-only preview linking to one elsewhere. Post-launch feedback
+ * (see PLAN.md): tapping a grid cell used to scroll to a duplicate
+ * accordion in a separate "Edit photos" list further down the page, which
+ * meant losing your place in the grid every time you edited one photo.
+ * This is a <details>, same as render_entry_photo(), same id/data
+ * attributes so every review.js handler that does .closest('.entry') still
+ * finds it — only the SUMMARY's layout differs (compact, image-forward,
+ * grid-cell-shaped when collapsed, vs. render_entry_photo()'s horizontal
+ * list row for Timeline/the "all types" grid). The edit form in the body
+ * is identical either way; there is exactly one markup for "edit a photo",
+ * per PLAN.md's original review-screen design goal — this only changes
+ * what the COLLAPSED state looks like in this one context.
+ */
+function render_photo_cell(array $p, array $eventGroups): string
 {
     ob_start();
     $id = (int) $p['id'];
+    $entryDate = substr((string) $p['captured_at'], 0, 10);
     $skip = (bool) $p['skip_for_book'];
     $full = (bool) $p['full_page'];
     $thumb = h((string) ($p['thumb_path'] ?: $p['original_path']));
-    $entryDate = substr((string) $p['captured_at'], 0, 10);
+    $original = h((string) $p['original_path']);
     ?>
-    <button type="button" class="photo-cell<?= $skip ? ' is-skipped' : '' ?><?= $full ? ' is-full-page' : '' ?>"
-            data-act="jump-to-photo" data-id="<?= $id ?>">
-      <img class="thumb" src="<?= $thumb ?>" alt="">
-      <span class="photo-cell-date"><?= h(fmt_date_human($entryDate)) ?></span>
-      <span class="photo-cell-bar">
-        <span class="pill pill-toggle<?= $skip ? ' is-plain' : '' ?>" data-act="toggle-skip" data-id="<?= $id ?>" data-value="<?= $skip ? '1' : '0' ?>">
-          <?= $skip ? 'Skipped' : 'In book' ?>
+    <details class="accordion entry photo-cell-details<?= $skip ? ' is-skipped' : '' ?><?= $full ? ' is-full-page' : '' ?>"
+              data-type="photo" data-id="<?= $id ?>" id="entry-photo-<?= $id ?>">
+      <summary class="photo-cell-head">
+        <img class="thumb" src="<?= $thumb ?>" alt="" data-role="thumb">
+        <span class="photo-cell-date accordion-count"><?= h(fmt_date_human($entryDate)) ?></span>
+        <span class="photo-cell-bar">
+          <button type="button" class="pill pill-toggle<?= $skip ? ' is-plain' : '' ?>" data-act="toggle-skip" data-id="<?= $id ?>" data-value="<?= $skip ? '1' : '0' ?>">
+            <?= $skip ? 'Skipped' : 'In book' ?>
+          </button>
+          <button type="button" class="pill pill-toggle<?= $full ? '' : ' is-plain' ?>" data-act="toggle-full" data-id="<?= $id ?>" data-value="<?= $full ? '1' : '0' ?>">
+            <?= $full ? 'Full page' : 'Full page: off' ?>
+          </button>
         </span>
-        <span class="pill pill-toggle<?= $full ? '' : ' is-plain' ?>" data-act="toggle-full" data-id="<?= $id ?>" data-value="<?= $full ? '1' : '0' ?>">
-          <?= $full ? 'Full page' : 'Full page: off' ?>
-        </span>
-      </span>
-    </button>
+      </summary>
+      <div class="accordion-body">
+        <form class="stack" data-role="entry-form">
+          <label class="field">
+            <span>Caption</span>
+            <textarea name="caption" rows="2"><?= h((string) ($p['caption'] ?? '')) ?></textarea>
+          </label>
+          <label class="field">
+            <span>Location</span>
+            <input type="text" name="location_text" value="<?= h((string) ($p['location_text'] ?? '')) ?>">
+          </label>
+          <label class="field">
+            <span>Date</span>
+            <input type="date" name="entry_date" value="<?= h($entryDate) ?>" required>
+          </label>
+          <label class="field">
+            <span>Event group</span>
+            <select name="event_group_id">
+              <option value="">— none —</option>
+              <?php foreach ($eventGroups as $g): ?>
+                <option value="<?= (int) $g['id'] ?>"<?= (int) ($p['event_group_id'] ?? 0) === (int) $g['id'] ? ' selected' : '' ?>>
+                  <?= h($g['name']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+
+          <div class="field">
+            <span>Crop</span>
+            <button type="button" class="btn-ghost" data-act="recrop" data-src="<?= $original ?>">Recrop</button>
+          </div>
+
+          <p class="field-err" data-role="error"></p>
+          <div class="row-between entry-actions">
+            <button type="button" class="btn-danger" data-act="delete">Delete</button>
+            <button type="submit" class="btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </details>
     <?php
     return ob_get_clean();
 }
@@ -431,11 +486,7 @@ function render_photo_cell(array $p): string
           <div class="empty"><p>No photos captured for <?= h((string) $year) ?> yet.</p></div>
         <?php else: ?>
           <div class="photo-grid" id="photo-grid">
-            <?php foreach ($photos as $p) { echo render_photo_cell($p); } ?>
-          </div>
-          <h2>Edit photos</h2>
-          <div id="entry-list">
-            <?php foreach ($photos as $p) { echo render_entry_photo($p, $groups); } ?>
+            <?php foreach ($photos as $p) { echo render_photo_cell($p, $groups); } ?>
           </div>
         <?php endif; ?>
 

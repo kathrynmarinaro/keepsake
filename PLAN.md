@@ -1222,3 +1222,60 @@ than fought.
   genuinely thorough — but a first real end-to-end run (upload a real photo
   batch, generate a real layout, drag a photo, export a real PDF, open it)
   is still worth doing before trusting this with 2020-2026's actual photos.
+
+## Post-launch fixes (first real usage)
+
+All eight phases were built and tested against a headless SQLite harness
+with no browser and no real MySQL — flagged as the single biggest
+remaining risk in Phase 8's own note above. This section records what
+that first real run actually turned up, since "verified" and "used for
+real" turned out to not be quite the same thing, twice now.
+
+**Round 1 — capture flow** (`public/capture.php`, `public/assets/capture.js`):
+1. No guidance on upload batch size — the upload is one long synchronous
+   HTTP request per batch, no queue, so a large batch risks a server-side
+   timeout that loses the whole thing. Added a UI hint recommending
+   10-15 photos per batch (informational only, not enforced).
+2. No indication the tab has to stay open during upload. Added a
+   `beforeunload` guard (native browser prompt) while an upload is in
+   flight, plus matching UI copy. **Chunked upload** (splitting one large
+   batch into several smaller sequential requests, so a dropped connection
+   only costs the current chunk) is documented as a future option in
+   `keepsake-brief.md` §8 — explicitly not built, only the hint/warning are.
+3. The caption/crop editing panel appeared to hang after the upload
+   progress bar hit 100%. Root cause: XHR's upload-progress event tracks
+   bytes SENT, not work done — it hits 100% the instant the browser
+   finishes transmitting, well before the server has read EXIF, made a
+   thumbnail and written a row for every photo in the batch (all
+   synchronous). Fixed by switching the status message to "Upload
+   complete — processing photos…" once the progress callback reports
+   `frac >= 1`, so the gap reads as ongoing work, not a freeze.
+4. Reordered the Add page: Photos first and open by default (was Quote)
+   — it's what actually gets added most.
+
+**Round 2 — review screen** (`public/review.php`, `public/assets/review.js`,
+`public/assets/styles.css`): tapping a photo in the Grid view's "at a
+glance" overview used to scroll down to and open a SEPARATE, duplicate
+edit accordion in an "Edit photos" list further down the page — losing
+your place in the grid every time you edited one photo. Root cause: Phase
+3 built two parallel representations of the same photo (`render_photo_cell()`,
+a read-mostly grid tile; `render_entry_photo()`, the real editable
+accordion) rather than one. Fixed by merging them: `render_photo_cell()`
+now IS the same kind of `<details>` accordion `render_entry_photo()` is —
+same id/data attributes, same edit form in the body — styled as a compact
+grid tile when collapsed (`.photo-cell-head`/`.photo-cell-date`/
+`.photo-cell-bar`) and spanning the full grid width when opened
+(`.photo-cell-details[open] { grid-column: 1 / -1; }`), so editing a photo
+expands it in place instead of jumping anywhere. The separate "Edit
+photos" list is gone; there is exactly one markup for "edit a photo" in
+every context now, matching the original Phase 3 design goal that Phase 3
+itself didn't quite reach for the Grid-view/Photo-filter case specifically.
+`jumpToPhoto()` and the duplicate-removal fallbacks in `saveEntry()`/
+`deleteEntry()`/`recrop()` (written for the two-parallel-elements world)
+are removed as genuinely dead code, not just unused — there is no longer
+a scenario where a photo has two DOM representations at once.
+
+Both rounds are the kind of gap `verify-*.php` cannot catch by
+construction (no browser exists in the build/test environment) — worth
+remembering as a category, not just these two fixed instances, the next
+time "all tests pass" is read as "this works."

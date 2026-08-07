@@ -102,10 +102,11 @@ async function saveEntry(details) {
   // with" rule swipe.js's own undo-restore path follows.
   const pageYearProjectId = Number(document.body.dataset.yearProjectId || 0);
   if (result.year_project_id && pageYearProjectId && result.year_project_id !== pageYearProjectId) {
+    // A photo's grid tile IS this same <details> in Grid view — one
+    // removal covers it. It used to also be a separate, always-present
+    // entry in a duplicate "Edit photos" list, which needed its own
+    // removal; that list is gone (see render_photo_cell()'s header).
     details.remove();
-    if (type === 'photo') {
-      document.querySelector(`.photo-cell[data-id="${id}"]`)?.remove();
-    }
     showSnackbar('Date changed — moved to a different year, off this page.');
     return;
   }
@@ -168,13 +169,9 @@ async function deleteEntry(details) {
     return;
   }
 
+  // In Grid view a photo's grid tile IS this <details> — one removal
+  // covers both what it looks like collapsed and its edit form.
   details.remove();
-  // A photo also has an overview cell in the photo grid (Grid view) — same
-  // id, a sibling section rather than a nested one, so it needs its own
-  // removal.
-  if (type === 'photo') {
-    document.querySelector(`.photo-cell[data-id="${id}"]`)?.remove();
-  }
   showSnackbar('Deleted.');
 }
 
@@ -183,9 +180,7 @@ async function deleteEntry(details) {
 /**
  * Flips skip_for_book/full_page instantly on click — no Save button, per
  * the exit criterion ("these need to visibly persist, not just save
- * silently"): both the grid cell and the matching accordion summary (they
- * can both be on screen at once in Grid view) update together, optimistic,
- * with a revert if the request fails.
+ * silently") — optimistic, with a revert if the request fails.
  */
 async function toggleFlag(el) {
   const field = el.dataset.act === 'toggle-skip' ? 'skip_for_book' : 'full_page';
@@ -204,8 +199,12 @@ async function toggleFlag(el) {
   showSnackbar(field === 'skip_for_book' ? (next ? 'Skipped.' : 'Back in the book.') : (next ? 'Marked full page.' : 'No longer full page.'));
 }
 
-/** Paints every element for this photo id/field pair — there can be up to
- *  two (grid cell + accordion summary) on screen at once. */
+/**
+ * Paints every element for this photo id/field pair: the toggle pill
+ * itself, plus — only in Grid view, where the collapsed tile's dimming/
+ * border IS the "at a glance" point of the feature (see .photo-grid's own
+ * header in styles.css) — the enclosing .photo-cell-details tile.
+ */
 function applyFlagState(id, field, value) {
   const act = field === 'skip_for_book' ? 'toggle-skip' : 'toggle-full';
   const onLabel = field === 'skip_for_book' ? 'Skipped' : 'Full page';
@@ -221,7 +220,7 @@ function applyFlagState(id, field, value) {
     el.classList.toggle('is-plain', isPlainWhenOn ? value : !value);
   }
 
-  const cell = document.querySelector(`.photo-cell[data-id="${id}"]`);
+  const cell = document.querySelector(`.photo-cell-details[data-id="${id}"]`);
   if (cell) {
     cell.classList.toggle(field === 'skip_for_book' ? 'is-skipped' : 'is-full-page', value);
   }
@@ -246,10 +245,11 @@ async function recrop(button) {
   }
 
   button.dataset.src = result.original_url;
+  // One thumbnail element either way now — Timeline's entry row and Grid
+  // view's tile are the same <details>, both with data-role="thumb" on
+  // their <img> (see render_entry_photo()/render_photo_cell()).
   const thumbImg = details.querySelector('[data-role="thumb"]');
   if (thumbImg) { thumbImg.src = result.thumb_url; }
-  const cellImg = document.querySelector(`.photo-cell[data-id="${id}"] img`);
-  if (cellImg) { cellImg.src = result.thumb_url; }
   showSnackbar('Cropped.');
 }
 
@@ -392,16 +392,6 @@ async function mergeGroups() {
   window.location.reload();
 }
 
-/* --------------------------------------------------------------- jump-to-photo */
-
-/** Grid view's overview cell -> scrolls to and opens the matching edit accordion. */
-function jumpToPhoto(id) {
-  const details = document.getElementById(`entry-photo-${id}`);
-  if (!details) { return; }
-  details.open = true;
-  details.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
 /* --------------------------------------------------------------------- init */
 
 document.addEventListener('submit', (event) => {
@@ -431,18 +421,15 @@ document.addEventListener('click', (event) => {
   switch (el.dataset.act) {
     case 'toggle-skip':
     case 'toggle-full':
-      // Nested inside a <summary> (or, in the grid overview, inside a
-      // <button>) — without this, the click's default action also toggles
-      // the parent <details> open/closed, or fires the outer cell's
-      // jump-to-photo. See this file's header on why nothing here needs
-      // stopPropagation as well: preventDefault alone cancels the details
-      // toggle, and returning after the switch's case stops this same
-      // handler from acting on the ancestor's data-act.
+      // Always nested inside a <summary> — Timeline's entry row and the
+      // photo grid's tile both use the same accordion shape now. Without
+      // this, the click's default action also toggles the parent <details>
+      // open/closed. Nothing here needs stopPropagation as well:
+      // preventDefault alone cancels the details toggle, and returning
+      // after the switch's case stops this same handler from acting on the
+      // ancestor's data-act.
       event.preventDefault();
       toggleFlag(el);
-      break;
-    case 'jump-to-photo':
-      jumpToPhoto(Number(el.dataset.id));
       break;
     case 'delete':
       event.preventDefault();

@@ -1306,44 +1306,65 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
  *
  * THE "at a glance" surface Phase 3's exit criteria called for: skip_for_book
  * and full_page have to be visible across many photos at once without
- * opening anything, which .accordion's one-at-a-time list can't show. Editing
- * any individual photo's other fields still happens in the "Edit photos"
- * list of accordions below this grid, reusing the SAME per-photo markup as
- * Timeline — this component is read-mostly, with just the two flag toggles
- * live.
+ * opening anything, which .accordion's one-at-a-time TIMELINE list can't
+ * show. Originally a read-only preview grid linking to a duplicate, fully
+ * editable accordion in a separate "Edit photos" list further down the
+ * page — post-launch feedback (PLAN.md) was that tapping a photo to edit it
+ * lost your place in the grid every time. Each cell below is now THE SAME
+ * <details> element render_entry_photo() renders in Timeline, not a link to
+ * one elsewhere — collapsed, it's this compact grid tile; opened, its own
+ * edit form expands right where the tile was.
+ *
+ * align-items: start keeps one cell opening from stretching every other
+ * cell in its row to match (grid rows default to equal-height siblings
+ * otherwise); the [open] rule below makes the opening cell span the full
+ * grid width first, since the edit form needs more room than 150px.
  */
 .photo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  align-items: start;
   gap: 12px;
   margin-bottom: 24px;
 }
-.photo-cell {
+.photo-cell-details {
   position: relative;
+  margin-top: 0;              /* .accordion's list-spacing default; the grid's own gap already spaces these */
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
   background: var(--surface);
+}
+.photo-cell-details[open] {
+  grid-column: 1 / -1;
+}
+.photo-cell-head {
+  display: block;
   cursor: pointer;
   padding: 0;
-  text-align: left;
-  display: block;
-  width: 100%;
+  list-style: none;
 }
-.photo-cell:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-.photo-cell .thumb {
+.photo-cell-head::-webkit-details-marker { display: none; }
+.photo-cell-head:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.photo-cell-head .thumb {
   aspect-ratio: 1;
   border-radius: 0;
+  width: 100%;
   transition: opacity 0.15s ease;
 }
 /* Skipped photos dim in place rather than disappearing from the grid — the
-   whole point of "at a glance" is seeing what's excluded, not hiding it. */
-.photo-cell.is-skipped .thumb { opacity: 0.35; }
+   whole point of "at a glance" is seeing what's excluded, not hiding it. An
+   OPEN skipped/full-page cell drops the visual treatment: it's spanning the
+   full row as an edit form at that point, not a thumbnail to read at a
+   glance, and a dimmed image behind a form someone's actively typing into
+   reads as broken rather than informative. */
+.photo-cell-details.is-skipped:not([open]) .thumb { opacity: 0.35; }
 /* Full-page photos get a visible border rather than a corner badge — reads
    at a glance across a full grid without needing to zoom in on text. */
-.photo-cell.is-full-page { border: 3px solid var(--teal); }
+.photo-cell-details.is-full-page:not([open]) { border: 3px solid var(--teal); }
 
 .photo-cell-date {
+  display: block;
   font-size: 0.72rem;
   color: var(--slate);
   padding: 4px 6px 0;
