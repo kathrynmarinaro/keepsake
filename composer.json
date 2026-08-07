@@ -1,0 +1,14 @@
+{
+    "name": "kathrynmarinaro/keepsake",
+    "description": "Keepsake — year-round capture app that compiles into an annually printed photo book.",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.4",
+        "mpdf/mpdf": "^8.2"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}
