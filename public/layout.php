@@ -291,6 +291,32 @@ function render_page(array $page): string
     </div>
   </div>
 
+  <!-- Phase 7 (brief §5.5): the one action the exit criterion asks for.
+       Always reads year_projects.active_book_layout_id — see
+       lib/pdfexport.php's header for why that's never "the newest version".
+       A plain GET link, not a JS-driven fetch(): the browser's own download
+       handling is simpler and more robust than reimplementing it, and GET
+       requests don't need api.js's CSRF header (require_same_origin() is a
+       no-op for GET). No cover photo picked yet doesn't block this — the
+       export itself fails soft on that (see lib/pdfexport.php). -->
+  <div class="card row-between" data-role="export-bar">
+    <div>
+      <strong>Export PDF</strong>
+      <div class="hint">
+        <?php if ($project['active_book_layout_id'] !== null): ?>
+          Print-ready PDF of the active layout — cover, title page, and every generated page.
+        <?php else: ?>
+          Generate a layout and mark one active ("Use this one") before exporting.
+        <?php endif; ?>
+      </div>
+    </div>
+    <?php if ($project['active_book_layout_id'] !== null): ?>
+      <a class="btn-primary" href="api/export.php?year=<?= h((string) $project['year']) ?>">Export PDF</a>
+    <?php else: ?>
+      <button class="btn-primary" type="button" disabled>Export PDF</button>
+    <?php endif; ?>
+  </div>
+
   <div class="card row-between" data-role="generate-bar" data-year-project="<?= (int) $project['id'] ?>">
     <div>
       <strong>Create book layout</strong>
