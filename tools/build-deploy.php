@@ -91,6 +91,25 @@ const SKIP_PREFIXES = array('verify-');
  * package's tests/ directory is never needed at runtime either. */
 const SKIP_DIR_NAMES = array('.git', '.github', 'tests', 'test', 'Tests');
 
+/* mPDF ships ttfonts/ as a ~90MB multi-script font pack (Arabic, CJK,
+ * Hebrew, Thai, dozens more) so it can typeset ANY language out of the
+ * box. lib/pdfexport.php only ever sets `font-family:sans-serif`, and
+ * every page type Keepsake renders is English — but mPDF's OWN internal
+ * defaults (SetDefaultFont(), resolved from its bundled mpdf.css before
+ * any app-level CSS runs) reach into the DejaVu family for more than just
+ * the plain sans variant — an earlier, narrower attempt at this filter
+ * (kept only DejaVuSans*.ttf) broke construction outright with "Cannot
+ * find TTF TrueType font file DejaVuSerifCondensed.ttf", caught by
+ * actually building and rendering a PDF with the trimmed bundle before
+ * shipping it, not by reasoning about mPDF's source alone. Keeping the
+ * WHOLE DejaVu family (prefix match, ~20 files, ~9MB) rather than
+ * enumerating exact filenames is the safe version of this trim: it
+ * survives mPDF pulling in a DejaVu variant this comment didn't predict,
+ * at the cost of a few extra MB instead of another silent breakage. The
+ * ~100 non-DejaVu files (Arabic/CJK/Hebrew/Thai/etc.) are still cut —
+ * they are the actual bulk of the 90MB and nothing here reaches them. */
+const KEPT_TTFONTS_PREFIX = 'DejaVu';
+
 /* Must all be present in the finished bundle or the build fails. Hiding
  * dotfiles is the file-manager default, so a missing one is invisible
  * until someone fetches /schema.sql or /config.php over HTTP and gets it. */
@@ -168,6 +187,10 @@ function main(): void
     if (!is_file($out . '/vendor/autoload.php')) {
         fail('vendor/autoload.php is missing — PDF export cannot work without it and there is no Composer on most shared hosts');
     }
+    $ttfontsKept = glob($out . '/vendor/mpdf/mpdf/ttfonts/' . KEPT_TTFONTS_PREFIX . '*.ttf') ?: array();
+    if (count($ttfontsKept) < 15) {
+        fail('vendor/mpdf/mpdf/ttfonts/ has suspiciously few DejaVu* files (' . count($ttfontsKept) . ') — the font-trimming filter may be broken');
+    }
 
     /* Hard guarantee, not just trust in the SKIP_DIR_NAMES filter above: a
      * stray .git anywhere in the bundle is the kind of thing worth failing
@@ -234,8 +257,13 @@ function copy_tree(string $from, string $to, string $prefix): array
         fail('could not read ' . $from);
     }
 
+    $inTtfonts = str_ends_with($prefix, '/ttfonts') || $prefix === 'ttfonts';
+
     foreach ($entries as $entry) {
         if ($entry === '.' || $entry === '..' || skipped($entry)) {
+            continue;
+        }
+        if ($inTtfonts && !str_starts_with($entry, KEPT_TTFONTS_PREFIX)) {
             continue;
         }
 
