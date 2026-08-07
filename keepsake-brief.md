@@ -196,3 +196,22 @@ Within an event group, the app further sub-groups photos by **day / close timing
   through only costs the current chunk — not a rewrite of the "no queue"
   decision itself, which was made for a different reason (nothing to defer
   processing for) and still holds regardless of how the transfer is split.
+- **Scrollable/paginated photo picker.** `public/assets/photo-picker.js`'s
+  `openPhotoPicker()` (used for a snapshot's hero photo — both the
+  quick-add form and the review-screen edit form — and for the book's
+  cover photo, `public/assets/layout.js`) only ever shows the 24
+  most-recently-uploaded photos (`lib/repo.php`'s `photos_recent()`,
+  hard-capped at 100 even if a caller asked for more), with no way to see
+  anything older. It's also NOT scoped to the year you're actually picking
+  for — `photos_recent()` queries across every year by upload time, so
+  picking a cover for an older year's book can be blocked entirely by
+  having since uploaded a batch for a newer one. Requested: let it scroll
+  through everything instead of a fixed recent slice. The real fix is
+  probably two changes together, not one: (1) `photos_recent()` (or a new
+  function alongside it) takes a `year_project_id` and paginates
+  (`LIMIT`/`OFFSET` or a keyset cursor on `id`) instead of a single capped
+  batch, and (2) `photo-picker.js`'s grid gets an infinite-scroll or
+  "load more" trigger and a new `public/api/photos-*.php` endpoint to page
+  through. Worth deciding at that point whether the picker should default
+  to the CALLER's year (the snapshot/cover being edited already has one)
+  rather than "everything, newest first."
