@@ -449,7 +449,7 @@ have the detail.
 - [x] Phase 4 — Event grouping & geocoding
 - [x] Phase 5 — Book layout engine
 - [x] Phase 6 — Page review UI
-- [ ] Phase 7 — PDF export
+- [x] Phase 7 — PDF export
 - [ ] Phase 8 — Polish & open-source readiness
 
 **Last updated**: 2026-08-06 (Phases 0-5 complete, one session. The entry below is Phase 2's; each later phase appends its own. Phase 2 complete, same session as Phase 0/1
@@ -881,3 +881,175 @@ layout tables — or Phase 8's polish pass (including the CSS consolidation
 and the empty-page gap above) if Kathryn would rather close out loose ends
 before export. Either is a valid next step per PLAN.md's own phase
 ordering; ask rather than assume which one.
+
+**Phase 7 complete (2026-08-06/07, same session as Phase 6 above).**
+`lib/pdfexport.php` (new) reads directly from `lib/repo.php`'s
+`book_layout_pages_with_content()` — exactly the shape hoped for — and
+never recomputes layout. `composer.json`/`vendor/` (gitignored, installs
+from `composer.lock`, also gitignored per this file's existing note) are
+this app's first Composer dependency, per this file's own architecture
+decision naming Phase 7 as when Composer would first be needed.
+
+**Library: mPDF.** Neither sibling repo (`personal-cms`, `inspiration`) uses
+a PDF library or Composer at all — `personal-cms/CLAUDE.md` says its
+vendored PHPMailer is deliberately "no Composer, no autoloader" — so there
+was nothing to match; this is the suite's first Composer usage, full stop.
+mPDF was picked over TCPDF because every page type here (a photo grid, a
+text card, a snapshot's two-column fact sheet) is naturally an HTML/CSS
+layout problem, and mPDF renders HTML directly rather than requiring
+per-element `Image()`/`Cell()` drawing calls; it's pure PHP with no external
+binary to shell out to, closer to this app's "no build step" philosophy
+than a wkhtmltopdf wrapper. TCPDF wasn't seriously in the running once that
+was clear.
+
+**Trim/bleed/safety-margin, verified against Lulu's and Mixam's actual
+current spec pages (2026-08-06), not assumed:**
+- **Trim: 8.5in x 8.5in** — the brief's own spec; both printers offer it as
+  a standard square softcover trim.
+- **Bleed: 0.125in on every edge — the two printers agree exactly.** Lulu's
+  own 8.5x8.5 interior template ships sized at 8.75in x 8.75in (Lulu Help
+  Center, "What is Full Bleed?",
+  https://help.lulu.com/en/support/solutions/articles/64000255584-what-is-full-bleed-;
+  Lulu Book Creation Guide,
+  https://assets.lulu.com/media/guides/en/lulu-book-creation-guide.pdf).
+  Mixam: "All print items... require a 0.125in bleed area outside your trim
+  line" (Mixam Support, "Full Bleed Printing Explained",
+  https://mixam.com/support/bleed), corroborated by Mixam's own digest-size
+  worked example (5.5x8.5 trim -> 5.75x8.75 file — the identical
+  0.125in-per-edge math).
+- **Safety margin: 0.5in, uniform — the one real spec disagreement this
+  phase had to reconcile.** Lulu wants a flat 0.5in from the trim edge
+  everywhere. Mixam publishes a smaller 0.25in "quiet area" for ordinary
+  content but a separate, larger 0.5in "gutter margin" specifically for the
+  bound/spine edge of a softcover interior page (Mixam Support, "Print File
+  Setup Guide", https://mixam.com/support/filesetup). This app renders one
+  page at a time with no per-edge gutter treatment, so it takes the larger,
+  uniform number: matches Lulu exactly, and is at least as conservative as
+  Mixam on every edge (more generous than its 0.25in quiet area, exactly
+  equal to its own 0.5in gutter number on the edge that matters most).
+  Flagged here explicitly since it's the one place "verify against both
+  services' spec sheets" turned up a real conflict rather than just a
+  number to confirm — worth Kathryn's eyes if she wants a tighter margin for
+  a specific printer later; it's one config value away
+  (`config.example.php`'s `export.safety_margin_in`).
+
+All three values are `config.example.php`'s new `'export'` block — never
+hardcoded — with the citations above inline as comments on each value.
+
+**Which layout gets exported: `year_projects.active_book_layout_id`,
+always** — confirmed against schema.sql's own comment on that column
+("most recent" and "the one I'm working from" are different facts) before
+writing a line of export code, per this phase's own instructions. Never
+"newest version," never a fresh `layout_generate()` call.
+`pdf_export_resolve_layout()` throws a plain `RuntimeException`
+(`'no_year_project'` / `'no_active_layout'`) for the two "nothing coherent
+to export" cases, the same house pattern `lib/imageproc.php` already uses —
+`public/api/export.php` catches it and maps to a `json_error()`.
+
+**Cover and title, built for the first time this phase** (schema.sql's own
+comment on `book_pages`: neither is a `book_pages` row) — read straight off
+`year_projects.cover_photo_id`/`subtitle`/`year` and prepended ahead of
+every generated page. Every `book_pages.page_type` gets its own renderer:
+`'photos'` (1-4 slots, a photo's own `caption` inline, a text-card slot
+mixed in per brief §4.3, grid shape chosen from slot count plus
+`lib/layout.php`'s own `layout_orientation()` — reused directly, not
+re-derived), `'text'` (a full-page quote/anecdote over the ~180-char
+threshold), `'snapshot'` (birthday age/height or school_year
+grade/school/teacher/favorite_color/dream_job/favorite_class, mirroring
+`public/layout.php`'s `render_snapshot_page()` field-for-field so the print
+matches what was already reviewed on screen — brief §2.3's real template
+fields, not just type/date).
+
+**Fail soft, three ways, all documented in `lib/pdfexport.php`'s own
+header:**
+- A photo file that can't be resolved on disk (moved, deleted, a stale row)
+  renders as a **visible labeled placeholder** instead of vanishing
+  silently — a missing photo in a print proof is exactly the kind of thing
+  Kathryn should notice before paying to print it, so this deliberately
+  does NOT hide the gap.
+- **No cover photo chosen yet still renders a real cover page** — a plain
+  background carrying just the year/subtitle, not a skipped page and not a
+  crash — so page numbering downstream never shifts depending on whether a
+  cover was picked yet. Choosing "placeholder" over "omit" was this phase's
+  own call, flagged here per the delegate instructions.
+- **A year whose active layout has zero `book_pages` still exports** — a
+  valid 2-page (cover + title) PDF, the honest continuation of what
+  `layout_generate()` already does for an empty year rather than a new
+  failure mode.
+
+**One mPDF quirk found and worked around, documented in
+`pdf_render_cover_html()`'s own header comment**: nesting two
+percentage-sized `position:absolute` children inside one
+`position:fixed` full-bleed wrapper makes mPDF 8.3.1 silently insert a
+phantom extra page — reproduced and isolated directly (a background-color
+div plus a second absolutely-positioned text overlay was enough to trigger
+it; a single absolute child, or two children in ordinary block flow, were
+not). The cover avoids `position:absolute` entirely: one fixed wrapper,
+ordinary document flow inside it, the photo/caption overlap done with a
+negative top margin instead. `tools/verify-export.php` asserts this shape
+directly (zero `position:absolute` anywhere in the cover's HTML) rather
+than just hoping the phantom page doesn't come back.
+
+**One deliberate simplification, flagged for Kathryn's eyes**: only the
+cover page bleeds a photo to the true physical page edge, matching how a
+printed book cover conventionally works. Every interior page — photo
+grids, text cards, snapshot templates — stays inside the configured safety
+margin using ordinary document flow rather than edge-to-edge bleed.
+Nothing in brief §5.5 requires interior bleed, and this keeps every page
+renderer simple and uniform against the page-count/dimension invariants
+`tools/verify-export.php` checks. Worth reconsidering later if Kathryn
+wants a more magazine-style edge-to-edge treatment on interior spreads —
+not decided unilaterally here.
+
+**The one action the exit criterion asks for**: `public/api/export.php?year=YYYY`
+(a plain GET, gated the same three ways as every other endpoint even though
+`require_same_origin()` is a no-op for GET) streams the PDF straight back
+with `Content-Disposition: attachment`. `public/layout.php` gets a new
+"Export PDF" card — a plain `<a href>` download link when the year has an
+active layout, a disabled `<button class="btn-primary" disabled>` (the
+stylesheet already styles `:disabled`) when it doesn't. **No new CSS
+file** — both reuse existing classes, so there's no fourth `capture.css`/
+`review.css`/`layout.css`-style gap to flag this time.
+
+**Testability, the one place `tools/verify-*.php`'s pattern doesn't fully
+apply** (no browser, no MySQL, and now no way to eyeball a rendered PDF
+either): `tools/verify-export.php` proves the pure/near-pure pieces
+directly (geometry math, missing-file fail-soft, the cover's
+single-fixed/zero-nested-absolute HTML shape, the text-length safety
+valve, which `book_layouts.id` gets resolved and when it refuses), then
+generates a real synthetic 2024 through `layout_generate()` — a birthday
+snapshot with a real hero photo, a school_year snapshot with no hero photo
+(the "No hero photo" placeholder path), an event group with a full-page
+and a skip_for_book photo, a short quote riding a photo page as a text
+card, a long anecdote on its own text page, one photo with a real
+embeddable JPEG fixture and several with none — exports it, and inspects
+the actual PDF bytes: starts with `%PDF-`, has the expected page count
+(cover + title + every `book_pages` row), and every `/MediaBox` in the file
+matches the configured trim+bleed size in points, via the same
+grep-parsing approach this phase's own instructions suggested. Also proves
+the two fail-soft edges called out by name: a year with zero `book_pages`
+still exports a valid 2-page PDF, and a year with no cover photo chosen
+still exports cleanly. First verify script that needs `UPLOAD_DIR`/
+`PUBLIC_DIR` and the first that writes a real file to disk — one small
+fixture JPEG under `public/uploads/original/` (gitignored, deleted via
+`register_shutdown_function` regardless of pass/fail).
+
+**Exit criteria verified**: the exported PDF opens cleanly (valid `%PDF-`
+header, correct page tree, real `startxref`/`%%EOF` trailer, checked by
+hand against a full real export in addition to the test script); dimensions
+and bleed verified against Lulu's and Mixam's actual spec pages (citations
+above and inline in `config.example.php`); a full year's book exports
+without manual intervention (one GET endpoint, tested end to end against a
+realistic synthetic year). All seven `verify-*.php` scripts —
+`verify-schema`, `verify-capture`, `verify-review`, `verify-grouping`,
+`verify-layout`, `verify-page-review`, and the new `verify-export` — pass
+clean together, unmodified except for `verify-export.php` itself being new.
+
+Next: Phase 8's polish and open-source-readiness pass — the CSS
+consolidation (`capture.css`/`review.css`/`layout.css` into `styles.css`,
+already instructed above), Phase 6's known empty-page gap, a secret-commit
+scan, tunable-value audit, and a top-level README. One suggestion for that
+pass or for Kathryn directly, not acted on here: whether the safety-margin
+reconciliation above (uniform 0.5in rather than a spine-aware gutter) is
+worth revisiting if a specific printer ever gets chosen as the primary
+target.
