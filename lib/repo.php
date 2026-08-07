@@ -1036,6 +1036,14 @@ function book_page_slot_swap(int $slotIdA, int $slotIdB): bool
  * or a source slot that no longer holds a photo all leave the layout exactly
  * as it was rather than throwing mid-drag.
  *
+ * PHASE 8: if moving the photo OUT drains the source page down to zero
+ * filled slots (no photos, no text card either — see
+ * book_page_delete_and_renumber()'s own header), that now-empty page is
+ * deleted and every later page in the same layout is renumbered to close the
+ * gap, rather than leaving the empty husk PLAN.md's Phase 6 note flagged as
+ * a known, deliberately-unfixed limitation. Same-page reordering can never
+ * trigger this — the slot's occupant never actually leaves that page.
+ *
  * @return bool
  */
 function book_page_slot_move(int $slotId, int $targetPageId, ?int $targetSlotNumber = null): bool
@@ -1060,9 +1068,11 @@ function book_page_slot_move(int $slotId, int $targetPageId, ?int $targetSlotNum
     )->fetchAll() as $row) {
         $occupied[(int) $row['slot_number']] = true;
     }
+    $sourcePageId = (int) $slot['book_page_id'];
+    $samePage     = $sourcePageId === $targetPageId;
     // Moving within the SAME page (reordering) doesn't count the slot's own
     // current position as "taken" — it's the one being vacated.
-    if ((int) $slot['book_page_id'] === $targetPageId) {
+    if ($samePage) {
         unset($occupied[(int) $slot['slot_number']]);
     }
 
@@ -1088,6 +1098,72 @@ function book_page_slot_move(int $slotId, int $targetPageId, ?int $targetSlotNum
         'UPDATE book_page_photos SET book_page_id = ?, slot_number = ? WHERE id = ?',
         array($targetPageId, $newSlotNumber, $slotId)
     );
+
+    if (!$samePage) {
+        book_page_delete_and_renumber($sourcePageId);
+    }
+
+    return true;
+}
+
+/**
+ * Phase 8 fix for the gap PLAN.md's Phase 6 note flagged and deliberately
+ * left unfixed under that session's time pressure: dragging the last photo
+ * off a page used to leave behind an empty page_type='photos' row (0 filled
+ * slots) rather than collapsing it out of the book.
+ *
+ * No-ops (returns false) unless $pageId currently has ZERO rows in
+ * book_page_photos — a page still carrying a lone text card (schema.sql:
+ * a photos page "may include ONE text-card slot mixed in among the
+ * photos") is not empty and is left exactly alone, same as it always was.
+ * Deliberately re-checks emptiness itself rather than trusting the caller,
+ * so this is safe to call unconditionally.
+ *
+ * Renumbering walks later pages in ASCENDING page_number order and updates
+ * one row at a time: each page's new number is exactly the number the row
+ * before it just vacated (the deleted page's own number, then each
+ * decremented page's old number), so book_pages.uniq_layout_page
+ * (book_layout_id, page_number) is never hit mid-renumber — there's no need
+ * for a temporary offset or a single batched UPDATE.
+ *
+ * Scoped to the page's own book_layout_id throughout, so this can no more
+ * reach another version or another year's pages than any other write path
+ * in this file (PLAN.md's year/version-isolation rule).
+ */
+function book_page_delete_and_renumber(int $pageId): bool
+{
+    $page = book_page_get($pageId);
+    if ($page === null) {
+        return false;
+    }
+
+    $filled = q(
+        'SELECT COUNT(*) AS n FROM book_page_photos WHERE book_page_id = ?',
+        array($pageId)
+    )->fetch();
+    if ((int) $filled['n'] !== 0) {
+        return false;
+    }
+
+    $layoutId   = (int) $page['book_layout_id'];
+    $pageNumber = (int) $page['page_number'];
+
+    q('DELETE FROM book_pages WHERE id = ?', array($pageId));
+
+    $later = q(
+        'SELECT id, page_number FROM book_pages
+          WHERE book_layout_id = ? AND page_number > ?
+          ORDER BY page_number',
+        array($layoutId, $pageNumber)
+    )->fetchAll();
+
+    foreach ($later as $row) {
+        q(
+            'UPDATE book_pages SET page_number = ? WHERE id = ?',
+            array((int) $row['page_number'] - 1, (int) $row['id'])
+        );
+    }
+
     return true;
 }
 

@@ -288,6 +288,18 @@ async function moveSlot(slotId, targetPageId) {
     return;
   }
 
+  /* Phase 8: emptying the source page down to zero filled slots deletes that
+     page server-side and renumbers everything after it (lib/repo.php's
+     book_page_slot_move()) — a structural change, not just "these two nodes
+     traded parents", so this reloads rather than patching the DOM, matching
+     every other structural action on this screen (generate/activate/reflow
+     above, and review.js's identical rule for delete/merge/split). */
+  if (result.page_deleted) {
+    showSnackbar('Moved — the emptied page was removed and the book renumbered.');
+    window.location.reload();
+    return;
+  }
+
   targetSlots.append(node);
   targetSlots.dataset.count = String(targetSlots.querySelectorAll('.ks-slot').length);
   if (sourceSlots) {

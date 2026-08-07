@@ -23,7 +23,13 @@
  *   3. Neither function duplicates or loses a photo anywhere in the layout
  *      — every photo present before a swap/move is still present exactly
  *      once afterward.
- *   4. year_project_update_subtitle()/year_project_set_cover_photo() are
+ *   4. Phase 8: book_page_slot_move() draining a page to zero filled slots
+ *      (no photos AND no text card) deletes that page and renumbers every
+ *      later page in the same layout, closing the gap PLAN.md's Phase 6 note
+ *      flagged as a known, deliberately-unfixed limitation. A page that still
+ *      holds a text card after its photo leaves is NOT deleted, and same-page
+ *      reordering never triggers this path at all.
+ *   5. year_project_update_subtitle()/year_project_set_cover_photo() are
  *      independent partial updates (public/api/year-projects-update.php's
  *      own header claims this) — setting one never touches the other.
  *
@@ -302,6 +308,107 @@ if ($slotsOnFullPage >= 4 && count($fillIds) > $capacity) {
 } else {
     echo "  skip (could not pack the target page to 4 slots with this synthetic year's photo count)\n";
 }
+
+/* ============================================ Phase 8: emptied-page gap === */
+
+echo "\nbook_page_slot_move(): draining a page's last photo deletes it and renumbers...\n";
+
+// A dedicated layout, built directly through the repo layer rather than
+// layout_generate() (whose exact page shapes aren't something this test
+// wants to depend on): full deterministic control over which page starts
+// with exactly one filled slot.
+$ypC = year_project_get_or_create('2022-03-01');
+$layoutC = book_layout_create($ypC);
+
+$photoLone   = make_photo('2022-03-01 09:00:00');
+$photoTargetA = make_photo('2022-03-01 09:05:00');
+$photoTargetB = make_photo('2022-03-01 09:06:00');
+$photoTail   = make_photo('2022-03-01 09:07:00');
+$photoMixed  = make_photo('2022-03-01 09:08:00');
+
+$quoteId = quote_create(array(
+    'quote_text'  => 'A short quote riding along a photo page.',
+    'who_said_it' => 'Emma',
+    'entry_date'  => '2022-03-01',
+));
+
+// Page 1: exactly one filled slot (the one being drained). Page 2: the move
+// TARGET. Page 3: a text page, to prove a non-'photos' page type also
+// renumbers correctly. Page 4: one more photo page, to prove renumbering
+// isn't a one-off single-decrement special case.
+$pageC1 = book_page_create($layoutC, 1, 'photos');
+book_page_slot_create($pageC1, 1, array('photo_id' => $photoLone));
+
+$pageC2 = book_page_create($layoutC, 2, 'photos');
+book_page_slot_create($pageC2, 1, array('photo_id' => $photoTargetA));
+book_page_slot_create($pageC2, 2, array('photo_id' => $photoTargetB));
+
+$pageC3 = book_page_create($layoutC, 3, 'text');
+book_page_slot_create($pageC3, 1, array('quote_id' => $quoteId));
+
+$pageC4 = book_page_create($layoutC, 4, 'photos');
+book_page_slot_create($pageC4, 1, array('photo_id' => $photoTail));
+
+// Page 5: a photo slot PLUS a text-card slot — moving the photo away must
+// leave the text card behind and must NOT delete this page, since "0 filled
+// slots" means zero of anything, not zero photos specifically.
+$quoteId2 = quote_create(array(
+    'quote_text'  => 'Stays behind on the mixed page.',
+    'who_said_it' => 'Kathryn',
+    'entry_date'  => '2022-03-01',
+));
+$pageC5 = book_page_create($layoutC, 5, 'photos');
+$slotC5Photo = book_page_slot_create($pageC5, 1, array('photo_id' => $photoMixed));
+book_page_slot_create($pageC5, 2, array('quote_id' => $quoteId2));
+
+$slotLone = null;
+foreach (book_pages_for_layout($layoutC)[0]['slots'] as $s) {
+    $slotLone = $s;
+}
+check('page 1 has exactly the one slot set up above', $slotLone !== null && (int) $slotLone['photo_id'] === $photoLone);
+
+$beforeIdsC = all_photo_ids(book_pages_for_layout($layoutC));
+$movedC = book_page_slot_move((int) $slotLone['id'], $pageC2);
+check('the drain-to-empty move itself reported success', $movedC);
+
+check('page 1 (now empty) was deleted', book_page_get($pageC1) === null);
+
+$pagesCAfter = book_pages_for_layout($layoutC);
+$byOldId = array();
+foreach ($pagesCAfter as $p) {
+    $byOldId[(int) $p['id']] = $p;
+}
+check('exactly 4 pages remain (5 minus the deleted one)', count($pagesCAfter) === 4);
+check('old page 2 renumbered down to page 1', (int) $byOldId[$pageC2]['page_number'] === 1);
+check('old page 3 (the TEXT page) renumbered down to page 2', (int) $byOldId[$pageC3]['page_number'] === 2);
+check('old page 4 renumbered down to page 3', (int) $byOldId[$pageC4]['page_number'] === 3);
+check('old page 5 (untouched by this move) renumbered down to page 4', (int) $byOldId[$pageC5]['page_number'] === 4);
+check('old page 3 kept its own page_type through the renumber', $byOldId[$pageC3]['page_type'] === 'text');
+check('the moved photo landed on old page 2, now with 3 filled slots', count($byOldId[$pageC2]['slots']) === 3);
+
+$afterIdsC = all_photo_ids($pagesCAfter);
+check('no photo was duplicated or lost by the drain-and-delete move', $beforeIdsC === $afterIdsC);
+
+echo "\nbook_page_slot_move(): a page with a surviving text card is NOT deleted...\n";
+
+$beforeCountC = count(book_pages_for_layout($layoutC));
+$targetForMixed = $byOldId[$pageC4]['id']; // old page 4, a plain photos page
+$movedMixed = book_page_slot_move((int) $slotC5Photo, (int) $targetForMixed);
+check('moving the mixed page\'s photo away reported success', $movedMixed);
+check('the mixed page (still holding its text card) was NOT deleted', book_page_get($pageC5) !== null);
+check('page count is unchanged — nothing was deleted this time', count(book_pages_for_layout($layoutC)) === $beforeCountC);
+
+echo "\nbook_page_slot_move(): same-page reordering never triggers the delete path...\n";
+
+$pageC2After = $byOldId[$pageC2];
+$reorderSlot = $pageC2After['slots'][0];
+$beforeCountReorder = count(book_pages_for_layout($layoutC));
+book_page_slot_move((int) $reorderSlot['id'], (int) $pageC2, 4); // move to an open slot_number on ITS OWN page
+check(
+    'reordering within the same page changes nothing about page count',
+    count(book_pages_for_layout($layoutC)) === $beforeCountReorder
+);
+check('the source page (self) still exists', book_page_get($pageC2) !== null);
 
 /* ================================================== title/cover updates === */
 

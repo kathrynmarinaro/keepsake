@@ -8,7 +8,18 @@
  * rules (photos only, destination must be a page_type='photos' page, same
  * layout only).
  *
- * -> { "moved": true, "slot_number": 3 }
+ * -> { "moved": true, "slot_number": 3, "page_deleted": false }
+ *
+ * page_deleted (Phase 8): true when this move drained the SOURCE page to
+ * zero filled slots, which book_page_slot_move() deletes and renumbers for
+ * automatically (see that function's own header). Determined here, not by
+ * changing that function's boolean return contract — book-page-slots-move.php
+ * is the only caller that needs to know, and every other caller (including
+ * tools/verify-page-review.php's === true/=== false checks) keeps working
+ * unmodified. public/assets/layout.js reloads instead of DOM-patching when
+ * this is true, since a page vanishing and everything after it renumbering is
+ * a structural change, not "these two nodes traded parents" — the same
+ * distinction this screen already draws for generate/activate/reflow.
  */
 
 declare(strict_types=1);
@@ -33,6 +44,9 @@ if (array_key_exists('slot_number', $body) && $body['slot_number'] !== null && $
     $targetSlotNumber = (int) $body['slot_number'];
 }
 
+$slotBefore   = book_page_slot_get($slotId);
+$sourcePageId = $slotBefore !== null ? (int) $slotBefore['book_page_id'] : null;
+
 $ok = book_page_slot_move($slotId, $targetPageId, $targetSlotNumber);
 if (!$ok) {
     // Fail soft: a full destination page, a stale page id, a slot that isn't
@@ -41,8 +55,13 @@ if (!$ok) {
     json_error('move_failed', 409, 'Could not move that photo there.');
 }
 
+$pageDeleted = $sourcePageId !== null
+    && $sourcePageId !== $targetPageId
+    && book_page_get($sourcePageId) === null;
+
 $slot = book_page_slot_get($slotId);
 json_out(array(
-    'moved'       => true,
-    'slot_number' => $slot !== null ? (int) $slot['slot_number'] : null,
+    'moved'        => true,
+    'slot_number'  => $slot !== null ? (int) $slot['slot_number'] : null,
+    'page_deleted' => $pageDeleted,
 ));
