@@ -4,6 +4,30 @@
  * Same palette and geometry as the sibling apps — this is the house system,
  * not a per-app choice. Change a token here only if it's changing in all of
  * them. Copied verbatim from the Workout Generator.
+ *
+ * ---------------------------------------------------------------------------
+ * PHASE 8 NOTE — this file is NO LONGER byte-identical to Personal CRM's copy,
+ * and that is expected, not a regression.
+ * ---------------------------------------------------------------------------
+ * Up through Phase 7, everything above this note stayed a verbatim copy of
+ * Personal CRM's `public/assets/styles.css` (itself a verbatim copy of
+ * Grocery's) — see PLAN.md's Suite Conventions. Three phases each needed a
+ * component class this house system had no sibling precedent for (a crop
+ * overlay, a photo grid, a book-page slot layout) and each, correctly per
+ * house convention at the time, added its own small scoped file rather than
+ * editing this one: `capture.css` (Phase 2), `review.css` (Phase 3),
+ * `layout.css` (Phase 5/6). Phase 8 folds all three into THIS file (their own
+ * sections are below, each still carrying its own header explaining what it's
+ * for) and deletes the separate files — Keepsake is the first app in the
+ * suite with photo/crop/layout needs, so this file now legitimately diverges
+ * from the siblings' copy. Whether the photo/crop/grid vocabulary below is
+ * worth backporting into `personal-cms`/`inspiration`'s shared house system is
+ * Kathryn's call, not made here — see PLAN.md's Phase 8 section and the
+ * session report that did this merge.
+ *
+ * Everything from the original design-tokens comment down to the "Keepsake:
+ * capture flow" heading below is still the untouched, siblings-shared
+ * portion of the file. Nothing in it was edited by this merge.
  */
 :root {
   --teal:      #41b7ab;
@@ -998,3 +1022,556 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
 @media (prefers-reduced-motion: reduce) {
   .snackbar { animation: none; }
 }
+
+
+/* =============================================================================
+ * Keepsake: capture flow (originally public/assets/capture.css, Phase 2 —
+ * folded in here by Phase 8's CSS consolidation, PLAN.md)
+ * =============================================================================
+ * WHY THIS SECTION EXISTS AS KEEPSAKE-SPECIFIC CSS, GIVEN THE HOUSE RULE
+ * "DON'T EDIT styles.css / DON'T ADD <style> OR INLINE style= — REPORT A
+ * MISSING COMPONENT INSTEAD":
+ * Up through Phase 7 this lived in its own file because Personal CRM (the
+ * app this stylesheet was copied from) has no photos, and neither does
+ * Grocery. The only sibling with an upload/crop UI is Inspiration Board, and
+ * ITS cropper rules live inside ITS OWN monolithic styles.css, which was
+ * never the file Keepsake copied — Keepsake copied Personal CRM's, "the
+ * newest of the suite," per that reconciliation pass. The result: Phase 2
+ * needed a component class of thing (an image crop overlay, a photo
+ * thumbnail, a recent-photos picker grid) that genuinely did not exist
+ * anywhere in the file Keepsake actually inherited, so it shipped as a new,
+ * separate file rather than editing this one — flagged as a gap in Phase 2's
+ * report, exactly as house convention asks. Phase 8 is where that gap gets
+ * resolved: folded into this file rather than left as a fourth (now third)
+ * separate stylesheet, per Kathryn's explicit instruction (PLAN.md, Phase 8).
+ *
+ * The .cropper* rules are ported near-verbatim from Inspiration Board's
+ * styles.css: crop.js is a verbatim port of that app's module, and its drag
+ * interaction depends on this exact positioning model (absolutely positioned
+ * children measured as fractions of a position:relative frame) — not just on
+ * matching colors.
+ */
+
+/* ============ Crop overlay — matches public/assets/crop.js exactly ============ */
+
+.cropper {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: rgba(20, 26, 30, 0.92);
+  padding-top: var(--safe-top);
+  touch-action: none;
+}
+
+.cropper-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+/* Sized in pixels by crop.js, not by CSS — see that file's own comment on
+   fit(): the frame must come out as exactly the painted image, because the
+   selection is measured as fractions of it. */
+.cropper-frame {
+  position: relative;
+  line-height: 0;
+}
+
+.cropper-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.cropper-sel {
+  position: absolute;
+  box-shadow: 0 0 0 9999px rgba(20, 26, 30, 0.55);
+  outline: 1px solid rgba(255, 255, 255, 0.9);
+  cursor: move;
+  touch-action: none;
+}
+
+.cropper-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to right,  transparent calc(33.33% - 0.5px), rgba(255,255,255,0.35) calc(33.33% - 0.5px) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px)),
+    linear-gradient(to right,  transparent calc(66.66% - 0.5px), rgba(255,255,255,0.35) calc(66.66% - 0.5px) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(33.33% - 0.5px), rgba(255,255,255,0.35) calc(33.33% - 0.5px) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(66.66% - 0.5px), rgba(255,255,255,0.35) calc(66.66% - 0.5px) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px));
+}
+
+.cropper-handle {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  touch-action: none;
+}
+.cropper-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 14px; height: 14px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+}
+.cropper-handle.is-nw { top: -22px;    left: -22px;  cursor: nwse-resize; }
+.cropper-handle.is-ne { top: -22px;    right: -22px; cursor: nesw-resize; }
+.cropper-handle.is-sw { bottom: -22px; left: -22px;  cursor: nesw-resize; }
+.cropper-handle.is-se { bottom: -22px; right: -22px; cursor: nwse-resize; }
+
+.cropper-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px calc(12px + var(--safe-bottom));
+  background: rgba(20, 26, 30, 0.92);
+}
+.cropper-bar .link-btn { color: #fff; }
+.cropper-bar .btn-primary,
+.cropper-bar .btn-ghost { width: auto; }
+.cropper-bar .btn-primary { margin-left: auto; }
+.cropper-bar .btn-ghost { color: #fff; border-color: rgba(255,255,255,0.4); }
+
+.cropper-size {
+  color: rgba(255,255,255,0.75);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* ============ Photo thumbnails ============
+ *
+ * The base stylesheet has no image-display primitive at all (no sibling
+ * before Inspiration Board ever needed one, and Inspiration's own img sizing
+ * lives next to its WebGL canvas code, not as a reusable class). Used for the
+ * batch step-through's preview, the recent-photos picker grid below, and
+ * every other place this app shows a photo thumbnail (review.php's grid,
+ * layout.php's page slots).
+ */
+.thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  background: var(--teal-tint);
+  object-fit: cover;
+}
+
+/* ============ Recent-photos picker (photo-picker.js) ============
+ *
+ * A scrollable grid inside a .sheet-panel — used both by the quick-add
+ * quote/anecdote "attach to a photo" option (brief §2.5) and a snapshot's
+ * hero-photo selector (brief §2.3). Deliberately reuses .sheet/.sheet-panel/
+ * .sheet-cancel from above rather than duplicating that chrome; only the grid
+ * itself is new.
+ */
+.photopicker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.photopicker-item {
+  position: relative;
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  padding: 0;
+  background: none;
+  line-height: 0;
+  aspect-ratio: 1;
+  overflow: hidden;
+}
+.photopicker-item .thumb {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+}
+.photopicker-item.is-selected { border-color: var(--teal); }
+
+/* ============ Batch step-through (photo-batch.js) ============
+ *
+ * The step card itself is built from .card/.field/.btn-primary/.btn-ghost/
+ * .pill (all above) — no new classes needed for those. This is only the
+ * preview image's fixed-height stage, so a portrait and a landscape photo in
+ * the same batch don't make the card jump size between steps.
+ */
+.batch-stage {
+  max-height: 46vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--teal-tint);
+  margin-bottom: 14px;
+}
+.batch-stage .thumb {
+  width: auto;
+  max-width: 100%;
+  max-height: 46vh;
+  border-radius: var(--radius);
+}
+
+/* The batch panel is shown inside the same full-screen dark overlay chrome
+ * as crop.js's .cropper (see photo-batch.js), but unlike the cropper's own
+ * single centered frame, this content can be taller than the viewport (a
+ * preview image plus three fields plus nav) — so it gets its own scrolling
+ * wrapper instead of reusing .cropper-stage's grid/place-items layout, which
+ * has no scroll behavior and isn't crop.js's to change.
+ */
+.batch-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+.batch-panel { max-width: var(--maxw); margin: 0 auto; }
+.batch-panel .field { margin-top: 12px; }
+.batch-panel .btn-ghost { width: auto; margin-bottom: 4px; }
+
+
+/* =============================================================================
+ * Keepsake: desktop review/browse screen (originally public/assets/review.css,
+ * Phase 3 — folded in here by Phase 8's CSS consolidation, PLAN.md)
+ * =============================================================================
+ * Same reasoning as the capture-flow section above: no sibling before
+ * Keepsake ever needed a photo grid, an at-a-glance inclusion/exclusion
+ * toggle, or a merge/split event-group list, so Phase 3 shipped these as a
+ * new, separate file rather than editing this one. Folded in by Phase 8.
+ * Every existing house primitive that DOES cover part of public/review.php is
+ * reused as-is and gets no rule here: .card, .pill/.pill.is-plain (view tabs,
+ * type filters, and the skip_for_book/full_page state pills all reuse it
+ * directly), .accordion (every entry's expand-to-edit panel), .cat-group/
+ * .cat-head/.cat-count (the timeline's month headings), .field,
+ * .btn-primary/.btn-danger/.btn-ghost, .list/.list-row (event-group rows),
+ * and .sr-only.
+ */
+
+/* ============ Entry edit forms (every accordion body in review.php) ============
+ *
+ * .btn-primary/.btn-secondary/.btn-danger are width:100% by default above (a
+ * form's only button, stacked). An entry's edit form has TWO side by side —
+ * Delete and Save — and needs them sized to their labels in a row instead,
+ * the same override the capture-flow section above applies to .cropper-bar's
+ * buttons for the identical reason.
+ */
+.entry-actions {
+  margin-top: 4px;
+}
+.entry-actions .btn-primary,
+.entry-actions .btn-danger { width: auto; }
+
+/* The small thumbnail + pills line inside a photo entry's <summary>, and the
+ * quiet flag pills that ride along with it — reused from Timeline's mixed
+ * entry list and Grid view's "Edit photos" list below the photo-grid
+ * overview (see .photo-grid below for the overview itself).
+ */
+.entry-summary-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex: none;
+  background: var(--teal-tint);
+}
+.entry-summary-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
+/* Toggle pills need a real button reset — .pill is written for a <span>,
+   and a <button class="pill"> without this inherits the browser's default
+   button chrome (border, background) underneath it. */
+.pill-toggle {
+  border: 0;
+  cursor: pointer;
+  flex: none;
+}
+
+/* ============ Photo grid overview (Grid view, filtered to Photo) ============
+ *
+ * THE "at a glance" surface Phase 3's exit criteria called for: skip_for_book
+ * and full_page have to be visible across many photos at once without
+ * opening anything, which .accordion's one-at-a-time list can't show. Editing
+ * any individual photo's other fields still happens in the "Edit photos"
+ * list of accordions below this grid, reusing the SAME per-photo markup as
+ * Timeline — this component is read-mostly, with just the two flag toggles
+ * live.
+ */
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.photo-cell {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  display: block;
+  width: 100%;
+}
+.photo-cell:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.photo-cell .thumb {
+  aspect-ratio: 1;
+  border-radius: 0;
+  transition: opacity 0.15s ease;
+}
+/* Skipped photos dim in place rather than disappearing from the grid — the
+   whole point of "at a glance" is seeing what's excluded, not hiding it. */
+.photo-cell.is-skipped .thumb { opacity: 0.35; }
+/* Full-page photos get a visible border rather than a corner badge — reads
+   at a glance across a full grid without needing to zoom in on text. */
+.photo-cell.is-full-page { border: 3px solid var(--teal); }
+
+.photo-cell-date {
+  font-size: 0.72rem;
+  color: var(--slate);
+  padding: 4px 6px 0;
+}
+
+.photo-cell-bar {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+}
+.photo-cell-bar .pill-toggle { font-size: 0.7rem; padding: 2px 8px; }
+
+/* ============ View tabs / type filter row ============
+ *
+ * Both are the same idiom: plain links styled as .pill/.pill.is-plain
+ * (filled = active), just with a little breathing room above/below that a
+ * bare .row doesn't carry.
+ */
+.view-tabs { margin: 18px 0; }
+.type-filter-row { margin-bottom: 18px; }
+
+/* ============ Event-group review (Groups view) ============ */
+
+/* The group name's tap-to-edit line (inline-edit.js) reuses .list/.list-row
+   purely for its .row-text hook — it isn't really a list of many rows here,
+   just one, so the list's own border/clipping is switched off. */
+.group-name-list,
+.group-name-list .list-row { border: 0; }
+
+.merge-checkbox { width: 20px; height: 20px; margin: 0; }
+
+/* Same width:100%-on-a-flex-item override as .entry-actions above, for the
+   Ungroup button sitting next to the group's name/date/checkbox. */
+.group-row-actions .btn-danger { width: auto; }
+
+.group-row { padding: 14px; }
+.group-row + .group-row { margin-top: 10px; }
+.group-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 6px;
+  margin: 10px 0;
+}
+.group-photos label {
+  position: relative;
+  display: block;
+  line-height: 0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.group-photos .thumb { aspect-ratio: 1; border-radius: 6px; }
+.group-photos input[type="checkbox"] {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+
+
+/* =============================================================================
+ * Keepsake: book layout screen (originally public/assets/layout.css, Phase
+ * 5/6 — folded in here by Phase 8's CSS consolidation, PLAN.md)
+ * =============================================================================
+ * Same reasoning, and the same precedent, as the two sections above:
+ * no sibling app has ever rendered a book page's slots, so Phase 5 shipped a
+ * small separate file rather than editing this one. Folded in by Phase 8.
+ * Everything already covered by a house primitive gets no rule here and is
+ * used as-is: .card (every page and every version row), .pill/.pill.is-plain
+ * (page type, "active", the quote/anecdote tag), .cat-head/.cat-count (the
+ * two section headings), .row/.row-between, .stack, .hint, .empty,
+ * .btn-primary/.btn-secondary/.btn-ghost/.link-btn, .list/.list-row (title
+ * and subtitle rows), and .thumb (the capture-flow section's photo
+ * primitive, reused exactly as review.php and layout.php both reuse it).
+ *
+ * PHASE 8 FIX, not just a straight copy — flagged explicitly rather than
+ * folded in silently: Phase 5's original page-slot markup used plain
+ * `.book-pages`/`.page-slots`/`.slot`/`.slot-photo`/`.slot-caption`/
+ * `.slot-snapshot` class names. Phase 6 rebuilt public/layout.php's page
+ * rendering into a real spread-by-spread view and renamed every one of those
+ * to a `ks-`-prefixed name (`.ks-book`/`.ks-spread`/`.ks-page`/`.ks-slots`/
+ * `.ks-slot`/`.ks-slot-photo`/`.ks-slot-text`, plus brand-new snapshot/cover
+ * classes that never existed under the old names at all:
+ * `.ks-snapshot*`/`.ks-cover-*`) — but never added CSS rules for any of the
+ * new names, and its own session note (PLAN.md, Phase 6) said CSS was
+ * "correctly NOT touched," which was true of this FILE but left the new
+ * markup with zero layout styling underneath the renamed classes. Confirmed
+ * by grepping every one of the old names against `public/*.php` and
+ * `public/assets/*.js`: none of `.book-pages`/`.page-slots`/`.slot` (exact)/
+ * `.slot-photo` (exact)/`.slot-caption`/`.slot-text` (exact)/`.slot-snapshot`
+ * appear in any current markup or script — they were already fully dead
+ * before this phase touched anything. Rather than carry that dead CSS forward
+ * under a "don't drop anything" reading of the merge instruction, they are
+ * replaced below with real rules under the names Phase 6's markup actually
+ * uses, restoring the spread/grid rendering that section's own header
+ * describes but which had no CSS behind it. `.version-row`/`.is-open`/
+ * `.version-actions` — the two Phase 5 classes Phase 6 kept using verbatim —
+ * are carried forward unchanged.
+ */
+
+/* The version being inspected, marked in the list above the pages. */
+.version-row.is-open { border-color: var(--teal); }
+
+/* Same width:100%-on-a-flex-item override the capture-flow and review
+   sections above already apply for the identical reason: buttons above are
+   width:100% by default for a stacked form, and this one sits in a row
+   beside a link. */
+.version-actions .btn-secondary { width: auto; }
+
+/* ============ The page-by-page spread view (public/layout.php, Phase 6) ============
+ *
+ * One column of spreads; each spread holds up to two page cards side by side
+ * on a wide viewport and stacks on a narrow one — "spread" being the
+ * printing term for two facing pages, matching how a real book is read.
+ */
+.ks-book {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+}
+.ks-spread {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.ks-page {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.ks-page-head { margin-bottom: 10px; }
+.ks-page-actions { gap: 8px; }
+
+/* The photo/text grid inside one page: 1-4 slots side by side, wrapping —
+   the same flex-wrap idiom Phase 5's .page-slots used, carried forward under
+   the ks- prefix Phase 6 renamed everything to (see this section's header).
+   A lone slot (a "full page" photo, or a standalone text card riding a
+   photos page with nothing else on it) takes the full width instead of
+   sitting cramped at 140px. */
+.ks-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ks-slots[data-count="1"] .ks-slot { flex-basis: 100%; }
+.ks-slot {
+  flex: 1 1 140px;
+  min-width: 120px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: var(--surface);
+}
+.ks-slot-photo { cursor: grab; }
+.ks-slot-photo img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+.ks-slot-photo figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+
+/* A text card, deliberately looking different from a photo slot — that
+   difference is the thing being checked when reading this screen. A
+   standalone one (a page_type='text' page, over the ~180-char threshold) has
+   no siblings to wrap alongside, so it just needs its own breathing room. */
+.ks-slot-text { background: var(--teal-tint); }
+.ks-slot-text p { margin: 6px 0; font-size: 0.85rem; }
+.ks-slot-text.is-standalone { margin-top: 4px; }
+
+/* Drag-and-drop feedback (layout.js's native HTML5 drag events — see that
+   file's header for why swap vs. move is decided by which selector a drop
+   target matches first). */
+.ks-slot-photo.is-dragging { opacity: 0.4; }
+.ks-slot.is-drop-target,
+.ks-page.is-drop-target { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+/* ============ Snapshot page (brief §2.3) ============
+ *
+ * A fixed hero photo + fact list + notes, the same template shape every
+ * year so birthday pages read like each other year to year, and school-year
+ * pages read like each other year to year.
+ */
+.ks-snapshot { display: flex; flex-direction: column; gap: 10px; }
+.ks-snapshot-hero {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: cover;
+  border-radius: var(--radius);
+}
+.ks-snapshot-body { display: flex; flex-direction: column; gap: 6px; }
+.ks-snapshot-facts {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+}
+.ks-snapshot-notes { font-size: 0.85rem; color: var(--ink); }
+
+/* ============ Cover-photo picker (brief §4.6, "Book title & cover" card) ============ */
+.ks-cover-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.ks-cover-thumb {
+  width: 72px;
+  height: 72px;
+  flex: none;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: var(--teal-tint);
+}
+.ks-cover-empty { border: 1px dashed var(--border); }
+
+/* The title row's value — plain text, not tap-to-edit like the subtitle row
+   right below it (brief §4.6: the title always defaults to the year and
+   isn't editable), so it just needs to read as a value rather than a control. */
+.ks-static-text { font-weight: 400; }

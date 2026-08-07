@@ -228,8 +228,6 @@ function render_page(array $page): string
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Keepsake — Book layouts</title>
 <link rel="stylesheet" href="<?= asset('assets/styles.css') ?>">
-<link rel="stylesheet" href="<?= asset('assets/capture.css') ?>">
-<link rel="stylesheet" href="<?= asset('assets/layout.css') ?>">
 </head>
 <body>
 <main class="wrap">

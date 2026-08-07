@@ -330,8 +330,6 @@ function render_photo_cell(array $p): string
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Keepsake — <?= $project ? h((string) $project['year']) : 'Review' ?></title>
 <link rel="stylesheet" href="<?= asset('assets/styles.css') ?>">
-<link rel="stylesheet" href="<?= asset('assets/capture.css') ?>">
-<link rel="stylesheet" href="<?= asset('assets/review.css') ?>">
 </head>
 <body data-year-project-id="<?= $project ? (int) $project['id'] : '' ?>">
 <main class="wrap">

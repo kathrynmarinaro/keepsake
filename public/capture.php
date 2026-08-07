@@ -23,7 +23,6 @@ require_login_page();
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Keepsake — Add</title>
 <link rel="stylesheet" href="<?= asset('assets/styles.css') ?>">
-<link rel="stylesheet" href="<?= asset('assets/capture.css') ?>">
 </head>
 <body>
 <main class="wrap">
