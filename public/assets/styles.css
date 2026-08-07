@@ -1385,6 +1385,37 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
  */
 .view-tabs { margin: 18px 0; }
 .type-filter-row { margin-bottom: 18px; }
+/* "View:"/"Type:" — a plain label ahead of the pills, not a pill itself.
+   Bolder than .hint (which reads as muted secondary text, too quiet to
+   introduce a whole control row) but not as heavy as a pill's own weight. */
+.filter-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--slate);
+  flex-shrink: 0;
+}
+
+/* ============ Review screen header (back link, subtitle + Create Book) ===
+ *
+ * Post-launch feedback (PLAN.md): the year screen's header used to put
+ * "Book layouts" and "Years" on the right of the title, mirroring the
+ * dashboard's own back-link. Kathryn asked for a dedicated back link on
+ * the LEFT instead, and for the book-layout entry point (retitled "Create
+ * Book") to sit next to the subtitle field instead — the two are done
+ * together right before generating a layout, so the review screen's own
+ * subtitle-row reads as one small pre-flight checklist rather than two
+ * unrelated links.
+ */
+.back-row { margin-bottom: 10px; }
+.subtitle-row {
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.subtitle-row .list { flex: 1 1 auto; min-width: 0; }
+/* .link-btn is already a real tap target (min-height: var(--tap)) without
+   forcing full width the way .btn-secondary/.btn-primary do — the right
+   shape to sit beside the subtitle box rather than stack under it. */
+.create-book-btn { flex: none; white-space: nowrap; }
 
 /* ============ Event-group review (Groups view) ============ */
 

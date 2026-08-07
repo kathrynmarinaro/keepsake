@@ -388,17 +388,12 @@ function render_photo_cell(array $p, array $eventGroups): string
 </head>
 <body data-year-project-id="<?= $project ? (int) $project['id'] : '' ?>">
 <main class="wrap">
+  <div class="row back-row">
+    <a class="link-btn" href="index.php">&larr; Back</a>
+  </div>
+
   <header class="screen-head">
     <h1><?= $project ? h((string) $project['year']) : 'Review' ?></h1>
-    <div class="head-actions">
-      <?php if ($project !== null): ?>
-        <!-- Phase 5's generated layouts for this year. Review comes first —
-             skip-for-book, full-page flags and event groups all change what
-             the arrangement engine does — so this is a link out, not a tab. -->
-        <a class="link-btn" href="layout.php?year=<?= h((string) $project['year']) ?>">Book layouts</a>
-      <?php endif; ?>
-      <a class="link-btn" href="index.php">Years</a>
-    </div>
   </header>
 
   <?php if ($project === null): ?>
@@ -417,22 +412,31 @@ function render_photo_cell(array $p, array $eventGroups): string
       $groups    = event_groups_for_year($yearProjectId);
   ?>
 
-    <!-- Pre-layout subtitle (brief §4.6). Tap-to-edit via inline-edit.js,
-         same gesture as every other tap-to-edit field in the suite. -->
-    <ul class="list" id="subtitle-list">
-      <li class="list-row" data-id="<?= $yearProjectId ?>">
-        <div class="row-slide">
-          <div class="row-body">
-            <span class="row-sub">Book subtitle</span>
-            <span class="row-text<?= $project['subtitle'] ? '' : ' muted' ?>" data-role="subtitle"><?= h($project['subtitle'] ?: 'Tap to add a subtitle…') ?></span>
+    <div class="row-between subtitle-row">
+      <!-- Pre-layout subtitle (brief §4.6). Tap-to-edit via inline-edit.js,
+           same gesture as every other tap-to-edit field in the suite. -->
+      <ul class="list" id="subtitle-list">
+        <li class="list-row" data-id="<?= $yearProjectId ?>">
+          <div class="row-slide">
+            <div class="row-body">
+              <span class="row-sub">Book subtitle</span>
+              <span class="row-text<?= $project['subtitle'] ? '' : ' muted' ?>" data-role="subtitle"><?= h($project['subtitle'] ?: 'Tap to add a subtitle…') ?></span>
+            </div>
           </div>
-        </div>
-      </li>
-    </ul>
+        </li>
+      </ul>
+      <!-- Phase 5's generated layouts for this year. Review comes first —
+           skip-for-book, full-page flags and event groups all change what
+           the arrangement engine does — so this is a link out, not a tab.
+           Sits next to the subtitle deliberately: both are the two things
+           worth doing right before generating a layout (brief §4.6). -->
+      <a class="link-btn create-book-btn" href="layout.php?year=<?= h((string) $project['year']) ?>">Create Book</a>
+    </div>
 
     <div class="row view-tabs" aria-label="View" role="tablist">
-      <a class="pill<?= $view === 'timeline' ? '' : ' is-plain' ?>" href="review.php?year=<?= $year ?>&amp;view=timeline">Timeline</a>
+      <span class="filter-label">View:</span>
       <a class="pill<?= $view === 'grid' ? '' : ' is-plain' ?>" href="review.php?year=<?= $year ?>&amp;view=grid&amp;type=<?= h($type) ?>">Grid</a>
+      <a class="pill<?= $view === 'timeline' ? '' : ' is-plain' ?>" href="review.php?year=<?= $year ?>&amp;view=timeline">Timeline</a>
       <a class="pill<?= $view === 'groups' ? '' : ' is-plain' ?>" href="review.php?year=<?= $year ?>&amp;view=groups">Groups</a>
     </div>
 
@@ -476,8 +480,20 @@ function render_photo_cell(array $p, array $eventGroups): string
     <?php elseif ($view === 'grid'): ?>
 
       <div class="row type-filter-row" aria-label="Filter by type">
-        <?php foreach (array('all' => 'All', 'quote' => 'Quote', 'anecdote' => 'Anecdote', 'snapshot' => 'Snapshot', 'photo' => 'Photo') as $t => $label): ?>
-          <a class="pill<?= $type === $t ? '' : ' is-plain' ?>" href="review.php?year=<?= $year ?>&amp;view=grid&amp;type=<?= $t ?>"><?= $label ?></a>
+        <span class="filter-label">Type:</span>
+        <?php
+        // Photo's count is shown right on its own pill — the count Kathryn
+        // asked for, placed where she's already looking when she wants it
+        // rather than as a separate line elsewhere on the page.
+        $typeLabels = array(
+            'all'      => 'All',
+            'photo'    => 'Photo (' . count($photos) . ')',
+            'snapshot' => 'Snapshot',
+            'quote'    => 'Quote',
+            'anecdote' => 'Anecdote',
+        );
+        foreach ($typeLabels as $t => $label): ?>
+          <a class="pill<?= $type === $t ? '' : ' is-plain' ?>" href="review.php?year=<?= $year ?>&amp;view=grid&amp;type=<?= $t ?>"><?= h($label) ?></a>
         <?php endforeach; ?>
       </div>
 
