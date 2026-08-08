@@ -504,6 +504,52 @@ function imageproc_crop_photo(string $srcAbs, array $rect, array $sniff): array
     );
 }
 
+/**
+ * A cropped copy of $srcAbs written to a TEMP file — never touches
+ * public/uploads/, the photos table, or a thumbnail. For lib/pdfexport.php:
+ * a page's composition (lib/layout_render.php) always needs a real raster
+ * cropped to an exact target box before it can go in a PDF table cell (mPDF
+ * has no `object-fit` equivalent), whether that box comes from Kathryn's own
+ * manual crop_x/y/w/h or from layout_auto_crop_rect()'s auto-fit — this is
+ * the one place both paths end up.
+ *
+ * Reuses the exact same primitives imageproc_crop_photo() uses
+ * (imageproc_crop_imagick()/imageproc_crop_gd()) — same EXIF-orientation
+ * handling, same quality — just pointed at sys_get_temp_dir() instead of
+ * imageproc_upload_path('original', ...), so nothing about export leaves a
+ * trace in the app's own storage or database.
+ *
+ * @param array{x:float,y:float,w:float,h:float} $rect
+ * @return string|null absolute path to the temp JPEG, or null on failure
+ *   (caller falls back to the uncropped original — see pdf_photo_html()).
+ */
+function imageproc_crop_to_temp(string $srcAbs, array $rect): ?string
+{
+    $x = max(0.0, min(1.0, (float) $rect['x']));
+    $y = max(0.0, min(1.0, (float) $rect['y']));
+    $w = max(IMAGEPROC_MIN_CROP, min(1.0 - $x, (float) $rect['w']));
+    $h = max(IMAGEPROC_MIN_CROP, min(1.0 - $y, (float) $rect['h']));
+
+    $dir = sys_get_temp_dir() . '/keepsake-export-crops';
+    if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) {
+        return null;
+    }
+
+    $outAbs = $dir . '/' . bin2hex(random_bytes(8)) . '.jpg';
+
+    try {
+        // Same choice imageproc_crop_photo() makes, for the same reason.
+        class_exists('Imagick')
+            ? imageproc_crop_imagick($srcAbs, $outAbs, $x, $y, $w, $h)
+            : imageproc_crop_gd($srcAbs, $outAbs, $x, $y, $w, $h, $srcAbs);
+    } catch (Throwable $e) {
+        error_log('imageproc_crop_to_temp: ' . $e->getMessage());
+        return null;
+    }
+
+    return is_file($outAbs) ? $outAbs : null;
+}
+
 /** @return array{0:int,1:int} */
 function imageproc_crop_imagick(string $srcAbs, string $outAbs, float $x, float $y, float $w, float $h): array
 {

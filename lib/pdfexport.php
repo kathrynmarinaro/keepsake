@@ -52,6 +52,16 @@
  * Kathryn wants a more magazine-style bleed treatment on interior spreads —
  * flagged in the Phase 7 report, not decided unilaterally here.
  *
+ * POST-LAUNCH REWORK: a page_type='photos' page's SHAPE (which photo gets
+ * how much of the page) now comes from lib/layout_render.php's ONE
+ * composition tree, shared verbatim with public/layout.php's on-screen
+ * preview — see pdf_render_photos_page_html()'s own comment for why, and
+ * PLAN.md for the two on-screen mockups ("letterboxed" vs "asymmetric")
+ * Kathryn chose between before this was built. Every photo is pre-cropped
+ * to the exact box mPDF will draw it into (imageproc_crop_to_temp()) rather
+ * than relying on `object-fit`, which this library's <img> support doesn't
+ * reliably honor — see pdf_resolve_crop_rect().
+ *
  * FAIL SOFT, PER PLAN.md:
  *   - No cover photo picked (year_projects.cover_photo_id IS NULL): the
  *     cover page still renders — a plain background carrying just the year
@@ -93,6 +103,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/imageproc.php';
 require_once __DIR__ . '/layout.php';
+require_once __DIR__ . '/layout_render.php';
 
 /** See this file's header. Generous on purpose — never hit by real content. */
 const PDF_EXPORT_MAX_TEXT_CHARS = 4000;
@@ -128,6 +139,13 @@ function pdf_export_geometry(): array
         // own convention), so from the outer bleed edge — where mPDF's page
         // margins actually start counting from — it's bleed + safety.
         'content_margin_mm' => ($bleed + $safety) * $mmPerIn,
+        // The box a "photos" page's composition tree actually gets to work
+        // with — mPDF's own margin_left/right/top/bottom (pdf_export_build())
+        // are already set to content_margin_mm, so content written inside
+        // ordinary flow is automatically inset that far; this is that same
+        // box's size, for lib/layout_render.php's geometry math.
+        'content_width_mm'  => $pageWIn * $mmPerIn - (2 * ($bleed + $safety) * $mmPerIn),
+        'content_height_mm' => $pageHIn * $mmPerIn - (2 * ($bleed + $safety) * $mmPerIn),
     );
 }
 
@@ -264,11 +282,22 @@ function pdf_render_title_html(array $project): string
  * A page_type='photos' page: 1-4 slots, each either a photo (its own typed
  * caption shown inline — the ONLY captioning mechanism a photo has, per
  * schema.sql) or, per brief §4.3, one text-card slot mixed in among them.
- * Grid shape is chosen from slot count and orientation using
- * lib/layout.php's own layout_orientation() — reused, not re-derived — so
- * this doesn't invent a second opinion about what "portrait" means.
+ *
+ * POST-LAUNCH REWORK (PLAN.md): the old renderer picked from a small set of
+ * equal-cell table shapes keyed off a landscape count, then let each <img>
+ * flow at `width:100%` — no crop, but a mismatched pair still got squeezed
+ * into the same box, and it disagreed with what public/layout.php actually
+ * showed on screen (which back then force-cropped to a square — the two
+ * renderers had two different opinions about the same page). Both are now
+ * driven by lib/layout_render.php's ONE composition tree
+ * (layout_page_tree()) — the browser lets flexbox resolve it; mPDF has no
+ * flexbox, so pdf_render_tree_node() below resolves the same row/col weight
+ * math into nested <table>s with explicit millimeter widths/heights, and
+ * pre-crops each photo (imageproc_crop_to_temp()) to the EXACT box it lands
+ * in rather than leaning on any CSS-level object-fit, which mPDF's <img>
+ * support doesn't reliably honor.
  */
-function pdf_render_photos_page_html(array $page): string
+function pdf_render_photos_page_html(array $page, array $geo): string
 {
     $slots = $page['slots'];
     $n     = count($slots);
@@ -281,71 +310,152 @@ function pdf_render_photos_page_html(array $page): string
             . '(empty page)</div>';
     }
 
-    $cellHtml = array_map('pdf_render_slot_cell', $slots);
-
-    if ($n === 1) {
-        $rows = array(array($cellHtml[0]));
-    } elseif ($n === 2) {
-        $landscapeCount = 0;
-        foreach ($slots as $slot) {
-            if ($slot['photo_id'] !== null && layout_orientation($slot) === 'landscape') {
-                $landscapeCount++;
-            }
-        }
-        // Two landscapes read better stacked; anything else (portraits,
-        // mixed, a text card) reads better side by side.
-        $rows = $landscapeCount === 2
-            ? array(array($cellHtml[0]), array($cellHtml[1]))
-            : array($cellHtml);
-    } elseif ($n === 3) {
-        $landscapeCount = 0;
-        foreach ($slots as $slot) {
-            if ($slot['photo_id'] !== null && layout_orientation($slot) === 'landscape') {
-                $landscapeCount++;
-            }
-        }
-        $rows = $landscapeCount >= 2
-            ? array(array($cellHtml[0]), array($cellHtml[1]), array($cellHtml[2])) // stacked
-            : array($cellHtml); // 3 columns
-    } else { // 4
-        $rows = array(
-            array($cellHtml[0], $cellHtml[1]),
-            array($cellHtml[2], $cellHtml[3]),
-        );
+    $orientations = array();
+    foreach ($slots as $slot) {
+        $orientations[] = $slot['photo_id'] !== null ? layout_orientation($slot) : 'flex';
     }
 
-    $html = '<table style="width:100%;border-collapse:collapse;">';
-    foreach ($rows as $row) {
-        $colWidth = 100 / count($row);
-        $html .= '<tr>';
-        foreach ($row as $cell) {
-            $html .= '<td style="width:' . $colWidth . '%;padding:3mm;vertical-align:middle;">' . $cell . '</td>';
-        }
-        $html .= '</tr>';
-    }
-    $html .= '</table>';
+    $mirror = ((int) $page['page_number']) % 2 === 0;
+    $tree   = layout_page_tree($orientations, $mirror);
 
-    return $html;
+    return pdf_render_tree_node($tree, $slots, (float) $geo['content_width_mm'], (float) $geo['content_height_mm']);
 }
 
-/** One slot's cell content — a photo (with inline caption) or a text card. */
-function pdf_render_slot_cell(array $slot): string
+/**
+ * Recursively resolve one composition-tree node into HTML sized to exactly
+ * $wMm x $hMm — a leaf becomes one slot's content at that size; a split
+ * becomes a nested <table> whose columns (row split) or rows (col split) are
+ * explicit millimeter widths/heights in the children's weight ratio (the
+ * same "row: proportional to aspect, col: proportional to 1/aspect" rule
+ * lib/layout_render.php's header documents — every node already carries its
+ * own precomputed 'aspect', so this doesn't recompute the table).
+ *
+ * A small fixed gap (PDF_RENDER_GAP_MM) between cells stands in for CSS
+ * flexbox's `gap` — mm here since this is the one renderer with no CSS gap
+ * property to lean on.
+ */
+const PDF_RENDER_GAP_MM = 3.0;
+
+function pdf_render_tree_node(array $node, array $slots, float $wMm, float $hMm): string
 {
-    if ($slot['photo_id'] !== null) {
-        $img = pdf_photo_html(
-            $slot,
-            'width:100%;',
-            'width:100%;height:40mm;border:0.5mm dashed #bbb;display:flex;'
-                . 'align-items:center;justify-content:center;color:#888;font-family:sans-serif;font-size:9pt;'
-        );
-        $caption = $slot['caption']
-            ? '<div style="font-size:9pt;font-family:sans-serif;margin-top:1.5mm;color:#333;">'
-                . pdf_esc(pdf_clip_text((string) $slot['caption'])) . '</div>'
-            : '';
-        return $img . $caption;
+    if (isset($node['leaf'])) {
+        $slot = $slots[$node['leaf']] ?? null;
+        if ($slot === null) {
+            return '';
+        }
+        return $slot['photo_id'] !== null
+            ? pdf_render_photo_cell_sized($slot, $wMm, $hMm)
+            : pdf_render_text_cell_sized($slot, $wMm, $hMm);
     }
 
-    return pdf_render_text_card_html($slot);
+    $weights = array();
+    foreach ($node['children'] as $child) {
+        $a         = (float) $child['aspect'];
+        $weights[] = $node['split'] === 'row' ? $a : (1.0 / max(0.0001, $a));
+    }
+    $total = array_sum($weights) ?: count($weights);
+    $count = count($node['children']);
+    $gaps  = PDF_RENDER_GAP_MM * max(0, $count - 1);
+
+    if ($node['split'] === 'row') {
+        $availW = max(1.0, $wMm - $gaps);
+        $html   = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>';
+        foreach ($node['children'] as $i => $child) {
+            $cw   = max(5.0, $availW * ($weights[$i] / $total));
+            $pad  = $i < $count - 1 ? PDF_RENDER_GAP_MM . 'mm' : '0';
+            $html .= '<td style="width:' . round($cw, 2) . 'mm;padding:0 ' . $pad . ' 0 0;vertical-align:top;">'
+                . pdf_render_tree_node($child, $slots, $cw, $hMm) . '</td>';
+        }
+        return $html . '</tr></table>';
+    }
+
+    $availH = max(1.0, $hMm - $gaps);
+    $html   = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">';
+    foreach ($node['children'] as $i => $child) {
+        $ch   = max(5.0, $availH * ($weights[$i] / $total));
+        $pad  = $i < $count - 1 ? PDF_RENDER_GAP_MM . 'mm' : '0';
+        $html .= '<tr><td style="height:' . round($ch, 2) . 'mm;padding:0 0 ' . $pad . ' 0;vertical-align:top;">'
+            . pdf_render_tree_node($child, $slots, $wMm, $ch) . '</td></tr>';
+    }
+    return $html . '</table>';
+}
+
+/**
+ * Which crop rect to cut a photo slot's ORIGINAL to before embedding it:
+ * Kathryn's manual override (book_page_photos.crop_x/y/w/h) if she's set
+ * one, else the auto-fit centered crop to whatever box this render actually
+ * gave the photo (lib/layout_render.php's layout_auto_crop_rect()) — always
+ * computed against the box mPDF will actually draw into, never a nominal
+ * role aspect, so a run of narrow columns on a busy page doesn't over-crop
+ * relative to what's really available.
+ */
+function pdf_resolve_crop_rect(array $slot, float $wMm, float $hMm): ?array
+{
+    if ($slot['crop_x'] !== null && $slot['crop_w'] !== null) {
+        return array(
+            'x' => (float) $slot['crop_x'], 'y' => (float) $slot['crop_y'],
+            'w' => (float) $slot['crop_w'], 'h' => (float) $slot['crop_h'],
+        );
+    }
+
+    $w = (int) ($slot['width'] ?? 0);
+    $h = (int) ($slot['height'] ?? 0);
+    if ($w <= 0 || $h <= 0 || $hMm <= 0) {
+        return null;
+    }
+    return layout_auto_crop_rect($w, $h, $wMm / $hMm);
+}
+
+/** A short run of text, matching public/layout.php's page_snippet() — this
+ *  file stays self-contained rather than requiring public/'s copy (see this
+ *  file's header on pdf_esc() for the same reasoning). */
+function pdf_snippet(string $text, int $len = 90): string
+{
+    $text = trim(preg_replace('/\s+/', ' ', $text) ?? $text);
+    return mb_strlen($text) > $len ? mb_substr($text, 0, $len - 1) . '…' : $text;
+}
+
+/**
+ * One photo slot, sized to EXACTLY $wMm x $hMm — a caption (if any) takes a
+ * small reserved band off the bottom rather than growing the cell, so a long
+ * caption can't push the row below it out of place; the image is pre-cropped
+ * to fill the remaining band exactly (pdf_resolve_crop_rect()), rather than
+ * leaning on `object-fit` — see this file's header on why.
+ */
+function pdf_render_photo_cell_sized(array $slot, float $wMm, float $hMm): string
+{
+    $hasCaption = !empty($slot['caption']);
+    $captionMm  = $hasCaption ? max(6.0, min(14.0, $hMm * 0.18)) : 0.0;
+    $imgHmm     = max(4.0, $hMm - $captionMm);
+
+    $srcAbs = pdf_resolve_photo_file($slot);
+    if ($srcAbs === null) {
+        $img = '<div style="width:100%;height:' . round($imgHmm, 2) . 'mm;border:0.5mm dashed #bbb;'
+            . 'display:table-cell;text-align:center;vertical-align:middle;color:#888;'
+            . 'font-family:sans-serif;font-size:9pt;">Photo not found on disk</div>';
+    } else {
+        $rect      = pdf_resolve_crop_rect($slot, $wMm, $imgHmm);
+        $croppedAbs = $rect !== null ? imageproc_crop_to_temp($srcAbs, $rect) : null;
+        $imgSrc     = $croppedAbs ?? $srcAbs;
+        $img = '<img src="' . pdf_esc($imgSrc) . '" style="width:100%;height:' . round($imgHmm, 2) . 'mm;display:block;">';
+    }
+
+    $caption = $hasCaption
+        ? '<div style="height:' . round($captionMm, 2) . 'mm;overflow:hidden;font-size:8pt;'
+            . 'font-family:sans-serif;color:#333;line-height:1.25;margin-top:1mm;">'
+            . pdf_esc(pdf_snippet((string) $slot['caption'])) . '</div>'
+        : '';
+
+    return $img . $caption;
+}
+
+/** A text-card slot sized to at most $wMm x $hMm — text reflows to fit
+ *  rather than needing an exact fill, so this just caps the box and lets
+ *  pdf_render_text_card_html() render as it always has. */
+function pdf_render_text_cell_sized(array $slot, float $wMm, float $hMm): string
+{
+    return '<div style="width:100%;max-height:' . round($hMm, 2) . 'mm;overflow:hidden;">'
+        . pdf_render_text_card_html($slot) . '</div>';
 }
 
 /** A quote/anecdote text card — riding along on a photo page (brief §4.3:
@@ -451,8 +561,9 @@ function pdf_render_snapshot_page_html(array $page): string
         . '</tr></table>';
 }
 
-/** One book_pages row, dispatched by page_type. */
-function pdf_render_page_html(array $page): string
+/** One book_pages row, dispatched by page_type. $geo only matters for
+ *  page_type='photos' — see pdf_render_photos_page_html(). */
+function pdf_render_page_html(array $page, array $geo): string
 {
     switch ($page['page_type']) {
         case 'snapshot':
@@ -460,7 +571,7 @@ function pdf_render_page_html(array $page): string
         case 'text':
             return pdf_render_text_page_html($page);
         default:
-            return pdf_render_photos_page_html($page);
+            return pdf_render_photos_page_html($page, $geo);
     }
 }
 
@@ -532,10 +643,16 @@ function pdf_export_build(int $yearProjectId): array
 
     $lastIndex = count($pages) - 1;
     foreach ($pages as $index => $page) {
-        $mpdf->WriteHTML(pdf_wrap_page(pdf_render_page_html($page), $index !== $lastIndex));
+        $mpdf->WriteHTML(pdf_wrap_page(pdf_render_page_html($page, $geo), $index !== $lastIndex));
     }
 
     $bytes = $mpdf->Output('', 'S');
+
+    // pdf_render_photo_cell_sized() -> imageproc_crop_to_temp() wrote one
+    // scratch JPEG per photo slot into this directory; mPDF has already read
+    // every one of them into $bytes by the time Output() returns, so nothing
+    // downstream needs them to survive this request.
+    pdf_cleanup_export_crops();
 
     $filename = 'Keepsake-' . $project['year'] . '.pdf';
 
@@ -545,6 +662,18 @@ function pdf_export_build(int $yearProjectId): array
         // cover + title + every book_pages row.
         'page_count'  => 2 + count($pages),
     );
+}
+
+/** Sweep imageproc_crop_to_temp()'s scratch directory after an export. Best
+ *  effort — a leftover file here is disk clutter, never a correctness
+ *  problem (each is randomly named, so nothing collides with the next
+ *  export), so a failed unlink is silently skipped rather than raised. */
+function pdf_cleanup_export_crops(): void
+{
+    $dir = sys_get_temp_dir() . '/keepsake-export-crops';
+    foreach (glob($dir . '/*.jpg') ?: array() as $file) {
+        @unlink($file);
+    }
 }
 
 /** page-break-after wrapper — $more is false only for the very last page in
