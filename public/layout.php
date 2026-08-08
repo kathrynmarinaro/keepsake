@@ -22,24 +22,34 @@
  *     uses for a snapshot's hero photo (brief: "same pattern ... not
  *     auto-selected").
  *   - A real spread-by-spread visual rendering of the selected version: pages
- *     paired two-up (a "spread"), photos shown as actual images at their own
- *     aspect ratio, a snapshot page rendered from its real template fields
- *     (not just its type/date the way Phase 5's preview showed it), and a
- *     text card visually distinct from a photo. Every "photos" page carries
- *     a "Reflow from here" button, wired to layout_reflow_from() (built and
- *     tested in Phase 5 — see that function's own doc comment for the exact
- *     rule, not re-derived here).
+ *     paired two-up (a "spread"), a snapshot page rendered from its real
+ *     template fields (not just its type/date the way Phase 5's preview
+ *     showed it), and a text card visually distinct from a photo. Every
+ *     "photos" page carries a "Reflow from here" button, wired to
+ *     layout_reflow_from() (built and tested in Phase 5 — see that
+ *     function's own doc comment for the exact rule, not re-derived here).
  *   - Drag-and-drop, in public/assets/layout.js: drop one photo directly onto
  *     another to SWAP them (book_page_slot_swap()); drop a photo onto a
  *     page's open background to MOVE it there (book_page_slot_move()). Both
  *     PHOTOS ONLY — see those functions' own comments in lib/repo.php for why
  *     text cards aren't drag targets in this build.
  *
+ * POST-LAUNCH REWORK (see PLAN.md): a "photos" page's slots no longer render
+ * in a flat row of equal-size boxes cropped to squares. render_page_canvas()
+ * builds lib/layout_render.php's composition tree from the page's CURRENT
+ * photos and walks it into nested flex divs sized to each photo's own
+ * orientation — a landscape gets a wide cell, a portrait a narrow one — so
+ * mismatched pairs stop fighting the grid instead of getting force-cropped
+ * to fit it. lib/pdfexport.php builds the SAME tree for the PDF, so the two
+ * can't drift apart. render_photo_slot() also carries the "Adjust crop"
+ * control for a slot's optional manual crop override.
+ *
  * NONE OF THIS IS BROWSER-TESTABLE IN THIS ENVIRONMENT (same constraint every
  * earlier phase has had — no browser, no MySQL). The repo-layer swap/move
- * functions are proven against the SQLite harness in
- * tools/verify-page-review.php; the drag gesture itself, the visual
- * appearance, and the picker UI were traced by hand, not clicked.
+ * functions, and the composition tree itself, are proven against the
+ * SQLite harness in tools/verify-page-review.php and
+ * tools/verify-layout-render.php; the drag gesture, the crop UI, and the
+ * visual appearance were traced by hand, not clicked.
  */
 
 declare(strict_types=1);
@@ -48,6 +58,7 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/repo.php';
 require_once __DIR__ . '/../lib/grouping.php';
 require_once __DIR__ . '/../lib/layout.php';
+require_once __DIR__ . '/../lib/layout_render.php';
 
 require_login_page();
 
@@ -141,19 +152,51 @@ function render_snapshot_page(array $page): string
     return ob_get_clean();
 }
 
-/** One photo slot — draggable, since photos are the only thing Phase 6's
- *  swap/move gestures act on (lib/repo.php's book_page_slot_swap()/_move()). */
-function render_photo_slot(array $slot): string
+/**
+ * One photo slot — draggable, since photos are the only thing Phase 6's
+ * swap/move gestures act on (lib/repo.php's book_page_slot_swap()/_move()).
+ *
+ * $flexStyle is this leaf's `flex: <weight> 0 0` from
+ * lib/layout_render.php's composition tree — see render_page_canvas() — so
+ * this slot claims exactly its own photo's proportional share of the page
+ * instead of an equal-sized cell.
+ *
+ * A slot with a manual crop override (book_page_photos.crop_x/y/w/h, set via
+ * the "Adjust crop" control) renders as a sized `background-image` instead
+ * of a plain `<img>` — lib/layout_render.php's layout_crop_css() header
+ * explains why `object-position` alone can't reproduce an arbitrary
+ * zoom+pan. Every OTHER slot (no override, the common case) stays a plain
+ * `<img>` with `object-fit: cover` — cheaper, and real `<img>` semantics.
+ */
+function render_photo_slot(array $slot, string $flexStyle = ''): string
 {
     ob_start();
+    $src     = (string) ($slot['thumb_path'] ?: $slot['original_path']);
+    $hasCrop = $slot['crop_x'] !== null && $slot['crop_w'] !== null;
     ?>
-    <figure class="ks-slot ks-slot-photo" draggable="true"
-            data-slot-id="<?= (int) $slot['id'] ?>" data-photo-id="<?= (int) $slot['photo_id'] ?>">
-      <img src="<?= h((string) ($slot['thumb_path'] ?: $slot['original_path'])) ?>"
-           <?php if ($slot['width'] && $slot['height']): ?>
-             width="<?= (int) $slot['width'] ?>" height="<?= (int) $slot['height'] ?>"
-           <?php endif; ?>
-           alt="" loading="lazy">
+    <figure class="ks-slot ks-slot-photo" draggable="true" style="<?= h($flexStyle) ?>"
+            data-slot-id="<?= (int) $slot['id'] ?>" data-photo-id="<?= (int) $slot['photo_id'] ?>"
+            data-original="<?= h((string) $slot['original_path']) ?>"
+            data-src="<?= h($src) ?>"
+            data-crop="<?= $hasCrop ? h((string) json_encode(array(
+                'x' => (float) $slot['crop_x'], 'y' => (float) $slot['crop_y'],
+                'w' => (float) $slot['crop_w'], 'h' => (float) $slot['crop_h'],
+            ))) : '' ?>">
+      <div class="ks-slot-photo-frame">
+        <?php if ($hasCrop):
+            $css = layout_crop_css(array(
+                'x' => (float) $slot['crop_x'], 'y' => (float) $slot['crop_y'],
+                'w' => (float) $slot['crop_w'], 'h' => (float) $slot['crop_h'],
+            ));
+        ?>
+          <div class="ks-slot-photo-bg"
+               style="background-image:url('<?= h($src) ?>');background-size:<?= h($css['size']) ?>;background-position:<?= h($css['position']) ?>;"></div>
+        <?php else: ?>
+          <img src="<?= h($src) ?>" alt="" loading="lazy">
+        <?php endif; ?>
+        <button type="button" class="ks-slot-crop-btn" data-act="adjust-crop"
+                data-slot-id="<?= (int) $slot['id'] ?>" aria-label="Adjust crop">⤢</button>
+      </div>
       <?php if ($slot['caption']): ?>
         <figcaption><?= h(page_snippet((string) $slot['caption'], 70)) ?></figcaption>
       <?php endif; ?>
@@ -164,12 +207,12 @@ function render_photo_slot(array $slot): string
 
 /** A quote/anecdote card — riding along on a photo page, or standing alone
  *  on a page_type='text' page. Never draggable — see this file's header. */
-function render_text_slot(array $slot, bool $standalone): string
+function render_text_slot(array $slot, bool $standalone, string $flexStyle = ''): string
 {
     ob_start();
     $isQuote = $slot['quote_id'] !== null;
     ?>
-    <div class="ks-slot ks-slot-text<?= $standalone ? ' is-standalone' : '' ?>">
+    <div class="ks-slot ks-slot-text<?= $standalone ? ' is-standalone' : '' ?>" style="<?= h($flexStyle) ?>">
       <span class="pill is-plain"><?= $isQuote ? 'quote' : 'anecdote' ?></span>
       <?php if ($isQuote): ?>
         <p>“<?= h(page_snippet((string) $slot['quote_text'], $standalone ? 400 : 90)) ?>”</p>
@@ -181,6 +224,67 @@ function render_text_slot(array $slot, bool $standalone): string
     </div>
     <?php
     return ob_get_clean();
+}
+
+/**
+ * Walk lib/layout_render.php's composition tree, emitting nested
+ * `.ks-split-row`/`.ks-split-col` wrappers down to each leaf slot. The
+ * OUTER call (from render_page_canvas()) never wraps the root in an extra
+ * div — .ks-page-canvas itself plays that role, sized to the book's square
+ * trim (styles.css) — so every div this function emits corresponds to one
+ * real split in the tree, nothing decorative.
+ */
+function render_tree_node(array $node, array $slots): string
+{
+    $flexStyle = 'flex:' . round((float) $node['aspect'], 4) . ' 0 0;';
+
+    if (isset($node['leaf'])) {
+        $slot = $slots[$node['leaf']] ?? null;
+        if ($slot === null) {
+            return '';
+        }
+        return $slot['photo_id'] !== null
+            ? render_photo_slot($slot, $flexStyle)
+            : render_text_slot($slot, false, $flexStyle);
+    }
+
+    ob_start();
+    ?>
+    <div class="ks-split ks-split-<?= h($node['split']) ?>" style="<?= h($flexStyle) ?>">
+      <?php foreach ($node['children'] as $child) { echo render_tree_node($child, $slots); } ?>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+/**
+ * The whole page canvas: a fixed-aspect box (styles.css: square, matching
+ * config's default trim) containing the composition tree built from this
+ * page's CURRENT slots. Roles (portrait/landscape) and the tree shape are
+ * recomputed here, every render — see lib/layout_render.php's header on
+ * why that's deliberate rather than reading back a decision made when the
+ * page was generated.
+ *
+ * $mirror alternates by page NUMBER, not stored anywhere — plain visual
+ * variety between two same-shaped pages a reader will see close together.
+ */
+function render_page_canvas(array $slots, int $pageNumber): string
+{
+    $orientations = array();
+    foreach ($slots as $slot) {
+        $orientations[] = $slot['photo_id'] !== null ? layout_orientation($slot) : 'flex';
+    }
+
+    $tree   = layout_page_tree($orientations, $pageNumber % 2 === 0);
+    $inner  = isset($tree['leaf'])
+        ? render_tree_node($tree, $slots)
+        : implode('', array_map(
+            static fn(array $child): string => render_tree_node($child, $slots),
+            $tree['children']
+        ));
+    $direction = isset($tree['leaf']) ? 'row' : $tree['split'];
+
+    return '<div class="ks-page-canvas ks-split-' . h($direction) . '">' . $inner . '</div>';
 }
 
 /** One page card: header, reflow button, and whichever body its page_type calls for. */
@@ -205,16 +309,13 @@ function render_page(array $page): string
         <?= render_snapshot_page($page) ?>
       <?php elseif ($type === 'text'): ?>
         <?php foreach ($page['slots'] as $slot) { echo render_text_slot($slot, true); } ?>
+      <?php elseif ($page['slots'] === array()): ?>
+        <?php // Phase 6's known gap: moving the only photo off a page can leave
+              // an empty book_pages row until a reflow — see lib/pdfexport.php's
+              // identical fail-soft case. ?>
+        <p class="hint">(empty page)</p>
       <?php else: ?>
-        <div class="ks-slots" data-count="<?= count($page['slots']) ?>">
-          <?php foreach ($page['slots'] as $slot): ?>
-            <?php if ($slot['photo_id'] !== null) {
-                echo render_photo_slot($slot);
-            } else {
-                echo render_text_slot($slot, false);
-            } ?>
-          <?php endforeach; ?>
-        </div>
+        <?= render_page_canvas($page['slots'], (int) $page['page_number']) ?>
       <?php endif; ?>
     </section>
     <?php
@@ -383,8 +484,10 @@ function render_page(array $page): string
         <p class="hint">
           Drag a photo onto another photo to swap them. Drag a photo onto a
           different page's background to move it there. Text cards aren't
-          drag targets. “Reflow from here” regenerates every page from that
-          one to the end of the book — the pages before it are never touched.
+          drag targets. Tap <span aria-hidden="true">⤢</span> on a photo to
+          adjust how it's cropped on this page. “Reflow from here”
+          regenerates every page from that one to the end of the book — the
+          pages before it are never touched.
         </p>
         <div class="ks-book" data-layout-id="<?= (int) $selected['id'] ?>">
           <?php foreach (array_chunk($pages, 2) as $spread): ?>

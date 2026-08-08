@@ -27,16 +27,33 @@
  *      Drop ON another photo slot -> SWAP (api/book-page-slots-swap.php).
  *      Drop on a photos-page's open background (not on a slot) -> MOVE
  *      (api/book-page-slots-move.php), landing at that page's next open
- *      slot. Both patch the DOM in place on success rather than reloading —
- *      unlike the structural actions above, a swap/move's effect is fully
- *      described by "these two DOM nodes trade parents/positions", so a
- *      reload would be a slower way to show exactly what's already visible.
+ *      slot. BOTH RELOAD ON SUCCESS, post-launch (PLAN.md) — this used to
+ *      patch the two swapped/moved DOM nodes directly, back when a page was
+ *      a flat row of equal-size cells and a swap/move only ever meant "these
+ *      two nodes trade parents". Now that a page's shape is a composition
+ *      tree keyed off every slot's orientation (lib/layout_render.php),
+ *      trading ONE photo for a different-shaped one can reshape the WHOLE
+ *      page's tree (a portrait swapped in for a landscape can flip a 2-up
+ *      page between side-by-side and stacked) — sometimes on both the
+ *      source AND destination page for a move. There is no longer a DOM
+ *      patch that's "fully described by these two nodes", so this now
+ *      follows the same reload rule reflow/generate/activate already use.
+ *
+ *   5. "Adjust crop" — a photo slot's optional manual crop override
+ *      (book_page_photos.crop_x/y/w/h). Opens crop.js's openCropper() locked
+ *      to that slot's own rendered shape (read straight off the DOM — see
+ *      adjustCrop() below), saves via api/book-page-photos-crop.php, and
+ *      patches that one slot's background-image/img in place — this one
+ *      genuinely IS fully described by "this one slot's own crop changed",
+ *      since it can never reshape the page (the target aspect a crop is
+ *      locked to is exactly the box the tree already gave this slot).
  */
 
 import { apiPost, ApiError } from './api.js';
 import { showSnackbar } from './swipe.js';
 import { attachInlineEdit } from './inline-edit.js';
 import { openPhotoPicker } from './photo-picker.js';
+import { openCropper } from './crop.js';
 
 function describe(err) {
   if (err instanceof ApiError && err.detail) { return err.detail; }
@@ -84,6 +101,10 @@ document.addEventListener('click', async (event) => {
 
   if (action === 'pick-cover') {
     await pickCover(button);
+  }
+
+  if (action === 'adjust-crop') {
+    await adjustCrop(button);
   }
 });
 
@@ -152,6 +173,75 @@ async function pickCover(button) {
   card.querySelector('[data-role="cover-status"]').textContent = 'Cover photo set.';
   button.textContent = 'Change cover photo';
   showSnackbar('Cover photo set.');
+}
+
+/* -------------------------------------------------------------- crop ----- */
+/* "Adjust crop" (see this file's header, point 5). Opens crop.js LOCKED to
+   this slot's own rendered shape — read straight off the frame's live
+   getBoundingClientRect(), not recomputed from role/aspect math, so the lock
+   always matches EXACTLY what the composition tree actually gave this slot,
+   including gaps/rounding, with zero risk of drifting from it. */
+
+async function adjustCrop(button) {
+  const figure = button.closest('.ks-slot-photo');
+  const frame = figure?.querySelector('.ks-slot-photo-frame');
+  if (!figure || !frame) { return; }
+
+  const rect = frame.getBoundingClientRect();
+  if (!rect.width || !rect.height) { return; } // not laid out yet — nothing to lock to
+
+  let initial = null;
+  if (figure.dataset.crop) {
+    try { initial = JSON.parse(figure.dataset.crop); } catch { /* malformed — treat as none */ }
+  }
+
+  const result = await openCropper(figure.dataset.original, {
+    lockAspect: rect.width / rect.height,
+    initial,
+  });
+  // crop.js resolves null for BOTH "cancelled" and "applied with no change
+  // from what it opened with" (see crop.js's own apply handler) — there is
+  // no case where null means "clear an existing crop", so this is always a
+  // safe no-op, whether or not `initial` was set. Don't mistake this for
+  // "reset to auto-fit": Reset moves the box to the centered default and
+  // then Apply saves THAT rect explicitly (a concrete value, not null) —
+  // there's currently no path back to the NULL "keep auto-fitting forever"
+  // state once a slot has a manual crop.
+  if (result === null) { return; }
+
+  button.disabled = true;
+  let saved;
+  try {
+    saved = await apiPost('api/book-page-photos-crop.php', {
+      slot_id: Number(figure.dataset.slotId),
+      rect: result,
+    });
+  } catch (err) {
+    showSnackbar(describe(err), { isError: true });
+    return;
+  } finally {
+    button.disabled = false;
+  }
+
+  figure.dataset.crop = result ? JSON.stringify(result) : '';
+  frame.querySelectorAll('img, .ks-slot-photo-bg').forEach((el) => el.remove());
+
+  if (saved.css) {
+    const bg = document.createElement('div');
+    bg.className = 'ks-slot-photo-bg';
+    bg.style.backgroundImage = `url('${figure.dataset.src}')`;
+    bg.style.backgroundSize = saved.css.size;
+    bg.style.backgroundPosition = saved.css.position;
+    frame.prepend(bg);
+  } else {
+    const img = document.createElement('img');
+    img.src = figure.dataset.src;
+    img.alt = '';
+    img.loading = 'lazy';
+    frame.prepend(img);
+  }
+
+  showSnackbar(saved.cropped ? 'Crop adjusted.' : 'Crop reset to auto-fit.');
 }
 
 /* Subtitle tap-to-edit (brief §4.6) — the SAME endpoint and gesture Phase 3
@@ -242,10 +332,6 @@ document.addEventListener('drop', async (event) => {
 });
 
 async function swapSlots(slotIdA, slotIdB) {
-  const nodeA = document.querySelector(`.ks-slot-photo[data-slot-id="${slotIdA}"]`);
-  const nodeB = document.querySelector(`.ks-slot-photo[data-slot-id="${slotIdB}"]`);
-  if (!nodeA || !nodeB) { return; }
-
   try {
     await apiPost('api/book-page-slots-swap.php', {
       slot_id_a: Number(slotIdA),
@@ -256,30 +342,21 @@ async function swapSlots(slotIdA, slotIdB) {
     return;
   }
 
-  // The request only swapped CONTENT (photo_id) between the two rows (see
-  // lib/repo.php's book_page_slot_swap()), so the DOM patch is exactly the
-  // mirror of that: swap the two nodes' positions, and each node keeps its
-  // own slot-id (the row identity never moved) while what's INSIDE it is now
-  // the other photo — so their inner img/figcaption/data-photo-id swap too.
-  const markerA = document.createComment('');
-  nodeA.before(markerA);
-  nodeB.before(nodeA);
-  markerA.replaceWith(nodeB);
-
+  // See this file's header, point 4: a swap can reshape either page's whole
+  // composition tree, not just the two cells involved, so there's no DOM
+  // patch that's fully described by "these two nodes traded content".
   showSnackbar('Swapped.');
+  window.location.reload();
 }
 
 async function moveSlot(slotId, targetPageId) {
   const node = document.querySelector(`.ks-slot-photo[data-slot-id="${slotId}"]`);
-  const targetSlots = document.querySelector(`.ks-page[data-page-id="${targetPageId}"] .ks-slots`);
-  if (!node || !targetSlots) { return; }
+  const sourcePage = node?.closest('.ks-page');
+  if (!node || !sourcePage) { return; }
+  if (sourcePage.dataset.pageId === String(targetPageId)) { return; } // dropped back on its own page
 
-  const sourceSlots = node.closest('.ks-slots');
-  if (sourceSlots === targetSlots) { return; } // dropped back on its own page
-
-  let result;
   try {
-    result = await apiPost('api/book-page-slots-move.php', {
+    await apiPost('api/book-page-slots-move.php', {
       slot_id: Number(slotId),
       target_page_id: Number(targetPageId),
     });
@@ -288,22 +365,9 @@ async function moveSlot(slotId, targetPageId) {
     return;
   }
 
-  /* Phase 8: emptying the source page down to zero filled slots deletes that
-     page server-side and renumbers everything after it (lib/repo.php's
-     book_page_slot_move()) — a structural change, not just "these two nodes
-     traded parents", so this reloads rather than patching the DOM, matching
-     every other structural action on this screen (generate/activate/reflow
-     above, and review.js's identical rule for delete/merge/split). */
-  if (result.page_deleted) {
-    showSnackbar('Moved — the emptied page was removed and the book renumbered.');
-    window.location.reload();
-    return;
-  }
-
-  targetSlots.append(node);
-  targetSlots.dataset.count = String(targetSlots.querySelectorAll('.ks-slot').length);
-  if (sourceSlots) {
-    sourceSlots.dataset.count = String(sourceSlots.querySelectorAll('.ks-slot').length);
-  }
-  showSnackbar('Moved to page ' + (document.querySelector(`.ks-page[data-page-id="${targetPageId}"]`)?.dataset.pageNumber ?? '') + '.');
+  // See this file's header, point 4 — a move reshapes both the source and
+  // destination page's composition tree, so this always reloads now (not
+  // just the "emptied the source page" case Phase 8 originally reloaded for).
+  showSnackbar('Moved.');
+  window.location.reload();
 }

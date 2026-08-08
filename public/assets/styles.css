@@ -1531,36 +1531,111 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
 .ks-page-head { margin-bottom: 10px; }
 .ks-page-actions { gap: 8px; }
 
-/* The photo/text grid inside one page: 1-4 slots side by side, wrapping —
-   the same flex-wrap idiom Phase 5's .page-slots used, carried forward under
-   the ks- prefix Phase 6 renamed everything to (see this section's header).
-   A lone slot (a "full page" photo, or a standalone text card riding a
-   photos page with nothing else on it) takes the full width instead of
-   sitting cramped at 140px. */
-.ks-slots {
+/* ============ The composition tree (public/layout.php, lib/layout_render.php) ============
+ *
+ * POST-LAUNCH REWORK (PLAN.md): a "photos" page used to be a flat, equal-size
+ * grid — every img force-cropped to a square regardless of its own shape,
+ * which is also why the engine leaned so heavily on 1-up pages (a mismatched
+ * portrait+landscape pair had nowhere good to go). Replaced with a real
+ * ASYMMETRIC composition: .ks-page-canvas is a fixed square box (the book's
+ * trim shape), and inside it, .ks-split-row/.ks-split-col wrap nested
+ * children whose `flex` VALUE (set inline, per node, by
+ * render_tree_node()/render_page_canvas()) is that child's own effective
+ * aspect ratio — see lib/layout_render.php's header for the row/col math. A
+ * wide landscape photo genuinely gets a wide cell; the leftover space around
+ * a mismatched pair reads as page margin, not a cropped-to-fit box.
+ *
+ * Every split/leaf shares `flex: 0 0` semantics via `flex-basis:0` here, so
+ * the aspect value set inline is a pure RATIO between siblings, never a
+ * literal size — the same reason the split containers need `min-width:0`/
+ * `min-height:0` (flex's own default `min-width:auto` would otherwise let a
+ * wide photo refuse to shrink and blow out its row on a narrow phone).
+ */
+.ks-page-canvas {
+  aspect-ratio: 1 / 1;
+  width: 100%;
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: 6px;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 6px;
 }
-.ks-slots[data-count="1"] .ks-slot { flex-basis: 100%; }
+.ks-page-canvas.ks-split-row { flex-direction: row; }
+.ks-page-canvas.ks-split-col { flex-direction: column; }
+
+.ks-split {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  flex-basis: 0;
+}
+.ks-split-row { flex-direction: row; }
+.ks-split-col { flex-direction: column; }
+
 .ks-slot {
-  flex: 1 1 140px;
-  min-width: 120px;
   margin: 0;
+  min-width: 0;
+  min-height: 0;
+  flex-basis: 0;
+}
+.ks-slot-text {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px;
-  background: var(--surface);
+  background: var(--teal-tint);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: auto;
 }
-.ks-slot-photo { cursor: grab; }
-.ks-slot-photo img {
+.ks-slot-photo { cursor: grab; display: flex; flex-direction: column; }
+
+/* The image (or its cropped background-image stand-in — see
+   render_photo_slot()) fills its whole cell, at exactly the shape the tree
+   gave that cell — no more forced aspect-ratio:1. The frame, not the img
+   itself, carries overflow:hidden and position:relative, so the "Adjust
+   crop" button can sit in a corner without being clipped by object-fit. */
+.ks-slot-photo-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 6px;
+}
+.ks-slot-photo-frame img {
   display: block;
   width: 100%;
-  height: auto;
-  aspect-ratio: 1;
+  height: 100%;
   object-fit: cover;
-  border-radius: 6px;
-  margin-bottom: 6px;
+  object-position: 50% 50%;
+}
+.ks-slot-photo-bg {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+}
+/* 48px, the app's own tap-target floor (--tap) — not a decorative icon size
+   choice, an overlay this small is exactly the kind of control that's easy
+   to miss on a phone if it's shrunk to fit visually. */
+.ks-slot-crop-btn {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: var(--tap);
+  height: var(--tap);
+  min-height: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .ks-slot-photo figcaption {
   display: flex;
@@ -1568,13 +1643,14 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   gap: 2px;
   font-size: 0.78rem;
   color: var(--ink);
+  margin-top: 6px;
+  flex: none;
 }
 
 /* A text card, deliberately looking different from a photo slot — that
    difference is the thing being checked when reading this screen. A
    standalone one (a page_type='text' page, over the ~180-char threshold) has
    no siblings to wrap alongside, so it just needs its own breathing room. */
-.ks-slot-text { background: var(--teal-tint); }
 .ks-slot-text p { margin: 6px 0; font-size: 0.85rem; }
 .ks-slot-text.is-standalone { margin-top: 4px; }
 
