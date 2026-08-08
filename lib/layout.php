@@ -39,17 +39,29 @@
  *   layout_density_preference()  house preference per page size, in the
  *                                abstract (config)
  *   layout_page_score()          the three above, combined, for one candidate
- *   layout_choose_page_size()    how many photos the NEXT page gets
- *   layout_partition_subgroup()  the greedy walk over one page-group
+ *   layout_merge_lone_subgroups() a photo with nobody to share a page with
+ *                                goes and finds a neighbour
+ *   layout_partition_subgroup()  one page-group -> its pages
  *
- * GREEDY, NOT GLOBALLY OPTIMAL, ON PURPOSE. A dynamic program could pick the
- * best partition of one page-group, but the variety heuristic is a function of
- * the pages already emitted ACROSS THE WHOLE BOOK — event groups, full-page
- * photos and snapshot pages interleaved — so "optimal within this group" is
- * optimising the wrong thing. Walking the book once in reading order, choosing
- * each page against what a reader has just seen, is both the shape that
- * matches the brief's own description ("across the book") and the shape whose
- * decisions a human can follow one page at a time when retuning.
+ * TWO TO THREE PHOTOS A PAGE IS A CONSTRAINT, NOT A PREFERENCE (PLAN.md,
+ * Round 5). Kathryn asked twice for fewer single-photo pages; both earlier
+ * answers were scoring changes (density_preference[1] lowered, then an
+ * unconditional singles_penalty) and both left 1-up able to win occasionally,
+ * because anything decided by a score can be won by a score. So page size is
+ * no longer scored at all: layout_partition_subgroup() only ever considers
+ * partitions in which every page holds page_size_min..page_size_max photos,
+ * and scoring chooses among those. The two 1-photo pages a reader will still
+ * see are both deliberate — a photos.full_page shot, and a photo that has no
+ * neighbour to pair with even after the merging pass.
+ *
+ * SEARCHED PER GROUP, WALKED IN BOOK ORDER. Within a page-group the engine
+ * now enumerates every legal partition and keeps the best, which the hard
+ * bounds make cheap; across the book it is still a single pass in reading
+ * order, because the variety heuristic is a function of the pages already
+ * emitted ACROSS THE WHOLE BOOK — event groups, full-page photos and snapshot
+ * pages interleaved — and "optimal within this group" would be optimising the
+ * wrong thing. That is the same shape the brief describes ("across the book")
+ * and the one whose decisions a human can still follow when retuning.
  *
  * ============================================== WHAT NEVER COMPETES FOR A SLOT
  *
@@ -95,16 +107,37 @@ function layout_tuning(): array
         'orientation_weight'     => 1.0,
         'density_weight'         => 0.5,
         // Kept in sync with config.example.php's own copy of this array —
-        // see that file's comment for why 1-up was lowered post-launch.
+        // see that file's comment for why 1-up was lowered post-launch, and
+        // why entries 1 and 4 are now only reachable by widening the page
+        // size bounds below.
         'density_preference'     => array(1 => 0.18, 2 => 1.0, 3 => 0.95, 4 => 0.85),
         'variety_window'         => 4,
         'variety_repeat_penalty' => 0.18,
         'variety_echo_factor'    => 0.5,
-        'orphan_page_penalty'    => 0.35,
-        // See layout_choose_page_size()'s own comment on where this is
-        // subtracted and why density_preference[1] alone couldn't fix "too
-        // many 1-up pages" (PLAN.md, Round 4).
-        'singles_penalty'        => 0.5,
+        // PLAN.md, Round 5: how many photos a page_type='photos' page may
+        // carry, as a HARD CONSTRAINT rather than a preference. Rounds 3 and
+        // 4 both tried to make 1-up pages rare by SCORING them lower
+        // (density_preference[1] down to 0.18, then an unconditional
+        // singles_penalty); both left 1-up able to win some lottery, because
+        // a score is a score. layout_partition_subgroup() now refuses to
+        // emit any page outside these bounds at all, so the only 1-photo
+        // pages left in a book are the two legitimate kinds: a
+        // photos.full_page shot (which never reaches the partitioner) and a
+        // photo with genuinely no neighbour to pair with.
+        'page_size_min'          => 2,
+        'page_size_max'          => 3,
+        // How far a LONE photo may reach to ride along with its ungrouped
+        // neighbours instead of taking a page of its own — see
+        // layout_merge_lone_subgroups(), and config.example.php for the
+        // reasoning behind a day-ish default.
+        'lone_merge_gap_hours'   => 24.0,
+        // REMOVED in Round 5: 'orphan_page_penalty' and 'singles_penalty'.
+        // Both were scoring nudges against page sizes the bounds above now
+        // forbid outright — stranding exactly one photo is structurally
+        // impossible (layout_partition_feasible()), and size 1 is no longer
+        // a candidate to charge. array_merge() below means an older
+        // config.php that still sets them is harmless: they land in $tuning,
+        // nothing reads them, and nothing warns.
     );
 
     $configured = function_exists('cfg') ? cfg('layout', array()) : array();
@@ -376,74 +409,223 @@ function layout_page_score(array $orientations, array $recentDensities, array $t
 }
 
 /**
- * How many PHOTOS the next page takes off the front of what's left. Pure.
+ * The page-size bounds, clamped to something the rest of the engine can
+ * actually honour. Pure.
  *
- * @param array $remaining     orientations of the photos still to place, in order
- * @param array $recentDensities the book so far
- * @param bool  $withCard      is a text card already committed to this page?
- * @return int 1..4 (1..3 with a card), or 0 if there are no photos left
+ * page_size_max is capped at LAYOUT_MAX_SLOTS because book_page_photos' own
+ * CHECK constraint would reject anything larger — a typo in config.php should
+ * degrade to "the busiest page this schema allows", not to a write that fails
+ * halfway through a book. page_size_min is capped at page_size_max for the
+ * same reason: min > max describes no page at all.
+ *
+ * @return array{0:int, 1:int} min, max
  */
-function layout_choose_page_size(array $remaining, array $recentDensities, bool $withCard, array $tuning): int
+function layout_page_size_bounds(array $tuning): array
 {
-    $left = count($remaining);
-    if ($left === 0) {
-        return 0;
+    $max = (int) ($tuning['page_size_max'] ?? 3);
+    $min = (int) ($tuning['page_size_min'] ?? 2);
+
+    $max = max(1, min(LAYOUT_MAX_SLOTS, $max));
+    $min = max(1, min($max, $min));
+
+    return array($min, $max);
+}
+
+/**
+ * Can $remaining photos be split into pages of $min..$max each? Pure.
+ *
+ * This is what makes "no orphan page" a STRUCTURAL fact instead of the
+ * one-page-lookahead penalty it used to be (removed in Round 5): a size is
+ * only ever offered if what it leaves behind can itself be partitioned, so a
+ * page that would strand a single photo is never on the table in the first
+ * place. True for 0 (nothing left to place is a valid end).
+ */
+function layout_partition_feasible(int $remaining, int $min, int $max): bool
+{
+    if ($remaining === 0) {
+        return true;
     }
-
-    $maxPhotos = min(LAYOUT_MAX_SLOTS - ($withCard ? 1 : 0), $left);
-
-    /* Candidates are tried in preference order, and a tie KEEPS THE EARLIER
-     * one (strictly-greater below), so 2- and 3-up win coin flips and a
-     * single photo only wins when it actually scores higher. */
-    $best      = 1;
-    $bestScore = -INF;
-
-    foreach (array(2, 3, 4, 1) as $size) {
-        if ($size > $maxPhotos) {
-            continue;
-        }
-
-        $orientations = array_slice($remaining, 0, $size);
-        if ($withCard) {
-            $orientations[] = 'flex';
-        }
-
-        $score = layout_page_score($orientations, $recentDensities, $tuning);
-
-        /* Lookahead, one page deep and no further: a size that strands
-         * exactly one photo at the end of this page-group is how a stray
-         * orphan page happens. Cheaper and far easier to retune than a real
-         * multi-page search, and it catches the case that actually shows up. */
-        if ($left - $size === 1) {
-            $score -= (float) $tuning['orphan_page_penalty'];
-        }
-
-        /* PLAN.md, Round 4: density_preference[1] alone couldn't keep 1-up
-         * rare, because it only ever competes with the VARIETY penalty other
-         * sizes are paying, and that penalty can get large — a run of four
-         * same-size pages costs that size 4 x repeat_penalty (up to ~0.7 at
-         * the shipped defaults). A 1-up that HASN'T appeared recently pays
-         * none of that, so after a run of, say, 2-up pages, a fresh 1-up
-         * could out-score a repeated 2-up even though 1-up is the worse page
-         * on its own merits — "avoid monotony" was quietly working against
-         * "avoid singles". This is a SEPARATE, unconditional penalty against
-         * size=1 specifically, charged regardless of how much variety credit
-         * it's carrying, so a rest from repetition can never be the reason a
-         * single wins. It does nothing to a page-group that only HAS one
-         * photo to begin with — that case never reaches this loop with any
-         * competing size to lose to (maxPhotos caps at 1, so size=1 is the
-         * only candidate tried, and it wins by simply being the only one). */
-        if ($size === 1) {
-            $score -= (float) $tuning['singles_penalty'];
-        }
-
-        if ($score > $bestScore) {
-            $bestScore = $score;
-            $best      = $size;
+    for ($pages = 1; $pages * $min <= $remaining; $pages++) {
+        if ($remaining <= $pages * $max) {
+            return true;
         }
     }
+    return false;
+}
 
-    return $best;
+/**
+ * How many partitions of $total into parts of $min..$max exist, SATURATING at
+ * $cap. Pure, O(total x max), and the reason layout_partition_subgroup() can
+ * decide between exhaustive search and the greedy fallback before doing
+ * either.
+ *
+ * Saturation rather than a real count keeps this honest on a 400-photo group:
+ * the true count of {2,3}-compositions grows like 1.3247^n (Padovan), which
+ * passes PHP's integer range somewhere around n=300, and a number we only
+ * ever compare against a few thousand does not need to be exact above it.
+ */
+function layout_partition_candidate_count(int $total, int $min, int $max, int $cap): int
+{
+    $ways    = array_fill(0, $total + 1, 0);
+    $ways[0] = 1;
+
+    for ($r = $min; $r <= $total; $r++) {
+        $sum = 0;
+        for ($size = $min; $size <= $max && $size <= $r; $size++) {
+            $sum += $ways[$r - $size];
+        }
+        $ways[$r] = min($sum, $cap + 1);
+    }
+
+    return $ways[$total];
+}
+
+/**
+ * Above this many candidate partitions, layout_partition_subgroup() stops
+ * enumerating and walks the group greedily instead (see there). Sized so the
+ * exhaustive path covers every page-group a real year plausibly contains — at
+ * the default 2..3 bounds this is reached somewhere around 40 photos in ONE
+ * sub-group, i.e. forty photos with no gap over subgroup_gap_hours between
+ * any two consecutive ones — while keeping the worst case a few thousand
+ * cheap scoring passes rather than an unbounded one.
+ */
+const LAYOUT_PARTITION_MAX_CANDIDATES = 4000;
+
+/**
+ * Every partition of $total photos into consecutive pages of $min..$max, in
+ * LARGEST-PAGE-FIRST order. Pure.
+ *
+ * The order is the tie-break rule: layout_partition_subgroup() keeps the
+ * first candidate that reaches the best score (strictly-greater), so two
+ * partitions that score identically resolve to the one that packs more photos
+ * onto earlier pages — fewer, fuller pages, which is the direction Kathryn
+ * has asked for twice.
+ *
+ * @param array<int,bool> $cardPages page indexes carrying a text card, so a
+ *   page can be held to LAYOUT_MAX_SLOTS-1 photos where the card takes the
+ *   fourth slot. Only bites if page_size_max is raised to 4; at the shipped
+ *   2..3 bounds a card always fits.
+ * @return list<list<int>> photo counts per page
+ */
+function layout_partition_candidates(int $total, int $min, int $max, array $cardPages): array
+{
+    $out = array();
+
+    $walk = static function (int $placed, int $pageIndex, array $sizes) use (&$walk, &$out, $total, $min, $max, $cardPages): void {
+        if ($placed === $total) {
+            $out[] = $sizes;
+            return;
+        }
+
+        $ceiling = min($max, $total - $placed, LAYOUT_MAX_SLOTS - (isset($cardPages[$pageIndex]) ? 1 : 0));
+
+        for ($size = $ceiling; $size >= $min; $size--) {
+            if (!layout_partition_feasible($total - $placed - $size, $min, $max)) {
+                continue;
+            }
+            $sizes[] = $size;
+            $walk($placed + $size, $pageIndex + 1, $sizes);
+            array_pop($sizes);
+        }
+    };
+
+    $walk(0, 0, array());
+
+    return $out;
+}
+
+/**
+ * The score of a whole candidate partition: every page scored by
+ * layout_page_score() against the book as a reader will have seen it BY THAT
+ * PAGE, summed. Pure.
+ *
+ * The running history is what makes this a sum over a walk rather than a sum
+ * over independent pages — page 3's variety penalty depends on what pages 1
+ * and 2 turned out to be, and $recentDensities seeds it with the rest of the
+ * book so a group doesn't restart the rhythm as though it were page one.
+ */
+function layout_partition_score(array $orientations, array $sizes, array $cardPages, array $recentDensities, array $tuning): float
+{
+    $history = $recentDensities;
+    $total   = 0.0;
+    $placed  = 0;
+
+    foreach ($sizes as $pageIndex => $size) {
+        $page = array_slice($orientations, $placed, $size);
+        if (isset($cardPages[$pageIndex])) {
+            // A text card is one more thing on the page and reads as one —
+            // see layout_page_score()'s own comment.
+            $page[] = 'flex';
+        }
+
+        $total    += layout_page_score($page, $history, $tuning);
+        $history[] = count($page);
+        $placed   += $size;
+    }
+
+    return $total;
+}
+
+/**
+ * The fallback for a page-group too large to enumerate: one greedy walk,
+ * choosing each page's size against the book so far and never offering a size
+ * whose remainder couldn't itself be partitioned. Pure.
+ *
+ * Same bounds, same tie-break (larger page wins a tie, since sizes are tried
+ * descending and the comparison is strictly-greater), same hard 2-3
+ * guarantee — only the search is smaller. A greedy walk is also what this
+ * engine did everywhere before Round 5, so the large-group path is the
+ * behaviour that shipped, not a new untested one.
+ *
+ * The `$size === 0` branch is a fail-soft guard for a config that describes
+ * no legal partition at all (page_size_min 3, page_size_max 3, four photos):
+ * rather than loop forever or throw away photos, it emits the largest page it
+ * can and lets the group end short of the minimum. A book with one odd page
+ * beats a screen that 500s.
+ *
+ * @return list<int> photo counts per page
+ */
+function layout_partition_greedy(array $orientations, array $cardPages, array $recentDensities, int $min, int $max, array $tuning): array
+{
+    $total   = count($orientations);
+    $history = $recentDensities;
+    $sizes   = array();
+    $placed  = 0;
+
+    while ($placed < $total) {
+        $pageIndex = count($sizes);
+        $ceiling   = min($max, $total - $placed, LAYOUT_MAX_SLOTS - (isset($cardPages[$pageIndex]) ? 1 : 0));
+
+        $best      = 0;
+        $bestScore = -INF;
+
+        for ($size = $ceiling; $size >= $min; $size--) {
+            if (!layout_partition_feasible($total - $placed - $size, $min, $max)) {
+                continue;
+            }
+
+            $page = array_slice($orientations, $placed, $size);
+            if (isset($cardPages[$pageIndex])) {
+                $page[] = 'flex';
+            }
+
+            $score = layout_page_score($page, $history, $tuning);
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $best      = $size;
+            }
+        }
+
+        if ($best === 0) {
+            $best = max(1, $ceiling);
+        }
+
+        $sizes[]   = $best;
+        $history[] = $best + (isset($cardPages[$pageIndex]) ? 1 : 0);
+        $placed   += $best;
+    }
+
+    return $sizes;
 }
 
 /* ============================================ page-groups within an event == */
@@ -488,6 +670,175 @@ function layout_subgroup_photos(array $photos, float $gapHours): array
         'layout_photo_hours_apart',
         $gapHours
     );
+}
+
+/**
+ * Two page-groups belong to the same run of the book if they came out of the
+ * same bucket: the same event group, or both ungrouped. Pure.
+ *
+ * The boundary is never crossed by the merging pass below, and that is the
+ * point of having this as its own predicate: an event group is a statement
+ * ("these photos are the Myrtle Beach trip") and folding an unrelated photo
+ * into it would make the book claim something Kathryn didn't. Two DIFFERENT
+ * event groups are two different occasions for the same reason.
+ */
+function layout_subgroup_same_bucket(array $a, array $b): bool
+{
+    $ga = $a['event_group_id'] === null ? null : (int) $a['event_group_id'];
+    $gb = $b['event_group_id'] === null ? null : (int) $b['event_group_id'];
+    return $ga === $gb;
+}
+
+/** One page-group's photos plus another's, rebuilt into a single group. Pure. */
+function layout_subgroup_absorb(array $host, array $lone): array
+{
+    $photos = array_merge($host['photos'], $lone['photos']);
+
+    // Sorted rather than concatenated: the caller knows the two are adjacent,
+    // but this function shouldn't have to trust that, and a group whose
+    // photos are out of order would put a page's photos out of order too.
+    usort($photos, static function (array $a, array $b): int {
+        return array((string) $a['captured_at'], (int) $a['id'])
+           <=> array((string) $b['captured_at'], (int) $b['id']);
+    });
+
+    $first = $photos[0];
+    $last  = $photos[count($photos) - 1];
+
+    $host['photos']     = $photos;
+    $host['start']      = (string) $first['captured_at'];
+    $host['start_date'] = substr((string) $first['captured_at'], 0, 10);
+    $host['end_date']   = substr((string) $last['captured_at'], 0, 10);
+    $host['first_id']   = (int) $first['id'];
+
+    return $host;
+}
+
+/**
+ * THE STRUCTURAL HALF OF "fewer 1-up pages" (PLAN.md, Round 5): a page-group
+ * holding exactly ONE photo goes and joins a chronological neighbour, so the
+ * partitioner has something to pair it with. Pure; expects $subgroups already
+ * in chronological order and returns them the same way.
+ *
+ * Round 4 ended by naming this as the honest limit of any scoring change: a
+ * page-group that only ever HAS one photo has no alternative page size to
+ * reach for, so no penalty against 1-up can do anything about it. The fix has
+ * to happen before the partitioner runs, and this is it.
+ *
+ * TWO DIFFERENT RULES, because "alone" means two different things:
+ *
+ *   inside an event group — merge, ALWAYS, however wide the gap. The event is
+ *     already the statement that these photos are one occasion; a single shot
+ *     from the far end of a three-day trip still belongs to the trip, and the
+ *     sub-grouping gap that separated it (subgroup_gap_hours, ~5h) is a
+ *     rhythm heuristic, not a claim that this photo is its own event.
+ *   ungrouped — merge only within $loneMergeGapHours. There is no event here
+ *     asserting the photos belong together, so the gap is all the evidence
+ *     there is: a lone shot from the same day-ish rides along with its
+ *     neighbours; a lone shot from a different week is genuinely its own
+ *     moment and has earned the page it gets.
+ *
+ * DETERMINISM. Groups are visited in chronological order. Each side's
+ * distance is measured photo-to-photo across the join (the neighbour's
+ * closest photo to this one), not group-start to group-start, since that is
+ * the gap a reader would feel. The nearer side wins; A TIE GOES TO THE
+ * EARLIER neighbour — a lone shot reads more naturally as the tail of what
+ * just happened than as a preface to what follows, and "the one before it" is
+ * the answer someone re-reading this can predict without running it.
+ *
+ * A merge that produces a pair is the whole point. Two adjacent lone photos
+ * merging into one 2-up page is the same case, handled by the same walk: the
+ * first merges into the second, and the second is no longer lone.
+ *
+ * @param list<array> $subgroups as built by layout_plan(), chronological
+ * @return list<array> same shape, chronological, possibly shorter
+ */
+function layout_merge_lone_subgroups(array $subgroups, float $loneMergeGapHours): array
+{
+    $list = array_values($subgroups);
+
+    for ($i = 0; $i < count($list); ) {
+        if (count($list[$i]['photos']) !== 1) {
+            $i++;
+            continue;
+        }
+
+        $lone      = $list[$i];
+        $lonePhoto = $lone['photos'][0];
+        $grouped   = $lone['event_group_id'] !== null;
+
+        /* Scan outward for the nearest group from the SAME bucket rather than
+         * looking only at index +/-1: an ungrouped photo taken in the middle
+         * of an event's date range can sit between two of that event's own
+         * sub-groups, and neither of them should be treated as that photo's
+         * neighbour just because it is adjacent in the sort. */
+        $prev = null;
+        for ($j = $i - 1; $j >= 0; $j--) {
+            if (layout_subgroup_same_bucket($list[$j], $lone)) {
+                $prev = $j;
+                break;
+            }
+        }
+        $next = null;
+        for ($j = $i + 1; $j < count($list); $j++) {
+            if (layout_subgroup_same_bucket($list[$j], $lone)) {
+                $next = $j;
+                break;
+            }
+        }
+
+        $prevGap = INF;
+        if ($prev !== null) {
+            $photos  = $list[$prev]['photos'];
+            $prevGap = layout_photo_hours_apart($photos[count($photos) - 1], $lonePhoto);
+        }
+        $nextGap = INF;
+        if ($next !== null) {
+            $nextGap = layout_photo_hours_apart($lonePhoto, $list[$next]['photos'][0]);
+        }
+
+        if (!$grouped) {
+            // The window only applies to the ungrouped bucket; INF (an
+            // unreadable timestamp, per layout_photo_hours_apart()) fails it,
+            // which is the same "fail apart" the sub-grouper already chose.
+            if ($prevGap > $loneMergeGapHours) {
+                $prev = null;
+            }
+            if ($nextGap > $loneMergeGapHours) {
+                $next = null;
+            }
+        }
+
+        // <= so a tie goes to the earlier neighbour; INF <= INF keeps that
+        // true when both gaps are unmeasurable inside one event group.
+        $into = null;
+        if ($prev !== null && ($next === null || $prevGap <= $nextGap)) {
+            $into = $prev;
+        } elseif ($next !== null) {
+            $into = $next;
+        }
+
+        if ($into === null) {
+            $i++;
+            continue;
+        }
+
+        $list[$into] = layout_subgroup_absorb($list[$into], $lone);
+        array_splice($list, $i, 1);
+        // Deliberately no $i++: index $i is now whatever followed the group
+        // just removed, and it has not been examined yet. The host itself is
+        // never re-examined — it holds two photos or more by construction.
+    }
+
+    /* A merge can move a group's start earlier (absorbing a lone photo that
+     * preceded it), so the chronological order is re-established rather than
+     * assumed. Same comparator layout_plan() sorts with, so "chronological"
+     * means one thing in this file. */
+    usort($list, static function (array $a, array $b): int {
+        return array($a['start'], $a['first_id']) <=> array($b['start'], $b['first_id']);
+    });
+
+    return $list;
 }
 
 /* ==================================================== standalone text ===== */
@@ -585,18 +936,25 @@ function layout_assign_texts(array $texts, array $subgroups, array $groups, int 
  * Roughly how many pages a page-group of $photoCount photos will need, used
  * ONLY to space text cards out across it before the real partition exists.
  *
- * Deliberately assumes the busiest ordinary page (3), which UNDER-estimates:
- * an underestimate means a card scheduled for "page 4" of a group that turns
- * out to have 5 pages simply lands one page early, while an overestimate
- * would schedule cards onto pages that never get emitted and spill them onto
- * pages of their own.
+ * Deliberately assumes the busiest page the bounds allow, which UNDER-
+ * estimates: an underestimate means a card scheduled for "page 4" of a group
+ * that turns out to have 5 pages simply lands one page early, while an
+ * overestimate would schedule cards onto pages that never get emitted and
+ * spill them onto pages of their own.
+ *
+ * Since Round 5 that underestimate is EXACT rather than merely safe: with
+ * every page holding page_size_min..page_size_max photos, the fewest pages
+ * $photoCount can occupy is precisely ceil(count / max), so every scheduled
+ * card index is guaranteed to exist on whatever partition wins. $maxPageSize
+ * is a parameter and not a hardcoded 3 so that raising page_size_max in
+ * config.php can't quietly turn this back into an OVER-estimate.
  */
-function layout_estimate_page_count(int $photoCount): int
+function layout_estimate_page_count(int $photoCount, int $maxPageSize = 3): int
 {
     if ($photoCount <= 0) {
         return 0;
     }
-    return max(1, (int) ceil($photoCount / 3));
+    return max(1, (int) ceil($photoCount / max(1, $maxPageSize)));
 }
 
 /**
@@ -632,10 +990,41 @@ function layout_card_schedule(int $pageCount, int $cardCount): array
 }
 
 /**
- * The greedy walk over one page-group: how many photos on each page, and
- * which pages carry a text card. Pure — no DB, no photo rows, just
- * orientations in order — so a test can assert the SHAPE of a book without
- * constructing one.
+ * How one page-group becomes pages: how many photos on each, and which carry
+ * a text card. Pure — no DB, no photo rows, just orientations in order — so a
+ * test can assert the SHAPE of a book without constructing one.
+ *
+ * EVERY PAGE HOLDS page_size_min..page_size_max PHOTOS. That is a constraint,
+ * not a preference, and it is the whole point of this function since Round 5
+ * (PLAN.md): Kathryn asked twice for fewer single-photo pages, and two rounds
+ * of scoring tweaks — density_preference[1] down to 0.18, then an
+ * unconditional singles_penalty — each only made 1-up rarer, because anything
+ * that competes on score can still win on score. The size is now decided
+ * before taste gets a vote; taste decides only WHICH legal partition wins.
+ *
+ * The two exceptions, both real photos and neither reachable from here:
+ *   - a photos.full_page photo, which layout_plan() emits directly and which
+ *     never enters this function;
+ *   - a group of one photo, which is what is left after
+ *     layout_merge_lone_subgroups() has tried and failed to find it a
+ *     neighbour. You cannot pair a photo with nothing.
+ *
+ * HOW THE PARTITION IS CHOSEN: every legal partition is enumerated and scored
+ * page by page against the running book (layout_partition_score()), and the
+ * best total wins — ties keeping the largest-pages-first candidate, per
+ * layout_partition_candidates(). This is a real search where the old greedy
+ * walk was a one-page lookahead, which it can afford to be BECAUSE the
+ * candidate set is small: compositions of n into {2,3} grow like 1.3247^n,
+ * so an ordinary page-group has single digits of them. Past
+ * LAYOUT_PARTITION_MAX_CANDIDATES it falls back to layout_partition_greedy()
+ * — same bounds, same guarantee, smaller search.
+ *
+ * A NOTE ON SCOPE, unchanged from the greedy era: the search is per-group but
+ * the variety history is the whole book, seeded through $recentDensities.
+ * "Optimal within this group" was never the goal — a reader sees event
+ * groups, full-page photos and snapshot pages interleaved — which is why
+ * groups are still visited in reading order, each scored against what a
+ * reader has just been shown.
  *
  * @param array $orientations     one per photo, chronological
  * @param int   $cardCount        short texts to weave into this group
@@ -656,38 +1045,58 @@ function layout_partition_subgroup(array $orientations, int $cardCount, array $r
         return $pages;
     }
 
-    $schedule = array_flip(layout_card_schedule(layout_estimate_page_count($total), $cardsLeft));
+    [$min, $max] = layout_page_size_bounds($tuning);
 
-    $history   = $recentDensities;
-    $placed    = 0;
-    $pageIndex = 0;
+    /* The card schedule is fixed BEFORE the partition is chosen, and is the
+     * same for every candidate — otherwise candidates would be scored against
+     * different page contents and the comparison would mean nothing. It can
+     * do that safely because layout_estimate_page_count() returns the FEWEST
+     * pages this group can occupy, so every scheduled index exists on every
+     * candidate. */
+    $schedule = array_flip(layout_card_schedule(layout_estimate_page_count($total, $max), $cardsLeft));
 
-    while ($placed < $total) {
+    if ($total < $min) {
+        /* Fewer photos than a page is supposed to hold: the merging pass
+         * upstream already looked for a neighbour and found none, so this is
+         * a genuinely isolated photo (or, if someone raises page_size_min, a
+         * genuinely isolated pair). One page holding what there is — and a
+         * card may ride along on it, which costs nothing: the card is not the
+         * reason this page is short. */
+        $sizes = array($total);
+    } else {
+        $sizes = null;
+
+        if (layout_partition_candidate_count($total, $min, $max, LAYOUT_PARTITION_MAX_CANDIDATES)
+            <= LAYOUT_PARTITION_MAX_CANDIDATES
+        ) {
+            $bestScore = -INF;
+            foreach (layout_partition_candidates($total, $min, $max, $schedule) as $candidate) {
+                $score = layout_partition_score($orientations, $candidate, $schedule, $recentDensities, $tuning);
+                if ($score > $bestScore) {
+                    $bestScore = $score;
+                    $sizes     = $candidate;
+                }
+            }
+        }
+
+        if ($sizes === null) {
+            // Too many candidates to enumerate, or (with an impossible
+            // min/max pair) none at all. Both land on the same walk.
+            $sizes = layout_partition_greedy($orientations, $schedule, $recentDensities, $min, $max, $tuning);
+        }
+    }
+
+    foreach ($sizes as $pageIndex => $size) {
         $withCard = $cardsLeft > 0 && isset($schedule[$pageIndex]);
-
-        $size = layout_choose_page_size(
-            array_slice($orientations, $placed),
-            $history,
-            $withCard,
-            $tuning
-        );
-        // layout_choose_page_size() cannot return 0 while photos remain; the
-        // guard is here so a future edit to it can't turn this into a spin.
-        $size = max(1, $size);
-
-        $pages[] = array('count' => $size, 'card' => $withCard);
-
+        $pages[]  = array('count' => $size, 'card' => $withCard);
         if ($withCard) {
             $cardsLeft--;
         }
-        $history[] = $size + ($withCard ? 1 : 0);
-        $placed   += $size;
-        $pageIndex++;
     }
 
-    // Cards the schedule never reached: fewer real pages than estimated, or
-    // more cards than this group has pages for. They get pages of their own
-    // rather than being dropped or doubled up.
+    // Cards the schedule never reached: more cards than this group has pages
+    // for. They get pages of their own rather than being dropped or doubled
+    // up (schema.sql: at most one text card per photo page).
     while ($cardsLeft-- > 0) {
         $pages[] = array('count' => 0, 'card' => true);
     }
@@ -767,6 +1176,13 @@ function layout_plan(array $content, array $tuning, array $historySeed = array()
     usort($subgroups, static function (array $a, array $b): int {
         return array($a['start'], $a['first_id']) <=> array($b['start'], $b['first_id']);
     });
+
+    /* A page-group of ONE photo has no page size to choose between, so it is
+     * the one case the partitioner's 2-3 rule cannot fix on its own — it gets
+     * folded into a chronological neighbour first (PLAN.md, Round 5). Done
+     * here, before text assignment, so a quote attaches to the page-group
+     * that will actually exist rather than to one about to disappear. */
+    $subgroups = layout_merge_lone_subgroups($subgroups, (float) $tuning['lone_merge_gap_hours']);
 
     /* ---- 3. text: long ones always stand alone, short ones look for a page */
     $threshold = (int) $tuning['text_page_chars'];

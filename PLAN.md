@@ -764,7 +764,10 @@ orientation_weight 1.0 (primary, per the brief) and density_weight 0.5
 2,3,4,1, ties keeping the earlier, and charges `orphan_page_penalty` against
 any size that would strand exactly one photo at the end of a group — a
 one-page lookahead rather than a real search, because it catches the case
-that actually happens and stays legible to retune.
+that actually happens and stays legible to retune. **(Superseded in Round 5,
+below: page size is now a hard 2-3 constraint enumerated and scored as whole
+partitions, and `layout_choose_page_size()`, `orphan_page_penalty` and
+`singles_penalty` are gone. Everything else in this paragraph still holds.)**
 
 **Greedy in book order, not optimal per group, on purpose.** A DP could
 partition one page-group optimally, but the variety heuristic is a function
@@ -772,7 +775,10 @@ of the pages already emitted ACROSS the book — event groups, full-page
 photos and snapshot pages interleaved — so per-group optimality optimises
 the wrong thing. Everything (page-groups, full-page photos, snapshots,
 standalone text) is merged into ONE chronological block list before any page
-is emitted, and the book is walked once in reading order.
+is emitted, and the book is walked once in reading order. **(Round 5 makes
+the WITHIN-group step a real search — the hard bounds shrink the candidate
+set to single digits — while keeping the across-book walk exactly as
+described here, which was always the load-bearing half of this decision.)**
 
 **Judgement calls worth Kathryn's eyes**, all commented where they live:
 - A **snapshot's hero photo is excluded from the loose photo flow** (it is
@@ -1420,3 +1426,89 @@ alternative size to reach for. That would need subgroup-merging
 (attaching a stray 1-2 photo cluster to its chronological neighbor before
 partitioning) rather than a scoring change, and hasn't been built —
 flagged here rather than assumed away.
+
+**Round 5 — "2-3 photos per page" stops being a preference and becomes a
+rule.** Third time Kathryn has asked for fewer single-image pages. Rounds 3
+and 4 both answered with scoring (`density_preference[1]` 0.35 → 0.18, then
+an unconditional `singles_penalty` of 0.5), and both worked in the sense that
+1-up got rarer and failed in the sense that it still turned up: anything
+decided by a score can be won by a score, and with a dozen page-groups in a
+book the unlikely candidate gets a dozen chances. Round 4's own closing
+paragraph named both halves of what was actually needed — a structural fix
+rather than another number, and specifically "subgroup-merging (attaching a
+stray 1-2 photo cluster to its chronological neighbor before partitioning)".
+This round builds both halves.
+
+**Half one: the partitioner no longer chooses page SIZE at all.**
+`layout_partition_subgroup()` used to walk a page-group greedily, asking
+`layout_choose_page_size()` for each page's photo count and letting sizes
+1-4 compete on score. It now enumerates every partition of the group into
+consecutive pages of `page_size_min`..`page_size_max` photos (new config,
+defaults **2** and **3**), scores each candidate page by page against the
+running book with the SAME `layout_page_score()` as before, and keeps the
+best total. Scoring still decides everything it used to decide except
+legality. The search is affordable precisely because the constraint is
+tight — compositions of n into {2,3} grow like 1.3247ⁿ (Padovan), so an
+ordinary page-group has single digits of candidates; past
+`LAYOUT_PARTITION_MAX_CANDIDATES` (4000, reached around n=40 photos in ONE
+sub-group) it falls back to a greedy walk under the same bounds, which is
+the behaviour that shipped anyway. **Ties keep the largest-pages-first
+candidate** (candidates are enumerated with sizes descending, comparison is
+strictly-greater), so a coin flip resolves toward fewer, fuller pages.
+
+**Half two: `layout_merge_lone_subgroups()`,** a new pure pass in
+`layout_plan()` between sub-grouping and text assignment. A page-group
+holding exactly one photo merges into a chronological neighbour, because
+no page-size rule can help a group that only ever HAS one photo — the exact
+limit Round 4 flagged. Two rules, deliberately different: inside an event
+group a lone photo merges **always**, however wide the gap (the event is
+already the statement that these photos are one occasion, and
+`subgroup_gap_hours` is a rhythm heuristic, not a claim of separateness);
+ungrouped, it merges only within the new `lone_merge_gap_hours` (default
+**24.0**) — with no event asserting anything, the gap is the only evidence,
+and a lone shot from a different week has earned its own page. A merge never
+crosses the grouped/ungrouped boundary or joins two different event groups.
+Nearest neighbour wins, **ties go to the earlier one** (a stray shot reads as
+the tail of what just happened, and "the one before it" is predictable
+without running the code). Two adjacent lone photos merging into one 2-up
+page is the same walk, and is the case this was built for.
+
+**Net effect: exactly two kinds of 1-photo page survive in a book** — a
+`photos.full_page` shot (which has always bypassed the partitioner entirely,
+unchanged) and a photo with genuinely no neighbour to pair with. Both are
+asserted by name in `tools/verify-layout.php`'s end-to-end pass, so a check
+that merely tolerated singles can't quietly pass on a book that has gone back
+to being full of them.
+
+**Removed rather than retuned:** `layout_choose_page_size()`, and with it the
+`orphan_page_penalty` and `singles_penalty` config keys. Both were charges
+against outcomes the bounds now forbid — a partition stranding one photo is
+never a candidate (`layout_partition_feasible()`), and there is no 1-up
+candidate left to charge. A knob that can only be multiplied by zero reads
+like a lever and isn't one. Both keys are still safe to leave in the
+`config.php` already on Kathryn's server: unknown keys merge over the
+defaults and are never read. `layout_estimate_page_count()` gained a
+`$maxPageSize` parameter so its "always under-estimate" contract survives
+someone raising `page_size_max` — with hard bounds, `ceil(n / max)` is now
+the EXACT minimum page count, which is what guarantees every scheduled text
+card lands on a page that actually exists.
+
+**Written test-first where it counted:** the `n=2..10` "every page holds 2 or
+3 photos, nothing else" loop went into `tools/verify-layout.php` before any
+engine change and failed on n=4, 7, 9 and 10 (4-up pages), exactly as
+expected. The old `layout_choose_page_size()` checks were rewritten rather
+than deleted where the intent survived — "a size that would strand exactly
+one photo is avoided" is now `layout_partition_feasible()`'s own unit test,
+which asserts the same thing as a structural fact instead of a scoring
+outcome.
+
+**Renderer, CSS and PDF are untouched, on purpose.**
+`lib/layout_render.php` builds a composition tree from whatever slot count
+the partitioner emits and already handles 1-4; narrowing the range it
+receives needs nothing from it. `tools/verify-export.php` still builds a real
+PDF through the changed engine and passes unmodified.
+
+**Files:** `lib/layout.php`, `config.example.php`, `tools/verify-layout.php`,
+`README.md`. Still not browser-tested, same standing caveat as every round
+above — the constraint is proven against the SQLite harness and a real
+rendered PDF, not looked at on a phone.

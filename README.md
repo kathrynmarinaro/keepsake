@@ -45,9 +45,12 @@ The hard part is the **book layout engine** (`lib/layout.php`): photos get
 auto-grouped into "events" by date-gap clustering
 (`lib/grouping.php`) with reverse-geocoded names via OpenStreetMap Nominatim
 (`lib/geocode.php`), then arranged onto pages using orientation-matching as
-the primary driver and a density/variety heuristic as the secondary one, so
-the book reads as intentional 1-4-photo spreads instead of "one photo per
-page." Quotes and anecdotes are woven in by date, as a styled card sharing a
+the primary driver and a density/variety heuristic as the secondary one. Page
+size itself is a hard constraint rather than a preference — every photo page
+carries 2 or 3 photos (tunable), so the book reads as intentional multi-photo
+spreads instead of "one photo per page." The only single-photo pages are a
+shot explicitly flagged "full page" and a photo with genuinely no neighbour
+to share a page with. Quotes and anecdotes are woven in by date, as a styled card sharing a
 page's slot (or their own full page, past a tunable length). Everything is
 manually correctable afterward — rename/merge/split a group, drag a photo to
 a different page, "reflow from here" to regenerate everything downstream of a
@@ -317,8 +320,10 @@ a `config.php` value with its reasoning documented right next to it in
   for how they combine into the rendered page size).
 
 `config.example.php`'s `layout` block has several more (sub-grouping gap
-hours, orientation/density weighting, variety-penalty tuning, an
-orphan-page penalty) — every one of them exists specifically so the book
+hours, orientation/density weighting, variety-penalty tuning, the
+`page_size_min`/`page_size_max` bounds — raise the max to 4 to bring back
+4-up pages — and `lone_merge_gap_hours`, how far a stray single photo may
+reach to join its neighbours) — every one of them exists specifically so the book
 layout engine can be hand-tuned after seeing a real generated book, per the
 brief's own instruction to treat that algorithm as a first draft. The one
 tunable that's deliberately **not** in config is the 12-number

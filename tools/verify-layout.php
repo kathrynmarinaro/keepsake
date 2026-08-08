@@ -15,11 +15,20 @@
  *      wildcard heals an otherwise lopsided 3+1 page; a lone photo scores
  *      below a matched pair (the value that keeps this engine out of the
  *      one-photo-per-page look).
- *   3. layout_variety_penalty() / layout_choose_page_size(): repeating a
- *      page size costs more each time, so density VARIES across a run of
- *      identically-shaped photos instead of sticking on one number; a size
- *      that would strand a single photo is avoided; a text card lowers the
- *      photo ceiling from 4 to 3.
+ *   3. layout_variety_penalty() / layout_partition_subgroup(): 2-3 photos a
+ *      page is a HARD CONSTRAINT (PLAN.md, Round 5) — every n from 2 to 10
+ *      partitions into pages of 2 or 3 and nothing else, including n=7
+ *      where no partition into 3s alone exists; a lone photo still gets its
+ *      1-up page because there is nothing to pair it with; the same input
+ *      twice gives the same partition; the large-group greedy fallback
+ *      obeys the same bounds; and within all that, density still VARIES
+ *      across a run of identically-shaped photos rather than sticking on
+ *      one number.
+ *   3b. layout_merge_lone_subgroups(): the structural half of "fewer 1-up
+ *      pages" — a lone photo inside an event group joins its neighbours
+ *      however wide the gap, an ungrouped one only within
+ *      lone_merge_gap_hours, and neither ever crosses the
+ *      grouped/ungrouped boundary or a boundary between two events.
  *   4. layout_subgroup_photos(): brief §4.3's day/close-timing pass — a
  *      beach morning and a dinner that evening (same day) land in different
  *      sub-groups, while photos minutes apart stay together, using the
@@ -29,8 +38,13 @@
  *   6. layout_assign_texts(): text inside an event's date range lands on
  *      that event; a leftover within the attach window rides along with the
  *      nearest page-group; a leftover outside it stands alone.
- *   7. layout_generate() end to end on a synthetic 2024: pages are NOT all
- *      1-up, every eligible photo appears exactly once, page numbering is
+ *   7. layout_generate() end to end on a synthetic 2024: every photos page
+ *      carries 2 or 3 photos except the two legitimate singles (the
+ *      full_page-flagged shot and the March photo with no neighbour inside
+ *      lone_merge_gap_hours), and those two are the ONLY ones — checked in
+ *      photo slots rather than total slots, since a page carrying a text
+ *      card holds one more slot than it holds photos. Also: every eligible
+ *      photo appears exactly once, page numbering is
  *      dense, full-page photos land alone, snapshots land alone as
  *      page_type='snapshot' with snapshot_id set and no slots, a long
  *      anecdote gets a page_type='text' page, short quotes ride in a slot
@@ -43,7 +57,10 @@
  *      reflowing from page N leaves every page before N byte-for-byte
  *      untouched — manual edit included — regenerates from N onward, does
  *      not duplicate content already used on the retained pages, and puts
- *      the evicted photo back into the flow.
+ *      the evicted photo back into the flow — and the regenerated tail
+ *      still honours the 2-3 rule, which is worth checking separately
+ *      because excluding the retained pages' content is what manufactures
+ *      the one-photo remainders the merging pass exists to absorb.
  *  10. Fail-soft: a year with no content at all, and an event group holding
  *      a single photo, both generate rather than throwing.
  *
@@ -155,35 +172,18 @@ check(
     layout_variety_penalty(2, array(2, 2, 2), array_merge($TUNING, array('variety_repeat_penalty' => 0.0))) === 0.0
 );
 
-echo "\nlayout_choose_page_size(): the next page's photo count...\n";
-$sixLandscapes = array_fill(0, 6, 'landscape');
-check(
-    'a fresh run of landscapes starts with a matched pair, not a single',
-    layout_choose_page_size($sixLandscapes, array(), false, $TUNING) === 2
-);
-check(
-    'after two 2-ups in a row the engine picks something else',
-    layout_choose_page_size($sixLandscapes, array(2, 2), false, $TUNING) !== 2
-);
-check(
-    // PLAN.md Round 4: variety credit used to be able to make a FRESH 1-up
-    // out-score a REPEATED multi-photo size, even with plenty of photos
-    // left to pair — "avoid monotony" quietly fighting "avoid singles".
-    // singles_penalty exists specifically so this never happens: as long as
-    // more than one photo remains, a long run of the SAME size still isn't
-    // a reason to drop to one.
-    'a long run of repeated 2-ups still does not drop to a single photo',
-    layout_choose_page_size($sixLandscapes, array(2, 2, 2, 2), false, $TUNING) !== 1
-);
-check(
-    'a size that would strand exactly one photo is avoided (3 left -> 3, not 2)',
-    layout_choose_page_size(array('landscape', 'landscape', 'landscape'), array(), false, $TUNING) === 3
-);
-check(
-    'a text card lowers the photo ceiling to 3 (4 slots total)',
-    layout_choose_page_size(array_fill(0, 8, 'portrait'), array(2, 2, 2), true, $TUNING) <= 3
-);
-check('nothing left means no page', layout_choose_page_size(array(), array(), false, $TUNING) === 0);
+echo "\nlayout_partition_feasible(): what the 2-3 rule can and cannot end on...\n";
+check('nothing left is a valid end', layout_partition_feasible(0, 2, 3) === true);
+check('exactly one photo left is NOT (that is the orphan page)', layout_partition_feasible(1, 2, 3) === false);
+check('every count from 2 up is reachable with 2s and 3s', (static function (): bool {
+    for ($n = 2; $n <= 60; $n++) {
+        if (!layout_partition_feasible($n, 2, 3)) {
+            return false;
+        }
+    }
+    return true;
+})());
+check('a min==max config can only end on multiples of it', layout_partition_feasible(4, 3, 3) === false);
 
 echo "\nlayout_card_schedule(): text cards spread, not bunched...\n";
 check('no pages means no schedule', layout_card_schedule(0, 3) === array());
@@ -191,18 +191,64 @@ check('one card across five pages lands in the middle', layout_card_schedule(5, 
 check('two cards across four pages are spread apart', layout_card_schedule(4, 2) === array(1, 3));
 check('more cards than pages caps at one per page', count(layout_card_schedule(2, 5)) === 2);
 
+echo "\nlayout_partition_subgroup(): 2-3 photos per page is a HARD CONSTRAINT...\n";
+foreach (range(2, 10) as $n) {
+    $mixed = array();
+    for ($i = 0; $i < $n; $i++) {
+        $mixed[] = array('portrait', 'landscape', 'square')[$i % 3] === 'square' ? 'flex' : array('portrait', 'landscape')[$i % 2];
+    }
+    $part  = layout_partition_subgroup($mixed, 0, array(), $TUNING);
+    $sizes = array_map(static fn(array $p): int => $p['count'], $part);
+    check(
+        "n=$n partitions into pages of 2 or 3 photos, nothing else (" . implode(',', $sizes) . ')',
+        array_sum($sizes) === $n && min($sizes) >= 2 && max($sizes) <= 3
+    );
+}
+
 echo "\nlayout_partition_subgroup(): density varies across a long run...\n";
 $partition = layout_partition_subgroup(array_fill(0, 14, 'landscape'), 0, array(), $TUNING);
 $sizes = array_map(static fn(array $p): int => $p['count'], $partition);
 check('every photo is placed exactly once', array_sum($sizes) === 14);
-check('no page is empty', min($sizes) >= 1);
-check('no page exceeds four photos', max($sizes) <= 4);
+// Was "no page is empty / no page exceeds four photos": since Round 5 the
+// bounds are the point of the function, so the check is the real bounds.
+check('no page falls below two photos', min($sizes) >= 2);
+check('no page exceeds three photos', max($sizes) <= 3);
 check(
     'density is NOT stuck on one number across 14 identical photos (brief §4.3)',
     count(array_unique($sizes)) > 1
 );
 check('the book is not one-photo-per-page', count($partition) < 14);
 echo '       (14 landscapes partitioned as: ' . implode(', ', $sizes) . ")\n";
+
+$seven = layout_partition_subgroup(array_fill(0, 7, 'portrait'), 0, array(), $TUNING);
+$sevenSizes = array_map(static fn(array $p): int => $p['count'], $seven);
+check(
+    'n=7 (no partition into 3s alone exists) still yields a valid {2,3} composition: ' . implode('+', $sevenSizes),
+    array_sum($sevenSizes) === 7 && min($sevenSizes) >= 2 && max($sevenSizes) <= 3
+);
+
+$onePhoto = layout_partition_subgroup(array('portrait'), 0, array(), $TUNING);
+check(
+    'a genuinely isolated photo still gets its own 1-up page (nothing to pair with)',
+    count($onePhoto) === 1 && $onePhoto[0]['count'] === 1
+);
+
+$mixedRun = array('portrait', 'landscape', 'landscape', 'flex', 'portrait', 'portrait', 'landscape', 'flex', 'portrait');
+check(
+    'the same input twice gives the same partition (deterministic)',
+    layout_partition_subgroup($mixedRun, 1, array(2, 3), $TUNING)
+        === layout_partition_subgroup($mixedRun, 1, array(2, 3), $TUNING)
+);
+
+/* Past LAYOUT_PARTITION_MAX_CANDIDATES the engine stops enumerating and walks
+   the group greedily instead — same bounds, smaller search. 60 photos with no
+   gap between them is well past that line, so this exercises the fallback. */
+$huge = layout_partition_subgroup(array_fill(0, 60, 'portrait'), 0, array(), $TUNING);
+$hugeSizes = array_map(static fn(array $p): int => $p['count'], $huge);
+check(
+    'the large-group greedy fallback obeys the same 2-3 bounds',
+    array_sum($hugeSizes) === 60 && min($hugeSizes) >= 2 && max($hugeSizes) <= 3
+);
 
 $withCards = layout_partition_subgroup(array_fill(0, 9, 'portrait'), 2, array(), $TUNING);
 $cardPages = array_values(array_filter($withCards, static fn(array $p): bool => $p['card']));
@@ -211,8 +257,30 @@ check(
     'no page carrying a card exceeds 4 slots',
     max(array_map(static fn(array $p): int => $p['count'] + ($p['card'] ? 1 : 0), $withCards)) <= 4
 );
+check(
+    'a card never buys itself room by shrinking a page below two photos',
+    min(array_map(static fn(array $p): int => $p['count'], $withCards)) >= 2
+);
 $cardsOnly = layout_partition_subgroup(array(), 2, array(), $TUNING);
 check('cards with no photos at all become pages of their own', count($cardsOnly) === 2 && $cardsOnly[0]['count'] === 0);
+
+$lonePlusCard = layout_partition_subgroup(array('portrait'), 1, array(), $TUNING);
+check(
+    'a card rides along with an isolated photo rather than taking a page of its own',
+    count($lonePlusCard) === 1 && $lonePlusCard[0]['count'] === 1 && $lonePlusCard[0]['card'] === true
+);
+
+echo "\nlayout_estimate_page_count(): under-estimates, which is the safe direction...\n";
+check('it is the FEWEST pages the bounds allow, never more', (static function (): bool {
+    for ($n = 2; $n <= 40; $n++) {
+        $pages = count(layout_partition_subgroup(array_fill(0, $n, 'portrait'), 0, array(), $GLOBALS['TUNING']));
+        if (layout_estimate_page_count($n, 3) > $pages) {
+            return false;
+        }
+    }
+    return true;
+})());
+check('raising the ceiling lowers the estimate rather than stranding cards', layout_estimate_page_count(8, 4) === 2);
 
 /* ============================================== pure: day / close timing == */
 
@@ -251,6 +319,120 @@ check(
         $shot(2, '2024-07-04 23:59:00'),
     ), 3)) === 1
 );
+
+/* ================================================ pure: lone-photo merging = */
+
+echo "\nlayout_merge_lone_subgroups(): a photo with nobody to share a page with...\n";
+
+/** A page-group fixture, in the shape layout_plan() builds. */
+function sub(?int $groupId, array $capturedAt): array
+{
+    $photos = array();
+    foreach ($capturedAt as $i => $at) {
+        // Ids ascend with time so 'first_id' is unambiguous in these fixtures.
+        $photos[] = array('id' => (int) (crc32($at) % 100000) + $i, 'captured_at' => $at);
+    }
+    return array(
+        'event_group_id' => $groupId,
+        'photos'         => $photos,
+        'start'          => $capturedAt[0],
+        'start_date'     => substr($capturedAt[0], 0, 10),
+        'end_date'       => substr($capturedAt[count($capturedAt) - 1], 0, 10),
+        'first_id'       => $photos[0]['id'],
+    );
+}
+
+/** Photo counts per page-group, in order. */
+function sub_counts(array $subgroups): array
+{
+    return array_map(static fn(array $s): int => count($s['photos']), $subgroups);
+}
+
+$insideEvent = layout_merge_lone_subgroups(array(
+    sub(7, array('2024-07-04 09:00:00', '2024-07-04 09:30:00')),
+    sub(7, array('2024-07-06 18:00:00')),                          // 2+ days later, same trip
+), 24.0);
+check(
+    'a lone photo inside an event group merges however wide the gap',
+    sub_counts($insideEvent) === array(3)
+);
+check(
+    '...and the merged group re-reads its own start and end from its photos',
+    $insideEvent[0]['start'] === '2024-07-04 09:00:00' && $insideEvent[0]['end_date'] === '2024-07-06'
+);
+check(
+    '...with its photos still in chronological order',
+    array_map(static fn(array $p): string => $p['captured_at'], $insideEvent[0]['photos'])
+        === array('2024-07-04 09:00:00', '2024-07-04 09:30:00', '2024-07-06 18:00:00')
+);
+
+$nearUngrouped = layout_merge_lone_subgroups(array(
+    sub(null, array('2024-09-10 10:00:00', '2024-09-10 10:10:00')),
+    sub(null, array('2024-09-10 20:00:00')),                       // ~10h later
+), 24.0);
+check('an ungrouped lone photo within the window rides along', sub_counts($nearUngrouped) === array(3));
+
+$farUngrouped = layout_merge_lone_subgroups(array(
+    sub(null, array('2024-09-10 10:00:00', '2024-09-10 10:10:00')),
+    sub(null, array('2024-09-17 20:00:00')),                       // a week later
+), 24.0);
+check(
+    'an ungrouped lone photo beyond the window keeps its own page (it IS its own moment)',
+    sub_counts($farUngrouped) === array(2, 1)
+);
+
+$acrossBuckets = layout_merge_lone_subgroups(array(
+    sub(7, array('2024-07-04 09:00:00', '2024-07-04 09:30:00')),
+    sub(null, array('2024-07-04 10:00:00')),                       // ungrouped, minutes away
+    sub(8, array('2024-07-04 11:00:00', '2024-07-04 11:30:00')),
+), 24.0);
+check(
+    'a lone photo never merges across the grouped/ungrouped boundary, however close',
+    sub_counts($acrossBuckets) === array(2, 1, 2)
+);
+
+$acrossEvents = layout_merge_lone_subgroups(array(
+    sub(7, array('2024-07-04 09:00:00', '2024-07-04 09:30:00')),
+    sub(8, array('2024-07-04 10:00:00')),
+), 24.0);
+check(
+    'nor between two different event groups (they are two different occasions)',
+    sub_counts($acrossEvents) === array(2, 1)
+);
+
+$tie = layout_merge_lone_subgroups(array(
+    sub(7, array('2024-07-04 08:00:00', '2024-07-04 08:30:00')),
+    sub(7, array('2024-07-04 09:30:00')),
+    sub(7, array('2024-07-04 10:30:00', '2024-07-04 11:00:00')),   // exactly as far away
+), 24.0);
+check('an exact tie between neighbours goes to the EARLIER one', sub_counts($tie) === array(3, 2));
+
+$nearer = layout_merge_lone_subgroups(array(
+    sub(null, array('2024-09-10 08:00:00', '2024-09-10 08:30:00')),
+    sub(null, array('2024-09-10 20:00:00')),                       // 11.5h back, 1h forward
+    sub(null, array('2024-09-10 21:00:00', '2024-09-10 21:30:00')),
+), 24.0);
+check('otherwise the nearer neighbour wins', sub_counts($nearer) === array(2, 3));
+
+$twoLonelies = layout_merge_lone_subgroups(array(
+    sub(null, array('2024-09-10 08:00:00')),
+    sub(null, array('2024-09-10 14:00:00')),
+), 24.0);
+check('two adjacent lone photos become one 2-up page, which is the whole point', sub_counts($twoLonelies) === array(2));
+
+$noNeighbour = layout_merge_lone_subgroups(array(sub(4, array('2021-05-05 12:00:00'))), 24.0);
+check('a lone photo with no neighbour at all is left alone rather than erroring', sub_counts($noNeighbour) === array(1));
+check('no page-groups at all is not an error either', layout_merge_lone_subgroups(array(), 24.0) === array());
+
+$stillSorted = layout_merge_lone_subgroups(array(
+    sub(null, array('2024-09-10 08:00:00')),                       // merges FORWARD, moving its host's start back
+    sub(null, array('2024-09-10 09:00:00', '2024-09-10 09:30:00')),
+    sub(null, array('2024-09-12 09:00:00', '2024-09-12 09:30:00')),
+), 24.0);
+$starts = array_map(static fn(array $s): string => $s['start'], $stillSorted);
+$sorted = $starts;
+sort($sorted);
+check('the returned page-groups are still in chronological order', $starts === $sorted);
 
 /* ==================================================== pure: text handling = */
 
@@ -460,7 +642,48 @@ $densities  = array_map(static fn(array $p): int => count($p['slots']), $photoPa
 check('there is more than one page density in the book (brief §4.3)', count(array_unique($densities)) > 1);
 check('the book is not one-photo-per-page', array_sum($densities) / max(1, count($densities)) > 1.5);
 check('no page holds more than four slots', max($densities) <= 4);
-echo '       (photo-page densities in order: ' . implode(', ', $densities) . ")\n";
+echo '       (photo-page slot counts in order: ' . implode(', ', $densities) . ")\n";
+
+/* The Round 5 rule, end to end and against the real interplay: this synthetic
+   year has a full-page photo, text cards riding on photo pages, and one March
+   photo with no neighbour inside lone_merge_gap_hours. Everything else must
+   be a 2- or 3-photo page — counted in PHOTO slots, since a card page holds
+   one more slot than it holds photos.
+
+   The two legitimate singles are named, not merely tolerated: a check that
+   allowed any 1-photo page would pass on a book that had gone back to being
+   full of them. */
+$expectedSingles = array($fullPagePhoto, $marchLoose);
+sort($expectedSingles);
+
+$photoCounts      = array();
+$singlePhotoPages = array();
+$illegalPages     = array();
+foreach ($photoPages as $row) {
+    $ids   = slot_ids(array($row), 'photo_id');
+    $count = count($ids);
+    $photoCounts[] = $count;
+
+    if ($count === 1) {
+        $singlePhotoPages[] = $ids[0];
+        if (!in_array($ids[0], $expectedSingles, true)) {
+            $illegalPages[] = (int) $row['page_number'];
+        }
+    } elseif ($count < 2 || $count > 3) {
+        $illegalPages[] = (int) $row['page_number'];
+    }
+}
+sort($singlePhotoPages);
+
+check(
+    'every photos page carries 2 or 3 photos, or is one of the two legitimate singles',
+    $illegalPages === array()
+);
+check(
+    '...and BOTH of those singles are accounted for: the full_page flag, and the March photo with no neighbour',
+    $singlePhotoPages === $expectedSingles
+);
+echo '       (photos per photo-page: ' . implode(', ', $photoCounts) . ")\n";
 
 $fullPageNumber = $photoPage[$fullPagePhoto] ?? null;
 $fullPageRow = null;
@@ -543,9 +766,22 @@ $summary = book_layouts_for_year($yp)[0];
 check('the listing carries a page count', (int) $summary['page_count'] === $v2['pages']);
 check('...and a per-type breakdown that adds up', (int) $summary['photo_pages'] + (int) $summary['text_pages'] + (int) $summary['snapshot_pages'] === (int) $summary['page_count']);
 
+/* A page's whole content, minus the row ids that necessarily differ between
+   two versions: type, snapshot, and every occupant in slot order. Comparing
+   only "type:slot count" would call two books identical while they held
+   different photos on every page, which is not what determinism means. */
+function page_fingerprint(array $page): string
+{
+    $slots = array();
+    foreach ($page['slots'] as $slot) {
+        $slots[] = ($slot['photo_id'] ?? 'n') . '/' . ($slot['quote_id'] ?? 'n') . '/' . ($slot['anecdote_id'] ?? 'n');
+    }
+    return $page['page_type'] . ':' . ($page['snapshot_id'] ?? 'n') . ':' . implode(',', $slots);
+}
+
 check('the two versions arranged the same content the same way (deterministic)',
-    array_map(static fn(array $p): string => $p['page_type'] . ':' . count($p['slots']), book_pages_for_layout($v2['layout_id']))
-    === array_map(static fn(array $p): string => $p['page_type'] . ':' . count($p['slots']), $v1Before));
+    array_map('page_fingerprint', book_pages_for_layout($v2['layout_id']))
+    === array_map('page_fingerprint', $v1Before));
 
 /* ============================================================ reflow ====== */
 
@@ -606,6 +842,31 @@ check('page numbering is still dense across the seam', array_map(static fn(array
 check('the hand-swapped photo does NOT appear a second time downstream', !in_array($movedIn, slot_ids($tail, 'photo_id'), true));
 check('the photo it displaced is back in the flow rather than lost', in_array($evicted, slot_ids($tail, 'photo_id'), true));
 
+/* The 2-3 rule has to survive a reflow too, and a reflow is where it is most
+   likely to break: excluding the retained pages' content cuts page-groups in
+   half, so remainders of one photo are actively manufactured here. They are
+   the merging pass's job — the only 1-photo pages the tail may contain are
+   the same two legitimate kinds as a fresh generation. */
+$tailSingles = array();
+foreach ($tail as $page) {
+    if ($page['page_type'] !== 'photos') {
+        continue;
+    }
+    $ids = slot_ids(array($page), 'photo_id');
+    if (count($ids) === 1) {
+        $tailSingles[] = $ids[0];
+    } elseif (count($ids) < 2 || count($ids) > 3) {
+        $tailSingles[] = -1;  // forces the check below to fail, and says why
+    }
+}
+sort($tailSingles);
+$expectedTailSingles = array($fullPagePhoto, $marchLoose);
+sort($expectedTailSingles);
+check(
+    'the reflowed tail still holds 2-3 photos a page, bar the full_page flag and the neighbourless March photo',
+    $tailSingles === $expectedTailSingles
+);
+
 $allAfter = slot_ids($after, 'photo_id');
 check('no photo is duplicated anywhere in the reflowed book', count($allAfter) === count(array_unique($allAfter)));
 $quotesAfter    = slot_ids($after, 'quote_id');
@@ -659,6 +920,9 @@ $lonelyGroup = event_group_create(array(
 ));
 photo_update($lonelyPhoto, array('event_group_id' => $lonelyGroup));
 $lonelyRun = layout_generate($lonely);
+// Still the right answer after Round 5, and worth keeping for exactly that
+// reason: layout_merge_lone_subgroups() looks for a neighbour to pair this
+// photo with, finds a year that contains nothing else, and leaves it alone.
 check('an event group with a single photo produces a single page', $lonelyRun['pages'] === 1);
 
 check(

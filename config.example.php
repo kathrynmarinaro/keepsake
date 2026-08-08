@@ -168,13 +168,76 @@ return array(
         'orientation_weight' => 1.0,
         'density_weight'     => 0.5,
 
+        /* ---- how many photos a page may hold (PLAN.md, Round 5) ----
+         * A HARD CONSTRAINT, not a preference: every page_type='photos' page
+         * carries between page_size_min and page_size_max photos, and the
+         * engine will not emit one that doesn't. Scoring still chooses
+         * BETWEEN legal pages (which photos, in what grouping) — it just no
+         * longer gets a vote on whether a 1-up page is allowed at all.
+         *
+         * This exists because two rounds of scoring changes didn't settle
+         * it. "Mostly multi-image pages" was asked for twice; the answer the
+         * first two times was to make 1-up score worse (density_preference[1]
+         * down to 0.18 below, then an unconditional singles_penalty), and
+         * each time singles still turned up, because anything decided by a
+         * score can be won by a score — a page size that scores badly is
+         * still a page size that wins occasionally. So it stopped being a
+         * score.
+         *
+         * TWO KINDS OF 1-PHOTO PAGE STILL EXIST IN A BOOK, both deliberate:
+         * a photo Kathryn ticked "full page" on (§2.4 — that flag has always
+         * bypassed this whole mechanism), and a photo that genuinely has no
+         * neighbour to share a page with, after lone_merge_gap_hours below
+         * has tried to find it one. Nothing can pair a photo with nothing.
+         *
+         * RAISING page_size_max TO 4 BRINGS 4-UP PAGES BACK, exactly as they
+         * behaved before Round 5 — the ceiling is tunable precisely so that
+         * decision stays Kathryn's. 4 is the hard maximum (the database's
+         * own CHECK on book_page_photos); anything larger is clamped to it.
+         * Lowering page_size_min to 1 re-allows single-photo pages, which
+         * puts the decision back in the hands of density_preference[1] and
+         * lands you where Round 4 was.
+         */
+        'page_size_min' => 2,
+        'page_size_max' => 3,
+
+        /* How far, in hours, a LONE photo may reach to join its neighbours
+         * rather than take a page of its own. This is the structural half of
+         * "fewer single-photo pages": no page-size rule can help a
+         * page-group that only ever HAS one photo in it, so a group of one
+         * goes and merges into a chronological neighbour before pages are
+         * decided at all.
+         *
+         * IT ONLY APPLIES TO UNGROUPED PHOTOS. A lone photo inside an event
+         * group merges into that event's neighbouring page-group ALWAYS,
+         * however wide the gap — the event is already the statement that
+         * those photos are one occasion, and a single shot from the far end
+         * of a three-day trip still belongs to the trip. With no event
+         * saying so, the gap is the only evidence there is: a day-ish (24h)
+         * says "same stretch of life, ride along", while a lone shot from a
+         * different week is genuinely its own moment and has earned its
+         * page. Lower this if stray photos are being glued to days they
+         * don't belong to; raise it if the book still has too many
+         * single-photo pages from ungrouped stretches.
+         *
+         * A merge never crosses the grouped/ungrouped boundary, and never
+         * joins two different event groups. Fractional values are fine.
+         */
+        'lone_merge_gap_hours' => 24.0,
+
         /* House preference for each page size, before orientation and
-         * variety have their say. 2- and 3-up are the book's default voice;
-         * 4-up is busier; 1-up is deliberately LOW because "one photo per
-         * page for everything" is the exact look brief §4 exists to avoid —
-         * a photo that deserves a page of its own gets there by Kathryn
-         * ticking "full page" on it (§2.4), not by the engine drifting
-         * there. Raise the 1 to let more singles through.
+         * variety have their say — the tie-breaker between the LEGAL page
+         * sizes above, now that legality is decided separately. 2- and 3-up
+         * are the book's default voice.
+         *
+         * ENTRIES 1 AND 4 ARE UNREACHABLE AT THE DEFAULT BOUNDS and are kept
+         * for exactly the case where they aren't: widen page_size_min/max
+         * and these are the numbers that decide how eagerly the engine
+         * reaches for the sizes you just re-allowed. 1-up is deliberately
+         * LOW because "one photo per page for everything" is the exact look
+         * brief §4 exists to avoid — a photo that deserves a page of its own
+         * gets there by Kathryn ticking "full page" on it (§2.4), not by the
+         * engine drifting there.
          *
          * LOWERED POST-LAUNCH (PLAN.md), from 0.35: a mismatched pair used
          * to have a real visual cost — the old renderer force-cropped every
@@ -204,30 +267,20 @@ return array(
         'variety_repeat_penalty' => 0.18,
         'variety_echo_factor'    => 0.5,
 
-        /* Charged against a page size that would leave exactly ONE photo
-         * behind at the end of a page-group, which is how a stray orphan
-         * page happens. Big enough to change the decision, small enough that
-         * a genuinely better-pairing page still wins.
+        /* GONE IN ROUND 5: 'orphan_page_penalty' (0.35) and
+         * 'singles_penalty' (0.5), both removed rather than retuned. Both
+         * were charges against page sizes that page_size_min/page_size_max
+         * above now forbid outright: a partition that would strand exactly
+         * one photo at the end of a page-group is no longer among the
+         * candidates at all, and there is no 1-up candidate left to charge.
+         * A knob that can only ever be multiplied by zero is worse than no
+         * knob — it reads like a lever and isn't one.
+         *
+         * LEAVING THEM IN AN EXISTING config.php IS HARMLESS. Unknown keys
+         * in this block are merged over the engine's defaults and then
+         * simply never read (lib/layout.php's layout_tuning()); nothing
+         * warns, nothing misbehaves. Delete them at your leisure.
          */
-        'orphan_page_penalty' => 0.35,
-
-        /* ADDED POST-LAUNCH (PLAN.md, Round 4): charged against a 1-up page
-         * UNCONDITIONALLY, on top of density_preference[1] above. The
-         * problem density_preference[1] alone couldn't fix: 1-up only ever
-         * competes against whatever the variety penalty (above) is charging
-         * OTHER sizes at that moment, and that charge can get large — a run
-         * of four same-size pages costs that size up to ~0.7 at the shipped
-         * defaults. A 1-up that hasn't appeared recently pays none of that,
-         * so after a run of, say, 2-up pages, a FRESH 1-up could out-score a
-         * REPEATED 2-up even though the 1-up is the worse page on its own
-         * merits — "avoid monotony" was quietly working against "avoid
-         * singles". This charges 1-up regardless of how much variety credit
-         * it's carrying, so a rest from repetition can never be the reason a
-         * single wins. Raise this further if singles are still showing up
-         * too often; it does nothing to a page-group that only has one
-         * photo to place — there's no competing size to lose to there.
-         */
-        'singles_penalty' => 0.5,
     ),
 
     /* ---- PDF export (Phase 7, brief §5.5) -------------------------------
