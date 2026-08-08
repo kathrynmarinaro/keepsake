@@ -960,6 +960,49 @@ function book_page_slot_get(int $id): ?array
 }
 
 /**
+ * Set or clear a PHOTO slot's manual crop override (schema.sql's
+ * crop_x/y/w/h — lib/layout_render.php's "adjust crop" feature). $rect null
+ * clears it back to NULL (auto-fit resumes); non-null must be exactly the 4
+ * normalized fractions crop.js's openCropper() returns.
+ *
+ * Refuses (returns false, changes nothing) a text-card slot — schema.sql's
+ * own comment on these columns says they're meaningless there, and this is
+ * where that gets enforced, since a table-level CHECK linking four nullable
+ * columns to three others isn't worth the schema noise for one caller to
+ * respect. Fails soft on an unknown slot id, same as every other slot
+ * mutator in this file.
+ */
+function book_page_slot_set_crop(int $slotId, ?array $rect): bool
+{
+    $slot = book_page_slot_get($slotId);
+    if ($slot === null || $slot['photo_id'] === null) {
+        return false;
+    }
+
+    if ($rect === null) {
+        q(
+            'UPDATE book_page_photos SET crop_x = NULL, crop_y = NULL, crop_w = NULL, crop_h = NULL WHERE id = ?',
+            array($slotId)
+        );
+        return true;
+    }
+
+    $clamp = static function ($v): float {
+        return max(0.0, min(1.0, (float) $v));
+    };
+    $x = $clamp($rect['x'] ?? 0);
+    $y = $clamp($rect['y'] ?? 0);
+    $w = max(0.02, min(1.0 - $x, $clamp($rect['w'] ?? 1)));
+    $h = max(0.02, min(1.0 - $y, $clamp($rect['h'] ?? 1)));
+
+    q(
+        'UPDATE book_page_photos SET crop_x = ?, crop_y = ?, crop_w = ?, crop_h = ? WHERE id = ?',
+        array($x, $y, $w, $h, $slotId)
+    );
+    return true;
+}
+
+/**
  * Phase 6's drag-and-drop (brief §4.4/§5.4): trade the PHOTOS occupying two
  * existing slots — same page or two different pages of the SAME layout,
  * doesn't matter, since a slot's year is derived only through

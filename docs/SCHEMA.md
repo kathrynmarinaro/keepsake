@@ -116,6 +116,17 @@ page per brief §4.3). No caption column: a photo slot's caption comes from
 `photos.caption` alone. No `year_project_id` — derived through
 `book_page_id` → `book_layout_id`.
 
+`crop_x`/`crop_y`/`crop_w`/`crop_h` (nullable `DECIMAL(6,5)`, added
+post-launch — see `PLAN.md`): Kathryn's manual "adjust crop" override for a
+photo slot, normalized 0–1 fractions of `photos.original_path`, same
+convention as `imageproc_crop_photo()`'s rect. NULL (the default) means
+"auto-fit to this slot's own shape" — see `lib/layout_render.php`'s
+`layout_auto_crop_rect()`. Non-destructive: unlike `imageproc_crop_photo()`,
+which bakes a crop into new `original_path`/`thumb_path` files, these columns
+only affect how THIS placement of the photo is windowed on THIS page.
+Meaningless for a text-card slot; not `CHECK`-enforced (see the column's own
+comment in `schema.sql`) since the renderer simply never reads it there.
+
 ## Relationships (text form)
 
 ```

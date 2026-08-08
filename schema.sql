@@ -580,6 +580,36 @@ CREATE TABLE IF NOT EXISTS book_page_photos (
   quote_id      INT UNSIGNED NULL,
   anecdote_id   INT UNSIGNED NULL,
 
+  -- Kathryn's manual "adjust crop" override for a PHOTO slot (public/layout.php,
+  -- lib/pdfexport.php) — normalized 0..1 fractions of the photo's own
+  -- original_path, same convention as crop.js's openCropper()/
+  -- imageproc_crop_photo()'s rect. NULL (the default for every slot) means
+  -- "no override yet": the renderer computes a centered crop to fit this
+  -- slot's own shape instead (lib/layout_render.php's
+  -- layout_auto_crop_rect()) — deliberately NOT backfilled with that
+  -- computed rect at write time, because the auto crop depends on the
+  -- SLOT's shape, which can change out from under a photo (a Phase 6
+  -- swap/move, a reflow) without anyone touching this row; a stale baked-in
+  -- rect would silently crop the wrong region after that, where NULL just
+  -- means "keep auto-fitting to wherever this photo ends up."
+  --
+  -- NON-DESTRUCTIVE, unlike imageproc_crop_photo(): that function bakes a
+  -- crop into a NEW original_path/thumb_path for the photo everywhere it
+  -- appears in the app. This one only changes how THIS placement of the
+  -- photo is windowed on THIS page — the same photo can sit uncropped in
+  -- the year timeline and adjusted here, and reflowing this page to a
+  -- different slot shape just makes the override reinterpreted (or ignored,
+  -- if the new shape doesn't need it) rather than wrong.
+  --
+  -- Meaningless for a text-card slot (quote_id/anecdote_id set): nothing
+  -- enforces that in the database — a CHECK tying four nullable columns to
+  -- three other nullable columns is more schema than the fact is worth —
+  -- the renderer simply never reads crop_* for a slot whose photo_id is NULL.
+  crop_x        DECIMAL(6,5) NULL,
+  crop_y        DECIMAL(6,5) NULL,
+  crop_w        DECIMAL(6,5) NULL,
+  crop_h        DECIMAL(6,5) NULL,
+
   PRIMARY KEY (id),
 
   -- One occupant per slot per page.

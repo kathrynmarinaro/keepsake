@@ -48,7 +48,11 @@ public_html/keepsake/ :
   [ ] hPanel -> phpMyAdmin -> Import -> schema.sql
       Creates all tables, seeds nothing (no default content). Every table
       uses CREATE TABLE IF NOT EXISTS, so re-importing a later schema.sql
-      after an update is always safe.
+      is always safe for BRAND-NEW tables — it just does nothing to a
+      table that already exists. A schema change that adds a COLUMN to an
+      EXISTING table (there is no migration runner — see schema.sql's own
+      header) needs a one-time ALTER TABLE instead; section 5 below covers
+      the one this app has needed so far.
 
 
 2. CONFIG
@@ -102,3 +106,24 @@ public_html/keepsake/ :
   [ ] No cron, no scheduled task of any kind — every feature (grouping,
       geocoding, layout generation, export) runs on-demand from a button
       you click, never in the background. Nothing to configure here.
+
+
+5. SCHEMA UPDATES (existing installs only — skip on a first deploy)
+---------------------------------------------------------------------
+
+  [ ] Asymmetric page layouts + adjustable crop (see PLAN.md). Adds four
+      nullable columns to an existing table, which re-importing schema.sql
+      will NOT do on its own (see section 1's note above) — run this once
+      in hPanel -> phpMyAdmin -> SQL, against your live database:
+
+          ALTER TABLE book_page_photos
+            ADD COLUMN crop_x DECIMAL(6,5) NULL,
+            ADD COLUMN crop_y DECIMAL(6,5) NULL,
+            ADD COLUMN crop_w DECIMAL(6,5) NULL,
+            ADD COLUMN crop_h DECIMAL(6,5) NULL;
+
+      Safe to run once; running it a second time errors ("duplicate
+      column") rather than doing anything harmful — if that happens, the
+      column is already there and nothing more is needed. Existing pages
+      keep working with no crop override (NULL = auto-fit) until you
+      adjust one by hand.
