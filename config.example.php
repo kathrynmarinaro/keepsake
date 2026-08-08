@@ -210,6 +210,24 @@ return array(
          * a genuinely better-pairing page still wins.
          */
         'orphan_page_penalty' => 0.35,
+
+        /* ADDED POST-LAUNCH (PLAN.md, Round 4): charged against a 1-up page
+         * UNCONDITIONALLY, on top of density_preference[1] above. The
+         * problem density_preference[1] alone couldn't fix: 1-up only ever
+         * competes against whatever the variety penalty (above) is charging
+         * OTHER sizes at that moment, and that charge can get large — a run
+         * of four same-size pages costs that size up to ~0.7 at the shipped
+         * defaults. A 1-up that hasn't appeared recently pays none of that,
+         * so after a run of, say, 2-up pages, a FRESH 1-up could out-score a
+         * REPEATED 2-up even though the 1-up is the worse page on its own
+         * merits — "avoid monotony" was quietly working against "avoid
+         * singles". This charges 1-up regardless of how much variety credit
+         * it's carrying, so a rest from repetition can never be the reason a
+         * single wins. Raise this further if singles are still showing up
+         * too often; it does nothing to a page-group that only has one
+         * photo to place — there's no competing size to lose to there.
+         */
+        'singles_penalty' => 0.5,
     ),
 
     /* ---- PDF export (Phase 7, brief §5.5) -------------------------------

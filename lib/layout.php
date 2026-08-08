@@ -101,6 +101,10 @@ function layout_tuning(): array
         'variety_repeat_penalty' => 0.18,
         'variety_echo_factor'    => 0.5,
         'orphan_page_penalty'    => 0.35,
+        // See layout_choose_page_size()'s own comment on where this is
+        // subtracted and why density_preference[1] alone couldn't fix "too
+        // many 1-up pages" (PLAN.md, Round 4).
+        'singles_penalty'        => 0.5,
     );
 
     $configured = function_exists('cfg') ? cfg('layout', array()) : array();
@@ -412,6 +416,25 @@ function layout_choose_page_size(array $remaining, array $recentDensities, bool 
          * multi-page search, and it catches the case that actually shows up. */
         if ($left - $size === 1) {
             $score -= (float) $tuning['orphan_page_penalty'];
+        }
+
+        /* PLAN.md, Round 4: density_preference[1] alone couldn't keep 1-up
+         * rare, because it only ever competes with the VARIETY penalty other
+         * sizes are paying, and that penalty can get large — a run of four
+         * same-size pages costs that size 4 x repeat_penalty (up to ~0.7 at
+         * the shipped defaults). A 1-up that HASN'T appeared recently pays
+         * none of that, so after a run of, say, 2-up pages, a fresh 1-up
+         * could out-score a repeated 2-up even though 1-up is the worse page
+         * on its own merits — "avoid monotony" was quietly working against
+         * "avoid singles". This is a SEPARATE, unconditional penalty against
+         * size=1 specifically, charged regardless of how much variety credit
+         * it's carrying, so a rest from repetition can never be the reason a
+         * single wins. It does nothing to a page-group that only HAS one
+         * photo to begin with — that case never reaches this loop with any
+         * competing size to lose to (maxPhotos caps at 1, so size=1 is the
+         * only candidate tried, and it wins by simply being the only one). */
+        if ($size === 1) {
+            $score -= (float) $tuning['singles_penalty'];
         }
 
         if ($score > $bestScore) {

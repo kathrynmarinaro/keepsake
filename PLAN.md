@@ -1384,3 +1384,39 @@ harness and (for the PDF path) a real rendered PDF; the on-screen drag
 interaction, the crop-adjust gesture, and the actual visual result are
 traced by hand, not clicked. Worth a real first look before trusting it —
 same note Phase 8 left, still true.
+
+**Round 4 — still too many 1-up pages after Round 3.** Lowering
+`density_preference[1]` (0.35 → 0.18 in Round 3) wasn't enough on its own.
+Root cause, found by working through the scoring formula rather than
+guessing: 1-up only ever competes against whatever the VARIETY penalty is
+charging other sizes at that moment (`layout_variety_penalty()`), and that
+penalty can get large — a run of four same-size pages costs that size up
+to ~0.7 at the shipped defaults. A 1-up that hasn't appeared recently pays
+NONE of that, so after a run of same-size pages, a fresh 1-up could
+out-score a repeated multi-photo page even though the 1-up is the worse
+page on its own merits — "avoid monotony" was quietly working against
+"avoid singles". Confirmed by writing the exact scenario as a test
+(`tools/verify-layout.php`: `layout_choose_page_size()` with
+`recentDensities = [2,2,2,2]` and six matched landscapes still left to
+place) before fixing anything, watching it fail, then fixing it.
+
+Fix: a new tuning value, `singles_penalty` (default 0.5,
+`lib/layout.php`'s `layout_tuning()` and `config.example.php`, kept in
+sync as usual), subtracted from a size-1 candidate's score
+UNCONDITIONALLY in `layout_choose_page_size()` — on top of, not instead
+of, the existing variety penalty. A rest from repetition can no longer be
+the reason a single wins. Does nothing to a page-group that genuinely only
+has one photo to place (there's no competing size in that case; `size=1`
+is the only candidate tried, per `maxPhotos`, and wins by being the only
+option). The test above now passes and stays in the suite as a guard
+against this specific regression.
+
+If 1-up pages are still too frequent after this, the next lever is
+raising `singles_penalty` further in `config.php`'s `layout` block — no
+code change needed for that. Past a certain point the honest limit is
+structural, not a scoring tweak: a page-group that only ever HAS one
+photo (a genuinely sparse day, an event with a single shot) has no
+alternative size to reach for. That would need subgroup-merging
+(attaching a stray 1-2 photo cluster to its chronological neighbor before
+partitioning) rather than a scoring change, and hasn't been built —
+flagged here rather than assumed away.

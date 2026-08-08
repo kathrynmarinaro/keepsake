@@ -166,6 +166,16 @@ check(
     layout_choose_page_size($sixLandscapes, array(2, 2), false, $TUNING) !== 2
 );
 check(
+    // PLAN.md Round 4: variety credit used to be able to make a FRESH 1-up
+    // out-score a REPEATED multi-photo size, even with plenty of photos
+    // left to pair — "avoid monotony" quietly fighting "avoid singles".
+    // singles_penalty exists specifically so this never happens: as long as
+    // more than one photo remains, a long run of the SAME size still isn't
+    // a reason to drop to one.
+    'a long run of repeated 2-ups still does not drop to a single photo',
+    layout_choose_page_size($sixLandscapes, array(2, 2, 2, 2), false, $TUNING) !== 1
+);
+check(
     'a size that would strand exactly one photo is avoided (3 left -> 3, not 2)',
     layout_choose_page_size(array('landscape', 'landscape', 'landscape'), array(), false, $TUNING) === 3
 );
