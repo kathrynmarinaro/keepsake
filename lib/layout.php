@@ -94,7 +94,9 @@ function layout_tuning(): array
         'text_attach_days'       => 2,
         'orientation_weight'     => 1.0,
         'density_weight'         => 0.5,
-        'density_preference'     => array(1 => 0.35, 2 => 1.0, 3 => 0.95, 4 => 0.85),
+        // Kept in sync with config.example.php's own copy of this array —
+        // see that file's comment for why 1-up was lowered post-launch.
+        'density_preference'     => array(1 => 0.18, 2 => 1.0, 3 => 0.95, 4 => 0.85),
         'variety_window'         => 4,
         'variety_repeat_penalty' => 0.18,
         'variety_echo_factor'    => 0.5,
@@ -201,7 +203,7 @@ function layout_orientation(array $photo): string
  * lever is to stop treating the card as a wildcard here (score it as a fixed
  * portrait-shaped block) rather than to touch the photo rows above.
  */
-function layout_orientation_score(array $orientations): float
+function layout_orientation_table(): array
 {
     static $table = array(
         1 => array('1,0' => 0.75, '0,1' => 0.75),
@@ -209,35 +211,96 @@ function layout_orientation_score(array $orientations): float
         3 => array('3,0' => 0.90, '2,1' => 0.90, '1,2' => 0.88, '0,3' => 0.70),
         4 => array('4,0' => 0.85, '0,4' => 0.85, '2,2' => 0.92, '3,1' => 0.60, '1,3' => 0.60),
     );
+    return $table;
+}
 
-    $density = count($orientations);
+function layout_orientation_score(array $orientations): float
+{
+    $table    = layout_orientation_table();
+    $density  = count($orientations);
+    $resolved = layout_resolve_orientations($orientations);
+
     if ($density < 1 || $density > LAYOUT_MAX_SLOTS) {
         return 0.0;
     }
 
-    $portraits = 0;
+    $portraits  = 0;
     $landscapes = 0;
-    $flex = 0;
-    foreach ($orientations as $orientation) {
+    foreach ($resolved as $role) {
+        if ($role === 'portrait') {
+            $portraits++;
+        } else {
+            $landscapes++;
+        }
+    }
+
+    $key = $portraits . ',' . $landscapes;
+    return (float) ($table[$density][$key] ?? 0.0);
+}
+
+/**
+ * Resolve every element of an orientation list to a concrete 'portrait' or
+ * 'landscape' role, choosing whichever split of the 'flex' elements
+ * (layout_orientation()'s wildcard — a square photo, a photo with no stored
+ * dimensions, or a text card riding along) scores best against
+ * layout_orientation_table(). Pure, deterministic, and this IS what
+ * layout_orientation_score() measures — that function now just re-looks-up
+ * the table for whatever this one resolved, so the two can never disagree.
+ *
+ * DELIBERATELY NOT CACHED ANYWHERE: a page's rendering (public/layout.php,
+ * lib/pdfexport.php) calls this again at render time rather than reading
+ * back a decision made at generate time, for the same reason
+ * photos.width/height has no stored `orientation` column (schema.sql) — a
+ * resolved role stored once could disagree with the photo currently in that
+ * slot after a Phase 6 manual swap/move. Recomputing is cheap (one pass over
+ * at most 4 elements) and can never go stale.
+ *
+ * Ties go to the FIRST split that reaches the best score, i.e. flex elements
+ * fill 'portrait' before 'landscape' — arbitrary but fixed, so two calls
+ * against the same input always agree.
+ *
+ * @param list<string> $orientations 'portrait' | 'landscape' | 'flex', in order
+ * @return list<string> 'portrait' | 'landscape', same length and order
+ */
+function layout_resolve_orientations(array $orientations): array
+{
+    $table   = layout_orientation_table();
+    $density = count($orientations);
+
+    $portraits  = 0;
+    $landscapes = 0;
+    $flexAt     = array();
+    foreach ($orientations as $i => $orientation) {
         if ($orientation === 'portrait') {
             $portraits++;
         } elseif ($orientation === 'landscape') {
             $landscapes++;
         } else {
-            $flex++;
+            $flexAt[] = $i;
         }
     }
+    $flex = count($flexAt);
 
-    $best = 0.0;
+    $bestScore     = -1.0;
+    $bestToPortrait = 0;
     for ($toPortrait = 0; $toPortrait <= $flex; $toPortrait++) {
-        $key = ($portraits + $toPortrait) . ',' . ($landscapes + $flex - $toPortrait);
+        $key   = ($portraits + $toPortrait) . ',' . ($landscapes + $flex - $toPortrait);
         $score = $table[$density][$key] ?? 0.0;
-        if ($score > $best) {
-            $best = $score;
+        if ($score > $bestScore) {
+            $bestScore      = $score;
+            $bestToPortrait = $toPortrait;
         }
     }
 
-    return $best;
+    $resolved = array();
+    foreach ($orientations as $i => $orientation) {
+        $resolved[$i] = $orientation === 'flex' ? null : $orientation;
+    }
+    foreach ($flexAt as $rank => $i) {
+        $resolved[$i] = $rank < $bestToPortrait ? 'portrait' : 'landscape';
+    }
+
+    return array_values($resolved);
 }
 
 /** House preference for a page size in the abstract, from config. */
