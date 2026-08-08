@@ -1,6 +1,7 @@
 /* Crop overlay.
  *
- *   const rect = await openCropper(src);   // null if cancelled
+ *   const rect = await openCropper(src);                          // free-form
+ *   const rect = await openCropper(src, { lockAspect, initial });  // pan/zoom
  *
  * Returns the selection in NORMALISED coordinates — fractions of the displayed
  * image, not pixels. Pixel coordinates would silently cut the wrong region if
@@ -15,6 +16,19 @@
  *
  * No dependencies and no build step, matching the rest of the app: the whole
  * interaction is pointer events against one absolutely positioned box.
+ *
+ * POST-LAUNCH ADDITION, `opts.lockAspect` (public/layout.php's "Adjust crop"
+ * — see PLAN.md): a book page's composition tree gives a photo slot a FIXED
+ * target shape, so that slot's crop isn't free-form — it's a pan-and-zoom
+ * within one aspect ratio (width/height). Every corner handle still works
+ * exactly as before EXCEPT resizing now holds the aspect fixed (the box
+ * grows/shrinks along whichever axis the drag moved more, the other axis
+ * follows), and "Reset" goes back to the largest centered box at that aspect
+ * instead of the full image. `opts.initial`, if given, seeds the starting box
+ * (editing a crop that already exists) instead of that centered default.
+ * Neither option changes anything for the two existing free-form callers
+ * (photo-batch.js, review.js) — they don't pass opts, so lockAspect stays
+ * null and every branch below falls through to the original behavior.
  */
 
 /** Matches IMAGEPROC_MIN_CROP server-side — reject the same crops it would. */
@@ -28,7 +42,20 @@ const HANDLES = [
   ['se', 1, 1],
 ];
 
-export function openCropper(src) {
+/** Largest box at `aspect` (width/height) centered in the unit square. */
+function centeredBoxAt(aspect) {
+  let w = 1;
+  let h = 1 / aspect;
+  if (h > 1) {
+    h = 1;
+    w = aspect;
+  }
+  return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
+}
+
+export function openCropper(src, opts = {}) {
+  const lockAspect = opts.lockAspect || null;
+
   return new Promise((resolve) => {
     const root = document.createElement('div');
     root.className = 'cropper';
@@ -88,8 +115,36 @@ export function openCropper(src) {
       frame.style.height = `${Math.round(nh * scale)}px`;
     }
 
+    /**
+     * `lockAspect` is a REAL-WORLD ratio (e.g. "this slot is rendered 1.8:1
+     * wide" — public/assets/layout.js reads it straight off the DOM), but
+     * every box in this file is a FRACTION of the displayed image, which has
+     * its OWN aspect ratio. A box that's `lockAspect` wide-for-tall AS A
+     * FRACTION only comes out `lockAspect` wide-for-tall ON SCREEN if the
+     * source image is itself square — for any other photo the fraction-space
+     * aspect has to be scaled by the image's own aspect first. Needs
+     * naturalWidth/Height, so this can't run until the image has loaded.
+     */
+    function lockFraction() {
+      if (!lockAspect) { return null; }
+      const nw = img.naturalWidth;
+      const nh = img.naturalHeight;
+      return nw && nh ? lockAspect / (nw / nh) : lockAspect;
+    }
+
     // The selection, in fractions of the image.
-    let box = { x: 0, y: 0, w: 1, h: 1 };
+    // What "Reset" goes back to, vs. what the cropper actually OPENED with —
+    // the same thing unless opts.initial seeds an existing crop, in which
+    // case Reset still means "start over from scratch" but "untouched" (see
+    // the apply handler below) means "didn't change what was already saved".
+    // opts.initial is already in fraction space (it's a rect THIS SAME tool
+    // saved before), so it needs no conversion — only the computed default
+    // does, and only once naturalWidth/Height are known (see lockFraction()),
+    // so both start as a placeholder and are corrected in the img 'load'
+    // handler below.
+    let defaultBox = lockAspect ? centeredBoxAt(lockAspect) : { x: 0, y: 0, w: 1, h: 1 };
+    let startBox = opts.initial ? { ...opts.initial } : { ...defaultBox };
+    let box = { ...startBox };
 
     function paint() {
       sel.style.left = `${box.x * 100}%`;
@@ -107,7 +162,7 @@ export function openCropper(src) {
     }
 
     function reset() {
-      box = { x: 0, y: 0, w: 1, h: 1 };
+      box = { ...defaultBox };
       paint();
     }
 
@@ -168,6 +223,39 @@ export function openCropper(src) {
       const right = o.x + o.w;
       const bottom = o.y + o.h;
 
+      const aspect = lockFraction();
+      if (aspect) {
+        // Pan/zoom within a fixed shape: the box may only grow or shrink,
+        // never change proportions. The axis the drag moved MORE (in width-
+        // equivalent terms) drives the resize; the other is derived to hold
+        // the aspect — same "dominant axis wins" idea a free resize already
+        // has per-axis, just resolved to one shared scale here. Uses the
+        // FRACTION-space aspect (see lockFraction()), not the real-world one
+        // opts.lockAspect was given in — dx/dy/w/h are all fractions here.
+        const growX = west ? -dx : dx;
+        const growY = north ? -dy : dy;
+        const growW = Math.abs(growX) >= Math.abs(growY * aspect) ? growX : growY * aspect;
+
+        // Bound BOTH dimensions jointly: how far w can grow before ITS OWN
+        // edge leaves the image, and how far it can grow before the
+        // aspect-derived h would push ITS edge out — take the tighter.
+        const maxWSelf = west ? right : (1 - o.x);
+        const maxHOther = north ? bottom : (1 - o.y);
+        const maxW = Math.min(maxWSelf, maxHOther * aspect);
+
+        const w = Math.max(MIN_FRAC, Math.min(maxW, o.w + growW));
+        const h = w / aspect;
+
+        box = {
+          x: west ? right - w : o.x,
+          y: north ? bottom - h : o.y,
+          w,
+          h,
+        };
+        paint();
+        return;
+      }
+
       let x = west ? clamp01(o.x + dx) : o.x;
       let y = north ? clamp01(o.y + dy) : o.y;
       let w = west ? right - x : clamp01(right + dx) - o.x;
@@ -219,17 +307,34 @@ export function openCropper(src) {
       if (act === 'cancel') finish(null);
       if (act === 'reset') reset();
       if (act === 'apply') {
-        // A full-frame selection is a no-op, not a crop — don't spend a
-        // re-encode and a colour re-extraction to produce the same image.
-        const untouched =
-          box.w > 0.999 && box.h > 0.999 && box.x < 0.001 && box.y < 0.001;
-        finish(untouched ? null : { ...box });
+        // A selection identical to what the cropper opened with (startBox)
+        // is a no-op — don't spend a re-encode (free-form) or a save
+        // (locked) to produce the same result. Free-form opens at the full
+        // frame, so this is the same "w=h=1, x=y=0" check as before; locked
+        // opens at defaultBox, or opts.initial if editing an existing crop,
+        // so "untouched" means "didn't change it", not "covers everything".
+        const EPS = 0.001;
+        const same = (a, b) =>
+          Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS
+          && Math.abs(a.w - b.w) < EPS && Math.abs(a.h - b.h) < EPS;
+        finish(same(box, startBox) ? null : { ...box });
       }
     });
 
     img.addEventListener('load', () => {
       fit();                          // needs naturalWidth, so not before load
-      reset();
+
+      // defaultBox needs the image's real aspect (lockFraction()), which
+      // isn't known until now — recompute it, and only OVERWRITE the current
+      // selection with it if there was no opts.initial to seed from (an
+      // initial rect is already correct fraction-space and shouldn't be
+      // discarded just because the image finished loading).
+      defaultBox = lockAspect ? centeredBoxAt(lockFraction()) : { x: 0, y: 0, w: 1, h: 1 };
+      if (!opts.initial) {
+        startBox = { ...defaultBox };
+        box = { ...defaultBox };
+      }
+      paint();
     });
     img.src = src;
 

@@ -1279,3 +1279,108 @@ Both rounds are the kind of gap `verify-*.php` cannot catch by
 construction (no browser exists in the build/test environment) — worth
 remembering as a category, not just these two fixed instances, the next
 time "all tests pass" is read as "this works."
+
+**Round 3 — book layout algorithm: asymmetric composition + adjustable
+crop.** Two complaints from a real generated layout: too many single-image
+pages, and every photo cropped into a square regardless of its own
+orientation ("I want to maintain the orientation of the image"). Both
+traced to one root cause: a page's slots were rendered as a flat set of
+EQUAL-SIZE cells (an HTML `<table>`/CSS grid of identical boxes), so a
+mismatched portrait+landscape pair had nowhere good to go — the on-screen
+preview covered the mismatch with `aspect-ratio:1; object-fit:cover`
+(forcing every photo into a square), and the engine leaned on 1-up pages
+partly to dodge that cost in the first place.
+
+Before writing any code, built a comparison Artifact showing two candidate
+fixes side by side — "letterboxed" (same equal-cell grid, switched from
+crop to contain-fit, so mismatches show visible bars) vs. "asymmetric" (the
+grid itself sized to the actual photos on it, cells hug their shape, no
+bars). Kathryn chose **asymmetric**, and said a LITTLE crop is fine as
+long as she can adjust it herself.
+
+**The fix — one composition tree, two renderers.** New `lib/layout_render.php`:
+a page's slots become a binary-split TREE (`layout_build_tree()`) — a row
+split shares height and sizes children by their own aspect ratio, a col
+split shares width and sizes children by `1/aspect`, following exactly the
+shapes `lib/layout.php`'s own `layout_orientation_table()` comments already
+named as good pages (two landscapes stack; a lone photo spans beside a
+stacked pair of the other orientation; a 2+2 groups into two uniform rows).
+Deliberately NOT a general bin-packer — a small set of named branches for
+1-4 elements, the same "small pure function, easy to retune" shape as the
+rest of the engine. `public/layout.php`'s preview walks the tree into
+nested `flex` divs (CSS does the sizing math); `lib/pdfexport.php` walks
+the SAME tree into nested `<table>`s with explicit millimeter widths/
+heights (`layout_resolve_geometry()`) since mPDF has no flexbox — one tree,
+never two opinions about the same page, which is exactly the kind of drift
+Phase 8's CSS-class audit caught once already (see that phase's own note
+above).
+
+**Deliberately NOT stored.** A page's resolved roles (which flex photo
+became portrait vs. landscape) and its tree shape are recomputed at RENDER
+TIME from the page's CURRENT slots, every time — not decided once at
+generate time and persisted. Same reasoning `photos.width`/`height` having
+no stored `orientation` column already uses (schema.sql): a decision stored
+once can disagree with what's actually in the slot after a Phase 6
+swap/move. The only per-page "memory" is a mirror bit for visual variety
+between same-shaped pages, derived from `page_number % 2` — free, and
+can't go stale either. Net effect: **no schema change was needed for the
+composition itself**, only for the crop override below.
+
+**Adjustable crop.** `book_page_photos` gets four new nullable columns —
+`crop_x`/`crop_y`/`crop_w`/`crop_h`, normalized fractions, NULL by default
+(auto-fit to whatever shape the tree currently gives that slot). Entirely
+non-destructive: unlike the existing `imageproc_crop_photo()` (which bakes
+a crop into a photo's ORIGINAL file, everywhere it appears), this only
+changes how ONE PLACEMENT of a photo is windowed on ONE page. `crop.js`'s
+`openCropper()` gained an optional `lockAspect`/`initial` mode (pan/zoom
+within a fixed shape, seeded from an existing crop) without changing
+behavior for its two existing free-form callers — the trickiest part was
+that `lockAspect` is a REAL-WORLD ratio but every box in that file is a
+FRACTION of the displayed image, so a non-square photo needs the target
+aspect converted through the image's own natural aspect before it means
+anything (`lockFraction()`) — caught this by writing a standalone Node
+script asserting the real, cut-pixel aspect ratio matched the requested
+one, not just that the fraction math ran without throwing. On the PDF
+side, each photo is pre-cropped to a real raster (`imageproc_crop_to_temp()`,
+reusing `imageproc_crop_photo()`'s own GD/Imagick primitives against a temp
+file, never touching `public/uploads/`) rather than leaning on `object-fit`,
+which mPDF's `<img>` doesn't reliably honor.
+
+**Consequence for drag-and-drop.** Swap and move used to patch the DOM
+directly ("these two nodes traded parents"), because a page used to be a
+flat list where that was the whole truth. It no longer is: swapping a
+landscape into a slot that held a portrait can flip that page's WHOLE tree
+shape (and, for a move, the source page's too). Both now reload on
+success, same as reflow/generate/activate already did — there's no longer
+a DOM patch that's fully described by "these two nodes changed."
+
+**Retuned** `layout.density_preference[1]` from 0.35 to 0.18 (both
+`config.example.php` and `lib/layout.php`'s own default, kept in sync) —
+the old value partly existed to make 1-up a viable escape from a bad crop,
+which the composition tree removed the need for; "mostly multi-image
+pages" needed the number turned down further to actually show up.
+
+**Files:** `lib/layout_render.php` (new), `lib/layout.php`
+(`layout_resolve_orientations()`, factored out of `layout_orientation_score()`
+so the two can never disagree), `lib/pdfexport.php`, `lib/imageproc.php`
+(`imageproc_crop_to_temp()`), `lib/repo.php` (`book_page_slot_set_crop()`),
+`public/layout.php`, `public/assets/{layout.js,crop.js,styles.css}`,
+`public/api/book-page-photos-crop.php` (new), `schema.sql`, `docs/SCHEMA.md`,
+`config.example.php`. New `tools/verify-layout-render.php` covers the tree
+builder, geometry resolver, and auto-crop math against the SQLite harness;
+`tools/verify-export.php`'s existing real-PDF assertions (page count, exact
+MediaBox size) still pass unchanged against the new nested-table renderer.
+
+**Schema change on an app that's already deployed.** This app has no
+migration runner (`schema.sql`'s own header) and re-importing it only helps
+brand-new tables, not new columns on an existing one — `DEPLOY.txt` now has
+a "SCHEMA UPDATES" section with the one-time `ALTER TABLE` Kathryn needs to
+run in Hostinger's phpMyAdmin, since a fresh `schema.sql` import silently
+does nothing to a table that already exists.
+
+**Still not browser-tested**, same standing caveat as the rest of this app —
+the tree math, geometry, and crop-rect math are proven against the SQLite
+harness and (for the PDF path) a real rendered PDF; the on-screen drag
+interaction, the crop-adjust gesture, and the actual visual result are
+traced by hand, not clicked. Worth a real first look before trusting it —
+same note Phase 8 left, still true.

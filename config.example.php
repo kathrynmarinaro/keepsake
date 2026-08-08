@@ -175,8 +175,20 @@ return array(
          * a photo that deserves a page of its own gets there by Kathryn
          * ticking "full page" on it (§2.4), not by the engine drifting
          * there. Raise the 1 to let more singles through.
+         *
+         * LOWERED POST-LAUNCH (PLAN.md), from 0.35: a mismatched pair used
+         * to have a real visual cost — the old renderer force-cropped every
+         * photo into a square, so pairing a portrait with a landscape meant
+         * one of them lost real content off its edges, and 1-up was a
+         * legitimate way to avoid that. lib/layout_render.php's composition
+         * tree removed that cost (a mismatched pair now gets an asymmetric
+         * split sized to each photo's own shape, no crop beyond what
+         * layout_auto_crop_rect() already does everywhere), so there's much
+         * less reason for the engine to reach for 1-up as an escape hatch —
+         * "mostly multi-image pages" (Kathryn's own request) needed this
+         * turned down further to actually show up in a generated book.
          */
-        'density_preference' => array(1 => 0.35, 2 => 1.0, 3 => 0.95, 4 => 0.85),
+        'density_preference' => array(1 => 0.18, 2 => 1.0, 3 => 0.95, 4 => 0.85),
 
         /* ---- rhythm / variety (brief §4.3: "not ten 2-up spreads in a row") ----
          * How many recently-emitted pages the engine remembers, and how hard
