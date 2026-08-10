@@ -82,7 +82,27 @@
     position: absolute; color: #333; font-size: 1.7cqw; line-height: 1.3;
     padding-top: 0.9cqw; overflow: hidden;
   }
-  .cap-foot { left: 7.5%; right: 7.5%; bottom: 4%; text-align: center; color: #555; }
+  /* Centred in the white space BETWEEN the photo block and the foot of the
+     page, rather than pinned a fixed distance up from the edge — Kathryn's
+     correction, and the right one: the block's height changes page to page, so
+     a fixed offset puts the line in a different relationship to the photos
+     every time. Positioned on its own midpoint so the two gaps stay equal
+     whatever the text wraps to. */
+  .cap-foot {
+    left: 7.5%; right: 7.5%; text-align: center; color: #555;
+    transform: translateY(-50%); padding-top: 0;
+    /* Never clipped. A caption you cannot fully see is one you cannot judge the
+       length of, and judging the length is the reason it is editable at all —
+       so an over-long line is allowed to crowd the photos above it. The page
+       showing the collision is the feedback. */
+    overflow: visible;
+  }
+  .cap-foot[contenteditable] { outline: none; border-radius: 3px; }
+  .cap-foot[contenteditable]:hover { background: rgba(0,0,0,0.035); box-shadow: 0 0 0 4px rgba(0,0,0,0.035); }
+  .cap-foot[contenteditable]:focus {
+    background: rgba(13,111,134,0.07); box-shadow: 0 0 0 4px rgba(13,111,134,0.07);
+  }
+  .edited { color: var(--sig-derived); font-weight: 600; }
   .page { container-type: inline-size; }
 
   .cap {
@@ -139,7 +159,7 @@
 
   <div class="legend">
     <p><b>Matched shapes</b> draws a row or column of same-orientation photos at one identical size, centre-cropping any that miss the target ratio. A mixed row &mdash; a landscape beside a portrait &mdash; is left alone and simply makes a rectangle, so the lower band of a 2&times;2 can be shorter than the upper. <b>Ratio widths</b> crops nothing and lets every photo set its own width. <b>Equal gaps</b> gives every photo the same <em>area</em>, so the outer edge goes ragged.</p>
-    <p>Pages that crop are called out under the page, with how much of the photo is lost. <span class="tag-derived">Cyan template names</span> are ones I derived to fill gaps your sketches don't cover. A <span class="tag-cross">dashed magenta edge</span> marks a page pairing two lone photos from different events.</p>
+    <p><b>Page foot</b> captions are editable &mdash; click one and type. Edits are kept in this browser so a reload will not lose them, and nothing is written back to the app. Pages that crop are called out under the page, with how much of the photo is lost. <span class="tag-derived">Cyan template names</span> are ones I derived to fill gaps your sketches don't cover. A <span class="tag-cross">dashed magenta edge</span> marks a page pairing two lone photos from different events.</p>
   </div>
 
   <h2 class="section" id="tpl-heading">Templates</h2>
@@ -443,6 +463,15 @@ let FILL = 0.85;
  *     reason a page can look like it has mysterious white space under an
  *     uncaptioned photo, and it is worth seeing before signing off.
  */
+/* Foot-caption edits, kept per page. Survives a reload so a rewrite is not lost
+ * to a stray refresh; deliberately not synced anywhere, because this is a proof
+ * and the app's own inline editing is where a real caption gets changed. */
+let capEdits = {};
+try { capEdits = JSON.parse(localStorage.getItem('kslab2-captions') || '{}'); } catch (e) { capEdits = {}; }
+function saveEdits() {
+  try { localStorage.setItem('kslab2-captions', JSON.stringify(capEdits)); } catch (e) { /* private mode */ }
+}
+
 const CAP_BAND = 0.16;   // share of a cell's height reserved when captioned
 const FOOT_BAND = 0.13;  // share of the page reserved by the page-foot style
 
@@ -496,11 +525,24 @@ function renderInto(el, list, numbered) {
     }
 
     if (CAPS === 'foot') {
+      const key = (numbered ? 'p' : 'c') + idx;
       const lines = rects.map(r => capOf(r.id)).filter(Boolean);
-      if (lines.length) {
+      const saved = capEdits[key];
+      if (lines.length || saved !== undefined) {
         const f = document.createElement('div');
         f.className = 'cap-foot';
-        f.textContent = lines.join('  \u00b7  ');
+        f.textContent = saved !== undefined ? saved : lines.join('  \u00b7  ');
+        /* Editable in place because Kathryn asked to be able to rewrite a line
+         * that runs too long, which is a judgement she can only make looking at
+         * the page. Edits are kept in localStorage so they survive a reload of
+         * the proof; nothing here writes to the app. */
+        f.contentEditable = 'true';
+        f.spellcheck = false;
+        f.addEventListener('input', () => { capEdits[key] = f.textContent; saveEdits(); });
+        /* Sit the line halfway between the bottom of the photos and the bottom
+         * of the page. */
+        const bottom = Math.max(...rects.map(r => r.y + r.h));
+        f.style.top = ((bottom + 100) / 2) + '%';
         page.appendChild(f);
       }
     }
