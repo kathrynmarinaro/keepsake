@@ -39,6 +39,18 @@
  *      patch that's "fully described by these two nodes", so this now
  *      follows the same reload rule reflow/generate/activate already use.
  *
+ *   6. The page's foot caption — the one line that prints under the photos.
+ *      Normally derived from the page's photos' own captions; typing over it
+ *      saves an override on the PAGE (api/book-pages-caption.php), and
+ *      emptying it back to nothing clears the override so the derived line
+ *      returns. Saved on blur rather than per keystroke: a caption is a
+ *      sentence, and a request per character would be both wasteful and
+ *      impossible to reason about if two landed out of order.
+ *
+ *      Does NOT reload. Unlike a swap or a move, a caption cannot reshape the
+ *      page — it is drawn in the white space the solver already left below
+ *      the photos, and its own length does not move a photo.
+ *
  *   5. "Adjust crop" — a photo slot's optional manual crop override
  *      (book_page_photos.crop_x/y/w/h). Opens crop.js's openCropper() locked
  *      to that slot's own rendered shape (read straight off the DOM — see
@@ -371,3 +383,67 @@ async function moveSlot(slotId, targetPageId) {
   showSnackbar('Moved.');
   window.location.reload();
 }
+
+
+/* ------------------------------------------------------------ page caption */
+
+/* What the field held when it was focused, so blur can tell "she changed it"
+   from "she tabbed through it" without a request either way. */
+let captionBefore = null;
+
+document.addEventListener('focusin', (event) => {
+  const field = event.target.closest('.ks-page-caption');
+  if (field) { captionBefore = field.textContent.trim(); }
+});
+
+document.addEventListener('focusout', async (event) => {
+  const field = event.target.closest('.ks-page-caption');
+  if (!field || captionBefore === null) { return; }
+
+  const before = captionBefore;
+  captionBefore = null;
+
+  const text = field.textContent.trim();
+  if (text === before) { return; }
+
+  /* Emptying the line means "go back to what the photos say", not "print an
+     empty caption" — the two are different states on the page row, and null is
+     the one that lets a later caption edit flow through again. Someone who
+     genuinely wants a bare page has the photos' captions to clear. */
+  const caption = text === '' ? null : text;
+
+  field.classList.add('is-saving');
+  try {
+    const res = await apiPost('api/book-pages-caption.php', {
+      page_id: Number(field.dataset.pageId),
+      caption,
+    });
+    /* Redraw from the response rather than from what was typed: clearing an
+       override brings the derived line back, and the server is the only thing
+       that knows what that line says. */
+    field.textContent = res.caption;
+    field.dataset.original = res.caption;
+  } catch (err) {
+    field.textContent = field.dataset.original || '';
+    showSnackbar(describe(err));
+  } finally {
+    field.classList.remove('is-saving');
+  }
+});
+
+/* Enter commits rather than opening a second line: this is one printed line,
+   and a stray newline in it would be invisible here and wrong in the PDF. */
+document.addEventListener('keydown', (event) => {
+  const field = event.target.closest('.ks-page-caption');
+  if (!field) { return; }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    field.blur();
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    field.textContent = field.dataset.original || '';
+    captionBefore = null;
+    field.blur();
+  }
+});

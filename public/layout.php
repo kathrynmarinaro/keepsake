@@ -35,7 +35,8 @@
  *     text cards aren't drag targets in this build.
  *
  * POST-LAUNCH REWORK (see PLAN.md): a "photos" page's slots no longer render
- * in a flat row of equal-size boxes cropped to squares. render_page_canvas()
+ * in a flat row of equal-size boxes cropped to squares. Round 6 replaced the
+ * nested-flex composition that succeeded it: render_page_canvas()
  * builds lib/layout_render.php's composition tree from the page's CURRENT
  * photos and walks it into nested flex divs sized to each photo's own
  * orientation — a landscape gets a wide cell, a portrait a narrow one — so
@@ -157,9 +158,9 @@ function render_snapshot_page(array $page): string
  * swap/move gestures act on (lib/repo.php's book_page_slot_swap()/_move()).
  *
  * $flexStyle is this leaf's `flex: <weight> 0 0` from
- * lib/layout_render.php's composition tree — see render_page_canvas() — so
- * this slot claims exactly its own photo's proportional share of the page
- * instead of an equal-sized cell.
+ * a rectangle solved by lib/compose.php — see render_page_canvas() — so this
+ * slot is positioned and sized by the same numbers the PDF uses, rather than
+ * by anything the browser works out for itself.
  *
  * A slot with a manual crop override (book_page_photos.crop_x/y/w/h, set via
  * the "Adjust crop" control) renders as a sized `background-image` instead
@@ -197,9 +198,12 @@ function render_photo_slot(array $slot, string $flexStyle = ''): string
         <button type="button" class="ks-slot-crop-btn" data-act="adjust-crop"
                 data-slot-id="<?= (int) $slot['id'] ?>" aria-label="Adjust crop">⤢</button>
       </div>
-      <?php if ($slot['caption']): ?>
-        <figcaption><?= h(page_snippet((string) $slot['caption'], 70)) ?></figcaption>
-      <?php endif; ?>
+      <?php /* No per-photo caption here any more. Kathryn chose the page-foot
+               treatment, so a photo's caption prints as part of one line at the
+               bottom of the page (book_page_caption()) — showing it under the
+               photo as well would put something on this screen that the book
+               will not have. Captions are still authored per photo, on the
+               review screen. */ ?>
     </figure>
     <?php
     return ob_get_clean();
@@ -227,34 +231,23 @@ function render_text_slot(array $slot, bool $standalone, string $flexStyle = '')
 }
 
 /**
- * Walk lib/layout_render.php's composition tree, emitting nested
- * `.ks-split-row`/`.ks-split-col` wrappers down to each leaf slot. The
- * OUTER call (from render_page_canvas()) never wraps the root in an extra
- * div — .ks-page-canvas itself plays that role, sized to the book's square
- * trim (styles.css) — so every div this function emits corresponds to one
- * real split in the tree, nothing decorative.
+ * One occupant, positioned absolutely from a solved rectangle.
+ *
+ * The rectangle is a percentage of the square page, straight out of
+ * compose_solve(), so this function does no geometry of its own — that is the
+ * point. The same numbers drive lib/pdfexport.php, which is the only way the
+ * preview and the printed book can be guaranteed to agree.
  */
-function render_tree_node(array $node, array $slots): string
+function render_placed_slot(array $slot, array $rect): string
 {
-    $flexStyle = 'flex:' . round((float) $node['aspect'], 4) . ' 0 0;';
+    $style = sprintf(
+        'position:absolute;left:%.4f%%;top:%.4f%%;width:%.4f%%;height:%.4f%%;',
+        $rect['x'], $rect['y'], $rect['w'], $rect['h']
+    );
 
-    if (isset($node['leaf'])) {
-        $slot = $slots[$node['leaf']] ?? null;
-        if ($slot === null) {
-            return '';
-        }
-        return $slot['photo_id'] !== null
-            ? render_photo_slot($slot, $flexStyle)
-            : render_text_slot($slot, false, $flexStyle);
-    }
-
-    ob_start();
-    ?>
-    <div class="ks-split ks-split-<?= h($node['split']) ?>" style="<?= h($flexStyle) ?>">
-      <?php foreach ($node['children'] as $child) { echo render_tree_node($child, $slots); } ?>
-    </div>
-    <?php
-    return ob_get_clean();
+    return $slot['photo_id'] !== null
+        ? render_photo_slot($slot, $style)
+        : render_text_slot($slot, false, $style);
 }
 
 /**
@@ -268,27 +261,54 @@ function render_tree_node(array $node, array $slots): string
  * $mirror alternates by page NUMBER, not stored anywhere — plain visual
  * variety between two same-shaped pages a reader will see close together.
  */
-function render_page_canvas(array $slots, int $pageNumber): string
+function render_page_canvas(array $slots, ?array $choice, string $caption, int $pageId): string
 {
-    $orientations = array();
-    foreach ($slots as $slot) {
-        $orientations[] = $slot['photo_id'] !== null ? layout_orientation($slot) : 'flex';
+    if ($choice === null) {
+        /* No template accepts these shapes. Draw the page empty and say so,
+         * rather than inventing an arrangement: a page that looks plausible and
+         * is wrong is worse than one that is visibly broken. */
+        return '<div class="ks-page-canvas is-unplaceable">'
+            . '<p class="hint">No template fits this page\'s photo shapes.</p></div>';
     }
 
-    $tree   = layout_page_tree($orientations, $pageNumber % 2 === 0);
-    $inner  = isset($tree['leaf'])
-        ? render_tree_node($tree, $slots)
-        : implode('', array_map(
-            static fn(array $child): string => render_tree_node($child, $slots),
-            $tree['children']
-        ));
-    $direction = isset($tree['leaf']) ? 'row' : $tree['split'];
+    $tpl   = compose_templates()[$choice['name']];
+    $occ   = compose_bind(compose_occupants($slots), $tpl, $choice['order']);
+    $rects = compose_solve($tpl, $occ);
 
-    return '<div class="ks-page-canvas ks-split-' . h($direction) . '">' . $inner . '</div>';
+    $inner = '';
+    foreach ($rects as $rect) {
+        $slot = $slots[$choice['order'][$rect['slot']]] ?? null;
+        if ($slot !== null) {
+            $inner .= render_placed_slot($slot, $rect);
+        }
+    }
+
+    /* The foot caption sits centred in the white space between the photos and
+     * the bottom of the page — Kathryn's correction to a fixed offset, which
+     * put the line in a different relationship to the photos on every page
+     * because the block's height changes. Computed from the solved rectangles
+     * rather than guessed. */
+    $bottom = 0.0;
+    foreach ($rects as $rect) {
+        $bottom = max($bottom, $rect['y'] + $rect['h']);
+    }
+    $footTop = ($bottom + 100.0) / 2.0;
+
+    $inner .= sprintf(
+        '<div class="ks-page-caption" style="top:%.4f%%" data-page-id="%d" '
+            . 'contenteditable="true" spellcheck="false" role="textbox" '
+            . 'aria-label="Page caption" data-original="%s">%s</div>',
+        $footTop,
+        $pageId,
+        h($caption),
+        h($caption)
+    );
+
+    return '<div class="ks-page-canvas">' . $inner . '</div>';
 }
 
 /** One page card: header, reflow button, and whichever body its page_type calls for. */
-function render_page(array $page): string
+function render_page(array $page, ?array $choice): string
 {
     ob_start();
     $type = (string) $page['page_type'];
@@ -315,7 +335,12 @@ function render_page(array $page): string
               // identical fail-soft case. ?>
         <p class="hint">(empty page)</p>
       <?php else: ?>
-        <?= render_page_canvas($page['slots'], (int) $page['page_number']) ?>
+        <?= render_page_canvas(
+              $page['slots'],
+              $choice,
+              book_page_caption($page, $page['slots']),
+              (int) $page['id']
+            ) ?>
       <?php endif; ?>
     </section>
     <?php
@@ -489,10 +514,28 @@ function render_page(array $page): string
           regenerates every page from that one to the end of the book — the
           pages before it are never touched.
         </p>
+        <?php
+          /* Template choice is a property of the SEQUENCE, not of one page —
+             interchangeable layouts rotate by least-recently-used so a book of
+             portraits is not the same arrangement forty times over. So it is
+             computed once for the whole layout here and handed down, which is
+             also what lets lib/pdfexport.php arrive at the same answer. */
+          $choices = array();
+          $photoPages = array();
+          foreach ($pages as $page) {
+              if ($page['page_type'] === 'photos' && $page['slots'] !== array()) {
+                  $photoPages[] = (int) $page['id'];
+                  $occupants[]  = compose_occupants($page['slots']);
+              }
+          }
+          foreach (compose_assign($occupants ?? array()) as $i => $choice) {
+              $choices[$photoPages[$i]] = $choice;
+          }
+        ?>
         <div class="ks-book" data-layout-id="<?= (int) $selected['id'] ?>">
           <?php foreach (array_chunk($pages, 2) as $spread): ?>
             <div class="ks-spread">
-              <?php foreach ($spread as $page) { echo render_page($page); } ?>
+              <?php foreach ($spread as $page) { echo render_page($page, $choices[(int) $page['id']] ?? null); } ?>
             </div>
           <?php endforeach; ?>
         </div>

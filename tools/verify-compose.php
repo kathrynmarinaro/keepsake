@@ -172,6 +172,73 @@ if (compose_fill(array(array('shape' => 'P', 'ar' => 0.75)), compose_templates()
 }
 $checks++;
 
+/* --------------------------------------------- occupants, binding, assignment */
+
+/* A photo with no stored dimensions must still reach the page. It becomes a
+ * wildcard rather than a guess, which is the fail-soft branch this app asks for
+ * everywhere: one bad row degrades itself, never the screen. */
+$occ = compose_occupants(array(
+    array('photo_id' => 1, 'width' => 3024, 'height' => 4032),
+    array('photo_id' => 2, 'width' => 4032, 'height' => 3024),
+    array('photo_id' => 3, 'width' => 0, 'height' => 0),
+    array('photo_id' => null, 'quote_id' => 9),
+));
+$checks++;
+if (array_column($occ, 'shape') !== array('P', 'L', '*', '*')) {
+    bad('compose_occupants: got ' . implode(',', array_column($occ, 'shape')));
+}
+
+/* A card between two portraits must not break the matched group. It takes the
+ * SHAPE of its slot, not just a ratio — without that the row falls back to
+ * ratio widths and the cells stop agreeing, which is the page-10 fault. */
+$tpl   = compose_templates()['row-PPP'];
+$occ   = array(
+    array('shape' => 'P', 'ar' => 0.75),
+    array('shape' => '*', 'ar' => 0.75),
+    array('shape' => 'P', 'ar' => 0.681),
+);
+$order = compose_fill($occ, $tpl);
+$checks++;
+if ($order === null) {
+    bad('compose_fill: a card should satisfy a portrait slot');
+} else {
+    $bound = compose_bind($occ, $tpl, $order);
+    if (array_column($bound, 'shape') !== array('P', 'P', 'P')) {
+        bad('compose_bind: wildcard did not take its slot shape');
+    }
+    $rects = compose_solve($tpl, $bound);
+    $w = $rects[0]['w'];
+    foreach ($rects as $r) {
+        if (abs($r['w'] - $w) > 1e-6) {
+            bad('compose_bind: a card broke the matched group');
+            break;
+        }
+    }
+}
+
+/* Interchangeable templates must rotate. row-PPP and heroP-PP both take three
+ * portraits; picking whichever enumerated first is what left the lab using 11
+ * of 19 templates, and a book of portraits looking like one page repeated. */
+$three   = array_fill(0, 3, array('shape' => 'P', 'ar' => 0.75));
+$assign  = compose_assign(array($three, $three, $three, $three));
+$names   = array_column($assign, 'name');
+$checks++;
+if (count(array_unique(array_slice($names, 0, 2))) !== 2) {
+    bad('compose_assign: two identical pages in a row used the same template (' . implode(',', $names) . ')');
+}
+$checks++;
+if (compose_assign(array($three, $three, $three, $three)) !== $assign) {
+    bad('compose_assign: not deterministic — the preview and the PDF would disagree');
+}
+
+/* A page nothing can draw reports null rather than a wrong template. */
+$checks++;
+if (compose_assign(array(array_fill(0, 4, array('shape' => 'L', 'ar' => 4 / 3)),
+                         array(array('shape' => 'P', 'ar' => 0.75)),
+                   ))[0] === null) {
+    bad('compose_assign: four landscapes do have a template');
+}
+
 printf("%d checks\n", $checks);
 if ($fails > 0) {
     printf("FAILED (%d)\n", $fails);

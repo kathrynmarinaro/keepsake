@@ -277,6 +277,125 @@ function compose_candidates(array $run, array $lastUsed): array
     return $out;
 }
 
+/**
+ * Turn a page's stored slots into occupants the solver understands.
+ *
+ * The bridge between what the database holds and what this file reasons about,
+ * and the one place the two renderers agree on what a slot IS — so the preview
+ * and the PDF cannot form different opinions about a photo's shape.
+ *
+ * A photo with no stored dimensions becomes a wildcard rather than being
+ * guessed at, and takes the canonical ratio of whatever slot it lands in. That
+ * is the fail-soft branch: a photo whose EXIF never parsed still appears in the
+ * book, at a sensible shape, instead of taking the page down with it.
+ *
+ * A text card is a wildcard by nature — it is typeset into whatever rectangle
+ * it is given, which is why it can sit in a slot of either shape.
+ *
+ * @param list<array> $slots book_page_photos rows, in slot order
+ */
+function compose_occupants(array $slots): array
+{
+    $out = array();
+    foreach ($slots as $slot) {
+        if (($slot['photo_id'] ?? null) === null) {
+            $out[] = array('shape' => '*', 'ar' => COMPOSE_CANON['P'], 'card' => true);
+            continue;
+        }
+
+        $w = (int) ($slot['width'] ?? 0);
+        $h = (int) ($slot['height'] ?? 0);
+        if ($w <= 0 || $h <= 0) {
+            $out[] = array('shape' => '*', 'ar' => COMPOSE_CANON['P']);
+            continue;
+        }
+
+        $ar = $w / $h;
+        $out[] = array('shape' => $ar > 1.05 ? 'L' : ($ar < 0.95 ? 'P' : '*'), 'ar' => $ar);
+    }
+    return $out;
+}
+
+/**
+ * Choose a template for every page of a layout, in one pass.
+ *
+ * Done for the WHOLE layout rather than per page because the choice depends on
+ * what the pages before it used: several templates accept the same shapes, and
+ * picking the least recently used one is what stops a book of portraits being
+ * the same arrangement forty times. That is a property of the sequence, so a
+ * per-page function could not compute it.
+ *
+ * It also has to be identical in the browser preview and the PDF. Deriving it
+ * from the page's own content plus its position — rather than storing a choice
+ * when the layout is generated — follows the same reasoning layout_render.php
+ * used for its mirror bit: a decision recomputed from current content cannot
+ * disagree with itself after a manual swap or a reflow moves photos around,
+ * where a stored one silently would.
+ *
+ * A page whose shapes no template accepts gets null rather than a wrong
+ * template. Callers draw nothing for it and the page is visibly empty, which is
+ * a bug someone can see; guessing would produce a page that looks plausible and
+ * is wrong.
+ *
+ * @param list<list<array{shape:string,ar:float}>> $pages occupants per page, in
+ *   page order
+ * @return list<array{name:string,order:list<int>}|null>
+ */
+function compose_assign(array $pages): array
+{
+    $lastUsed = array();
+    $out      = array();
+
+    foreach ($pages as $index => $occ) {
+        $candidates = compose_candidates($occ, $lastUsed);
+        if ($candidates === array()) {
+            $out[] = null;
+            continue;
+        }
+
+        $pick = $candidates[0];
+        $lastUsed[$pick['name']] = $index;
+        $out[] = array('name' => $pick['name'], 'order' => $pick['order']);
+    }
+
+    return $out;
+}
+
+/**
+ * Put a page's occupants into TEMPLATE SLOT ORDER, resolving wildcards.
+ *
+ * compose_fill() answers "which occupant goes in which slot"; the solver wants
+ * them in slot order, so this is the step between. Two things happen here that
+ * matter more than the reordering:
+ *
+ * A wildcard — a text card, or a photo whose dimensions never parsed — takes on
+ * the SHAPE of the slot it landed in, not merely its ratio. Without that it
+ * would break a matched group: two portraits either side of a card would stop
+ * counting as "all the same orientation" and the row would fall back to ratio
+ * widths, which is the fault Kathryn rejected on page 10. A card is typeset
+ * into whatever rectangle it is given, so calling it a portrait when it sits in
+ * a portrait slot is simply true.
+ *
+ * The caller keeps $order to map a solved rectangle back to its database row:
+ * rect['slot'] indexes the TEMPLATE, and $order[rect['slot']] indexes the
+ * page's slots.
+ *
+ * @return list<array{shape:string,ar:float}> in slot order
+ */
+function compose_bind(array $occ, array $tpl, array $order): array
+{
+    $bound = array();
+    foreach ($tpl['slots'] as $i => $want) {
+        $o = $occ[$order[$i]];
+        if ($o['shape'] === '*') {
+            $o['shape'] = $want;
+            $o['ar']    = COMPOSE_CANON[$want];
+        }
+        $bound[] = $o;
+    }
+    return $bound;
+}
+
 /* ------------------------------------------------------------------ solver */
 
 /**
