@@ -321,6 +321,10 @@ year_project_update_subtitle($yp, 'The year we went to the beach');
 year_project_set_cover_photo($yp, $heroPhoto);
 
 $expectedPages = 2 + count(book_pages_for_layout($run['layout_id']));
+$photoPageCount = count(array_filter(
+    book_pages_for_layout($run['layout_id']),
+    static fn(array $p): bool => $p['page_type'] === 'photos' && $p['slots'] !== array()
+));
 
 /** Extract every distinct /MediaBox entry and every /Type /Page (not
  *  /Pages) object from raw PDF bytes — the crude-but-works technique
@@ -359,6 +363,29 @@ foreach ($boxes as $box) {
     }
 }
 check('every MediaBox in the file matches the configured trim+bleed size in points', $allMatch);
+
+/* The photos actually made it in.
+ *
+ * Added after a real miss: pdf_render_page_html() was handed a template choice
+ * that was never declared as a parameter, so every photo page silently took the
+ * "no template fits" branch and exported as a line of grey text. Every check
+ * above still passed — the file was a PDF, the page count was right, the trim
+ * was right — because none of them looked at whether a page had a PHOTO on it.
+ * A book of empty pages is the most expensive way for this exporter to fail and
+ * was, until now, the one thing it could do unnoticed. */
+$imageCount = preg_match_all('/\/Subtype\s*\/Image/', $export['bytes']);
+check('the PDF embeds image data at all (got ' . $imageCount . ' image objects for '
+    . $photoPageCount . ' photo pages)', $imageCount >= 1);
+/* Not one image PER page: every photo in this fixture is the same JPEG, and
+ * mPDF stores identical images once and places them repeatedly, so a per-page
+ * count would be testing the deduplicator rather than the exporter. What
+ * actually catches the failure is the two placeholders below — both of them
+ * mean "a page came out with no photograph on it", which is the shape the bug
+ * took and the shape any repeat of it would take. */
+check('no page fell back to the no-template placeholder',
+    strpos($export['bytes'], 'no template fits') === false);
+check('no page fell back to the missing-file placeholder',
+    strpos($export['bytes'], 'Photo not found') === false);
 
 /* ================================================ fail soft: zero pages == */
 

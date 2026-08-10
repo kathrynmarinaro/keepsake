@@ -525,11 +525,26 @@ function compose_width(array $node, float $h, float $gap, array $occ): float
     return ($lo + $hi) / 2.0;
 }
 
-function compose_place(array $node, float $x, float $y, float $w, float $h, float $gap, array $occ, array &$out): void
+/**
+ * Place a node and everything under it, returning an ANNOTATED TREE rather than
+ * a flat list: every node, split or leaf, carries the rectangle it occupies.
+ *
+ * The tree shape is what the PDF exporter needs. mPDF ignores CSS `left`/`top`
+ * outright — a quick probe put three absolutely-positioned boxes all at x=0 —
+ * so it cannot place rectangles the way a browser can, and has to rebuild the
+ * page as nested tables. Handing it the tree with sizes already solved means it
+ * reconstructs the arrangement without ever redoing the arithmetic, which is
+ * the whole point: two renderers, one layout.
+ *
+ * compose_solve() flattens this to the leaves for callers that just want the
+ * rectangles. One implementation, two shapes of answer.
+ */
+function compose_place(array $node, float $x, float $y, float $w, float $h, float $gap, array $occ): array
 {
+    $rect = array('x' => $x, 'y' => $y, 'w' => $w, 'h' => $h);
+
     if ($node['t'] === 'leaf') {
-        $out[] = array('slot' => $node['i'], 'x' => $x, 'y' => $y, 'w' => $w, 'h' => $h, 'crop' => 0.0);
-        return;
+        return array('t' => 'leaf', 'slot' => $node['i'], 'crop' => 0.0) + $rect;
     }
 
     if (compose_uniform($node, $occ)) {
@@ -539,39 +554,57 @@ function compose_place(array $node, float $x, float $y, float $w, float $h, floa
         $cw  = $row ? $c : $c * $t;
         $ch  = $row ? $c / $t : $c;
 
-        $grp = count($out);   // cells of one group share the index of the first
-        $cx  = $x;
-        $cy  = $y;
+        /* Cells of one matched group share an identifier, so a caller can assert
+         * they came out identical — the property Kathryn rejected two builds
+         * over. Uses the group's own position, which is stable. */
+        $grp = sprintf('%s@%.4f,%.4f', $node['t'], $x, $y);
+        $kids = array();
+        $cx   = $x;
+        $cy   = $y;
         foreach ($node['k'] as $kid) {
-            $o = $occ[$kid['i']];
-            $out[] = array(
-                'slot' => $kid['i'], 'x' => $cx, 'y' => $cy, 'w' => $cw, 'h' => $ch,
+            $o      = $occ[$kid['i']];
+            $kids[] = array(
+                't' => 'leaf', 'slot' => $kid['i'], 'x' => $cx, 'y' => $cy, 'w' => $cw, 'h' => $ch,
                 /* A text card is typeset into whatever rectangle it is given, so
                  * it is never "cropped" however far its slot is from canonical. */
-                'crop' => $o['shape'] === '*' ? 0.0 : compose_crop_loss($o['ar'], $t),
+                'crop'  => $o['shape'] === '*' ? 0.0 : compose_crop_loss($o['ar'], $t),
                 'group' => $grp,
             );
             if ($row) { $cx += $cw + $gap; } else { $cy += $ch + $gap; }
         }
-        return;
+        return array('t' => $node['t'], 'k' => $kids) + $rect;
     }
 
+    $kids = array();
     if ($node['t'] === 'row') {
         $cx = $x;
         foreach ($node['k'] as $kid) {
-            $kw = compose_width($kid, $h, $gap, $occ);
-            compose_place($kid, $cx, $y, $kw, $h, $gap, $occ, $out);
-            $cx += $kw + $gap;
+            $kw     = compose_width($kid, $h, $gap, $occ);
+            $kids[] = compose_place($kid, $cx, $y, $kw, $h, $gap, $occ);
+            $cx    += $kw + $gap;
         }
-        return;
+        return array('t' => 'row', 'k' => $kids) + $rect;
     }
 
     $cy = $y;
     foreach ($node['k'] as $kid) {
-        $kh = compose_height($kid, $w, $gap, $occ);
-        compose_place($kid, $x, $cy, $w, $kh, $gap, $occ, $out);
-        $cy += $kh + $gap;
+        $kh     = compose_height($kid, $w, $gap, $occ);
+        $kids[] = compose_place($kid, $x, $cy, $w, $kh, $gap, $occ);
+        $cy    += $kh + $gap;
     }
+    return array('t' => 'col', 'k' => $kids) + $rect;
+}
+
+/** Every leaf of an annotated tree, in slot order. */
+function compose_flatten(array $node, array &$out = array()): array
+{
+    if ($node['t'] === 'leaf') {
+        $out[] = $node;
+    } else {
+        foreach ($node['k'] as $kid) { compose_flatten($kid, $out); }
+    }
+    usort($out, static fn(array $a, array $b): int => $a['slot'] <=> $b['slot']);
+    return $out;
 }
 
 /**
@@ -597,9 +630,30 @@ function compose_solve(array $tpl, array $occ, float $fill = COMPOSE_FILL, float
         $w = compose_width($tpl['tree'], $box, $gap, $occ);
     }
 
-    $out = array();
-    compose_place($tpl['tree'], $off + ($box - $w) / 2.0, $off + ($box - $h) / 2.0, $w, $h, $gap, $occ, $out);
+    return compose_flatten(compose_solve_tree($tpl, $occ, $fill, $gap));
+}
 
-    usort($out, static fn(array $a, array $b): int => $a['slot'] <=> $b['slot']);
-    return $out;
+/**
+ * The same solve, kept as a tree. For renderers that cannot place a rectangle
+ * where they are told and have to rebuild the arrangement structurally — which
+ * is mPDF, and the reason this exists.
+ */
+function compose_solve_tree(array $tpl, array $occ, float $fill = COMPOSE_FILL, float $gap = COMPOSE_GAP): array
+{
+    $box = $fill * 100.0;
+    $off = (100.0 - $box) / 2.0;
+
+    $w = $box;
+    $h = compose_height($tpl['tree'], $box, $gap, $occ);
+    if ($h > $box) {
+        $h = $box;
+        $w = compose_width($tpl['tree'], $box, $gap, $occ);
+    }
+
+    return compose_place(
+        $tpl['tree'],
+        $off + ($box - $w) / 2.0,
+        $off + ($box - $h) / 2.0,
+        $w, $h, $gap, $occ
+    );
 }

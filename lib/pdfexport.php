@@ -283,26 +283,34 @@ function pdf_render_title_html(array $project): string
  * caption shown inline — the ONLY captioning mechanism a photo has, per
  * schema.sql) or, per brief §4.3, one text-card slot mixed in among them.
  *
- * POST-LAUNCH REWORK (PLAN.md): the old renderer picked from a small set of
- * equal-cell table shapes keyed off a landscape count, then let each <img>
- * flow at `width:100%` — no crop, but a mismatched pair still got squeezed
- * into the same box, and it disagreed with what public/layout.php actually
- * showed on screen (which back then force-cropped to a square — the two
- * renderers had two different opinions about the same page). Both are now
- * driven by lib/layout_render.php's ONE composition tree
- * (layout_page_tree()) — the browser lets flexbox resolve it; mPDF has no
- * flexbox, so pdf_render_tree_node() below resolves the same row/col weight
- * math into nested <table>s with explicit millimeter widths/heights, and
- * pre-crops each photo (imageproc_crop_to_temp()) to the EXACT box it lands
- * in rather than leaning on any CSS-level object-fit, which mPDF's <img>
- * support doesn't reliably honor.
+ * ROUND 6 (PLAN.md): both renderers now draw ONE SOLVED LAYOUT.
+ *
+ * lib/compose.php sizes the page and hands back rectangles in percent of the
+ * square trim. The browser positions them absolutely. mPDF cannot: it ignores
+ * CSS `left` and `top` outright — a probe put three absolutely-positioned
+ * boxes all at x=0, stacked — which is the same limitation the cover's
+ * negative-margin hack works around further up this file.
+ *
+ * So this renderer takes the solve as a TREE (compose_solve_tree()) and
+ * rebuilds it as nested <table>s with explicit millimetre sizes. Every size
+ * comes from a rectangle the solver already computed; the gaps are read as the
+ * distance BETWEEN sibling rectangles rather than being a constant of this
+ * file's own. Nothing here decides how big anything is, which is the point —
+ * the previous version resolved the same row/col weight maths independently,
+ * and two implementations of one layout is what this file's history is a
+ * record of going wrong.
+ *
+ * Photos are still pre-cropped (imageproc_crop_to_temp()) to the exact box they
+ * land in rather than leaning on CSS object-fit, which mPDF's <img> support
+ * does not reliably honour. Under the new rules most boxes are the photo's own
+ * shape and that crop is a no-op; it does real work only where the solver
+ * matched a photo to its neighbours' ratio.
  */
-function pdf_render_photos_page_html(array $page, array $geo): string
+function pdf_render_photos_page_html(array $page, array $geo, ?array $choice, string $caption): string
 {
     $slots = $page['slots'];
-    $n     = count($slots);
 
-    if ($n === 0) {
+    if ($slots === array()) {
         // Phase 6's known gap (PLAN.md's Phase 6 note): moving the only
         // photo off a page can leave an empty book_pages row behind until a
         // reflow. Fail soft here too — a quiet blank page, not a crash.
@@ -310,84 +318,116 @@ function pdf_render_photos_page_html(array $page, array $geo): string
             . '(empty page)</div>';
     }
 
-    $orientations = array();
-    foreach ($slots as $slot) {
-        $orientations[] = $slot['photo_id'] !== null ? layout_orientation($slot) : 'flex';
+    if ($choice === null) {
+        /* No template accepts these shapes. Same call as the preview: a page
+         * that is visibly wrong beats one that looks plausible and isn't. */
+        return '<div style="text-align:center;padding-top:45%;color:#999;font-family:sans-serif;">'
+            . '(no template fits this page)</div>';
     }
 
-    $mirror = ((int) $page['page_number']) % 2 === 0;
-    $tree   = layout_page_tree($orientations, $mirror);
+    $tpl  = compose_templates()[$choice['name']];
+    $occ  = compose_bind(compose_occupants($slots), $tpl, $choice['order']);
+    $tree = compose_solve_tree($tpl, $occ);
 
-    return pdf_render_tree_node($tree, $slots, (float) $geo['content_width_mm'], (float) $geo['content_height_mm']);
+    $pageMm = (float) $geo['content_width_mm'];
+    $tallMm = (float) $geo['content_height_mm'];
+
+    /* The solved block sits somewhere inside the trim, and mPDF cannot be told
+     * to put it there. A spacer row above and a spacer cell to the left place
+     * it — crude, but it is the one construct mPDF sizes reliably. */
+    $blockX = $tree['x'] / 100.0 * $pageMm;
+    $blockY = $tree['y'] / 100.0 * $tallMm;
+    $blockW = $tree['w'] / 100.0 * $pageMm;
+    $blockH = $tree['h'] / 100.0 * $tallMm;
+
+    $inner = pdf_render_solved_node($tree, $slots, $choice['order'], $pageMm, $tallMm);
+
+    $html = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+        . '<tr><td style="height:' . round($blockY, 2) . 'mm;"></td></tr>'
+        . '<tr><td style="height:' . round($blockH, 2) . 'mm;vertical-align:top;">'
+        . '<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>'
+        . '<td style="width:' . round($blockX, 2) . 'mm;"></td>'
+        . '<td style="width:' . round($blockW, 2) . 'mm;vertical-align:top;">' . $inner . '</td>'
+        . '</tr></table></td></tr>';
+
+    /* The foot caption, centred in the white space under the photos — the same
+     * midpoint the preview uses, so the printed line sits where the screen said
+     * it would. Given as a fixed-height row so a long caption cannot push the
+     * page taller than the trim. */
+    if ($caption !== '') {
+        $footMm = max(0.0, $tallMm - ($blockY + $blockH));
+        $html .= '<tr><td style="height:' . round($footMm, 2) . 'mm;vertical-align:middle;'
+            . 'text-align:center;font-family:sans-serif;font-size:8.5pt;color:#444;'
+            . 'line-height:1.3;overflow:hidden;">' . pdf_esc(pdf_clip_text($caption)) . '</td></tr>';
+    }
+
+    return $html . '</table>';
 }
 
 /**
- * Recursively resolve one composition-tree node into HTML sized to exactly
- * $wMm x $hMm — a leaf becomes one slot's content at that size; a split
- * becomes a nested <table> whose columns (row split) or rows (col split) are
- * explicit millimeter widths/heights in the children's weight ratio (the
- * same "row: proportional to aspect, col: proportional to 1/aspect" rule
- * lib/layout_render.php's header documents — every node already carries its
- * own precomputed 'aspect', so this doesn't recompute the table).
+ * One node of a solved composition tree, as nested <table>s.
  *
- * A small fixed gap (PDF_RENDER_GAP_MM) between cells stands in for CSS
- * flexbox's `gap` — mm here since this is the one renderer with no CSS gap
- * property to lean on.
+ * Sizes come from the rectangles, never from a weight recomputed here. Sibling
+ * spacing is read as the distance between one child's far edge and the next
+ * child's near edge, so the gap on paper is the gap the solver actually left
+ * and there is no constant in this file that could drift from it.
  */
-const PDF_RENDER_GAP_MM = 3.0;
-
-function pdf_render_tree_node(array $node, array $slots, float $wMm, float $hMm): string
+function pdf_render_solved_node(array $node, array $slots, array $order, float $pageMm, float $tallMm): string
 {
-    if (isset($node['leaf'])) {
-        $slot = $slots[$node['leaf']] ?? null;
+    if ($node['t'] === 'leaf') {
+        $slot = $slots[$order[$node['slot']]] ?? null;
         if ($slot === null) {
             return '';
         }
+        $wMm = $node['w'] / 100.0 * $pageMm;
+        $hMm = $node['h'] / 100.0 * $tallMm;
+
         return $slot['photo_id'] !== null
             ? pdf_render_photo_cell_sized($slot, $wMm, $hMm)
             : pdf_render_text_cell_sized($slot, $wMm, $hMm);
     }
 
-    $weights = array();
-    foreach ($node['children'] as $child) {
-        $a         = (float) $child['aspect'];
-        $weights[] = $node['split'] === 'row' ? $a : (1.0 / max(0.0001, $a));
-    }
-    $total = array_sum($weights) ?: count($weights);
-    $count = count($node['children']);
-    $gaps  = PDF_RENDER_GAP_MM * max(0, $count - 1);
+    $kids  = $node['k'];
+    $count = count($kids);
 
-    if ($node['split'] === 'row') {
-        $availW = max(1.0, $wMm - $gaps);
-        $html   = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>';
-        foreach ($node['children'] as $i => $child) {
-            $cw   = max(5.0, $availW * ($weights[$i] / $total));
-            $pad  = $i < $count - 1 ? PDF_RENDER_GAP_MM . 'mm' : '0';
-            $html .= '<td style="width:' . round($cw, 2) . 'mm;padding:0 ' . $pad . ' 0 0;vertical-align:top;">'
-                . pdf_render_tree_node($child, $slots, $cw, $hMm) . '</td>';
+    if ($node['t'] === 'row') {
+        $html = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>';
+        foreach ($kids as $i => $kid) {
+            $wMm = $kid['w'] / 100.0 * $pageMm;
+            $gap = $i < $count - 1
+                ? max(0.0, ($kids[$i + 1]['x'] - ($kid['x'] + $kid['w'])) / 100.0 * $pageMm)
+                : 0.0;
+            $html .= '<td style="width:' . round($wMm, 2) . 'mm;padding:0 ' . round($gap, 2)
+                . 'mm 0 0;vertical-align:top;">'
+                . pdf_render_solved_node($kid, $slots, $order, $pageMm, $tallMm) . '</td>';
         }
         return $html . '</tr></table>';
     }
 
-    $availH = max(1.0, $hMm - $gaps);
-    $html   = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">';
-    foreach ($node['children'] as $i => $child) {
-        $ch   = max(5.0, $availH * ($weights[$i] / $total));
-        $pad  = $i < $count - 1 ? PDF_RENDER_GAP_MM . 'mm' : '0';
-        $html .= '<tr><td style="height:' . round($ch, 2) . 'mm;padding:0 0 ' . $pad . ' 0;vertical-align:top;">'
-            . pdf_render_tree_node($child, $slots, $wMm, $ch) . '</td></tr>';
+    $html = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">';
+    foreach ($kids as $i => $kid) {
+        $hMm = $kid['h'] / 100.0 * $tallMm;
+        $gap = $i < $count - 1
+            ? max(0.0, ($kids[$i + 1]['y'] - ($kid['y'] + $kid['h'])) / 100.0 * $tallMm)
+            : 0.0;
+        $html .= '<tr><td style="height:' . round($hMm, 2) . 'mm;padding:0 0 ' . round($gap, 2)
+            . 'mm 0;vertical-align:top;">'
+            . pdf_render_solved_node($kid, $slots, $order, $pageMm, $tallMm) . '</td></tr>';
     }
     return $html . '</table>';
 }
 
 /**
  * Which crop rect to cut a photo slot's ORIGINAL to before embedding it:
- * Kathryn's manual override (book_page_photos.crop_x/y/w/h) if she's set
- * one, else the auto-fit centered crop to whatever box this render actually
- * gave the photo (lib/layout_render.php's layout_auto_crop_rect()) — always
- * computed against the box mPDF will actually draw into, never a nominal
- * role aspect, so a run of narrow columns on a busy page doesn't over-crop
- * relative to what's really available.
+ * Kathryn's manual override (book_page_photos.crop_x/y/w/h) if she's set one,
+ * else a centred crop to the box the solver gave this photo.
+ *
+ * That second case does almost nothing now and that is deliberate. Under the
+ * Round 6 rules a photo's box IS its own shape unless the solver matched it to
+ * same-shape neighbours, so this resolves to the whole image for all but a
+ * handful of photos — 4 of Kathryn's 123. It stays because the arithmetic is
+ * the same either way, and because mPDF will not honour object-fit for the
+ * cases where a crop really is needed.
  */
 function pdf_resolve_crop_rect(array $slot, float $wMm, float $hMm): ?array
 {
@@ -563,7 +603,7 @@ function pdf_render_snapshot_page_html(array $page): string
 
 /** One book_pages row, dispatched by page_type. $geo only matters for
  *  page_type='photos' — see pdf_render_photos_page_html(). */
-function pdf_render_page_html(array $page, array $geo): string
+function pdf_render_page_html(array $page, array $geo, ?array $choice = null): string
 {
     switch ($page['page_type']) {
         case 'snapshot':
@@ -571,7 +611,12 @@ function pdf_render_page_html(array $page, array $geo): string
         case 'text':
             return pdf_render_text_page_html($page);
         default:
-            return pdf_render_photos_page_html($page, $geo);
+            return pdf_render_photos_page_html(
+                $page,
+                $geo,
+                $choice,
+                book_page_caption($page, $page['slots'])
+            );
     }
 }
 
@@ -641,9 +686,28 @@ function pdf_export_build(int $yearProjectId): array
     $mpdf->WriteHTML(pdf_wrap_page(pdf_render_cover_html($geo, $project, $coverPhoto), true));
     $mpdf->WriteHTML(pdf_wrap_page(pdf_render_title_html($project), $pages !== array()));
 
+    /* Template choice for the WHOLE book at once, exactly as public/layout.php
+     * does it — see compose_assign(). Doing it per page would pick the same
+     * template every time, and doing it differently here from the preview would
+     * mean the printed book quietly disagreed with the screen Kathryn approved
+     * it on. Same function, same input, same answer. */
+    $choices    = array();
+    $photoPages = array();
+    $occupants  = array();
+    foreach ($pages as $page) {
+        if ($page['page_type'] === 'photos' && $page['slots'] !== array()) {
+            $photoPages[] = (int) $page['id'];
+            $occupants[]  = compose_occupants($page['slots']);
+        }
+    }
+    foreach (compose_assign($occupants) as $i => $choice) {
+        $choices[$photoPages[$i]] = $choice;
+    }
+
     $lastIndex = count($pages) - 1;
     foreach ($pages as $index => $page) {
-        $mpdf->WriteHTML(pdf_wrap_page(pdf_render_page_html($page, $geo), $index !== $lastIndex));
+        $html = pdf_render_page_html($page, $geo, $choices[(int) $page['id']] ?? null);
+        $mpdf->WriteHTML(pdf_wrap_page($html, $index !== $lastIndex));
     }
 
     $bytes = $mpdf->Output('', 'S');
