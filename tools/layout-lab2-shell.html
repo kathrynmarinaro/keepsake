@@ -1,0 +1,377 @@
+<title>Keepsake — Layout Lab 2</title>
+<style>
+  /* A print proof is judged against a NEUTRAL grey surround, because a tinted
+     one skews how you read colour in the image. So the ground here is a plain
+     grey with no hue pushed into it, and the 8.5in page sits on it as true
+     paper white — in both themes, because the book prints on white paper
+     whatever time of day you review it. Colour is spent only on the two
+     markers that mean something, and those borrow process-ink cyan and
+     magenta rather than inventing a decorative accent. */
+  :root {
+    --ground: #d5d5d3; --panel: #e7e7e5; --paper: #ffffff;
+    --ink: #17171a; --muted: #5b5b61; --faint: #8a8a90; --rule: #b7b7b5;
+    --sig-derived: #0d6f86; --sig-cross: #a8256b;
+    --page: 620px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #191a1c; --panel: #232427; --paper: #ffffff;
+      --ink: #e9e9ec; --muted: #9b9ba2; --faint: #6e6e76; --rule: #35363b;
+      --sig-derived: #58bcd6; --sig-cross: #ef8ab8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #191a1c; --panel: #232427; --paper: #ffffff;
+    --ink: #e9e9ec; --muted: #9b9ba2; --faint: #6e6e76; --rule: #35363b;
+    --sig-derived: #58bcd6; --sig-cross: #ef8ab8;
+  }
+
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 96px; }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .sub code { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+
+  /* Controls stay put while scrolling: the entire point is comparing the same
+     page under two policies, which means changing a toggle without losing it. */
+  .controls {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--ground); border-bottom: 1px solid var(--rule);
+    padding: 12px 0 14px; margin-bottom: 28px;
+    display: flex; flex-wrap: wrap; gap: 18px 28px;
+  }
+  .ctl-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); margin-bottom: 6px; }
+  .seg { display: flex; border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; background: var(--panel); }
+  .seg button {
+    font: inherit; font-size: 13px; padding: 7px 13px; border: 0; cursor: pointer;
+    background: transparent; color: var(--muted); border-right: 1px solid var(--rule);
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+
+  .stats { display: flex; gap: 22px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-bottom: 26px; }
+  .stats b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .legend { font-size: 13px; color: var(--muted); border-left: 3px solid var(--rule); padding: 2px 0 2px 14px; margin-bottom: 30px; }
+  .legend p { margin: 0 0 7px; }
+  .legend p:last-child { margin-bottom: 0; }
+  .tag-derived { color: var(--sig-derived); font-weight: 600; }
+  .tag-cross { color: var(--sig-cross); font-weight: 600; }
+
+  .section { font-size: 17px; margin: 46px 0 6px; padding-top: 22px; border-top: 1px solid var(--rule); }
+  .section + .sub { margin-bottom: 26px; }
+  .spread { margin-bottom: 34px; }
+  /* The page is a true square because the book is 8.5in square. Everything
+     inside is measured against this box, so what you see is proportionally what
+     prints — only the absolute scale differs. */
+  .page {
+    position: relative; width: 100%; max-width: var(--page); aspect-ratio: 1 / 1;
+    background: var(--paper); border: 1px solid var(--rule); border-radius: 2px;
+    margin: 0 auto; box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+  }
+  .page img { position: absolute; display: block; object-fit: fill; }
+  .page.cross { outline: 2px dashed var(--sig-cross); outline-offset: 3px; }
+
+  .cap {
+    max-width: var(--page); margin: 9px auto 0; display: flex; gap: 10px;
+    align-items: baseline; font-size: 12.5px; color: var(--muted);
+  }
+  .cap .num { color: var(--faint); font-variant-numeric: tabular-nums; min-width: 30px; }
+  .cap .tpl { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
+  .cap .tpl.derived { color: var(--sig-derived); }
+  .cap .note { color: var(--faint); }
+
+  .usage { margin-top: 44px; border-top: 1px solid var(--rule); padding-top: 22px; }
+  .usage h2 { font-size: 15px; margin: 0 0 12px; }
+  .usage table { border-collapse: collapse; font-size: 13px; width: 100%; }
+  .usage td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--rule); }
+  .usage td.n { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); width: 50px; }
+  .usage td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .usage tr.zero td { color: var(--faint); }
+</style>
+
+<div class="wrap">
+  <h1>Layout Lab 2 — no cropping</h1>
+  <p class="sub">Every photo at its true aspect ratio. Templates transcribed from your sticky notes; a slot only ever receives the shape it asks for. Page is a true 8.5&Prime; square.</p>
+
+  <div class="controls">
+    <div>
+      <div class="ctl-label">Alignment</div>
+      <div class="seg" id="seg-align">
+        <button data-v="justify" aria-pressed="true">Clean outer block</button>
+        <button data-v="even" aria-pressed="false">Equal gaps</button>
+      </div>
+    </div>
+    <div>
+      <div class="ctl-label">Margins</div>
+      <div class="seg" id="seg-margin">
+        <button data-v="0.60" aria-pressed="false">Generous</button>
+        <button data-v="0.72" aria-pressed="true">Moderate</button>
+        <button data-v="0.85" aria-pressed="false">Tight</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="legend">
+    <p><b>Clean outer block</b> gives every photo in a row the same height, so the group forms a tidy rectangle. <b>Equal gaps</b> gives every photo the same <em>area</em> instead, so a landscape and a portrait carry equal visual weight — but the outer edge goes ragged.</p>
+    <p><span class="tag-derived">Cyan template names</span> are ones I derived to fill gaps your sketches don't cover. A <span class="tag-cross">dashed magenta edge</span> marks a page pairing two lone photos from different events.</p>
+  </div>
+
+  <h2 class="section">The 19 templates</h2>
+  <p class="sub">Every template drawn once, on stand-in photos, whether or not the book below uses it. This is the set to accept or strike — the book is only what the partitioner made of it.</p>
+  <div id="catalogue"></div>
+
+  <h2 class="section">The book — 123 photos</h2>
+  <div id="book"></div>
+
+  <div class="usage">
+    <h2>Template usage</h2>
+    <table id="usage"></table>
+  </div>
+</div>
+
+<script>
+const PHOTOS = /*PHOTOS*/;
+const TEMPLATES = /*TEMPLATES*/;
+const PAGES = /*PAGES*/;
+const STATS = /*STATS*/;
+const CATALOGUE = /*CATALOGUE*/;
+
+/* ---------------------------------------------------------------- geometry
+ *
+ * Two placement policies over the same composition tree. Neither ever changes a
+ * photo's aspect ratio; that is the invariant the whole lab exists to hold.
+ *
+ * JUSTIFY. A row's children all share one height, a column's all share one
+ * width. That is what makes the block come out as a tight rectangle with
+ * uniform gaps. For a row of plain photos the height follows in closed form,
+ * but a row containing a nested column has no closed form once gaps are in
+ * play, so the shared dimension is found by bisection. Both measures are
+ * monotonic in the dimension being solved for, so bisection is exact to
+ * whatever tolerance we ask for and cannot land on a wrong branch.
+ *
+ * EVEN. Every photo is scaled to the same area, then laid out with uniform gaps
+ * and centred within its row or column. Nothing is stretched to meet a
+ * neighbour, so the block's outer edge is ragged by construction.
+ */
+
+const ITERS = 40;
+
+function arOf(node) { return PHOTOS[node.id].ar; }
+
+/* --- justify ------------------------------------------------------------- */
+
+function jHeight(node, w, gap) {
+  if (node.t === 'leaf') return w / arOf(node);
+  if (node.t === 'col') {
+    let h = gap * (node.k.length - 1);
+    for (const kid of node.k) h += jHeight(kid, w, gap);
+    return h;
+  }
+  // row: find the shared height h whose total width is w.
+  let lo = 0, hi = w * 8;
+  for (let i = 0; i < ITERS; i++) {
+    const mid = (lo + hi) / 2;
+    (jWidth(node, mid, gap) < w) ? (lo = mid) : (hi = mid);
+  }
+  return (lo + hi) / 2;
+}
+
+function jWidth(node, h, gap) {
+  if (node.t === 'leaf') return h * arOf(node);
+  if (node.t === 'row') {
+    let w = gap * (node.k.length - 1);
+    for (const kid of node.k) w += jWidth(kid, h, gap);
+    return w;
+  }
+  // col: find the shared width w whose total height is h.
+  let lo = 0, hi = h * 8;
+  for (let i = 0; i < ITERS; i++) {
+    const mid = (lo + hi) / 2;
+    (jHeight(node, mid, gap) < h) ? (lo = mid) : (hi = mid);
+  }
+  return (lo + hi) / 2;
+}
+
+function jPlace(node, x, y, w, h, gap, out) {
+  if (node.t === 'leaf') { out.push({ id: node.id, x, y, w, h }); return; }
+  if (node.t === 'row') {
+    let cx = x;
+    for (const kid of node.k) {
+      const kw = jWidth(kid, h, gap);
+      jPlace(kid, cx, y, kw, h, gap, out);
+      cx += kw + gap;
+    }
+  } else {
+    let cy = y;
+    for (const kid of node.k) {
+      const kh = jHeight(kid, w, gap);
+      jPlace(kid, x, cy, w, kh, gap, out);
+      cy += kh + gap;
+    }
+  }
+}
+
+/* --- even ---------------------------------------------------------------- */
+
+/* Natural size of a subtree when each photo has unit area. */
+function eSize(node, gap) {
+  if (node.t === 'leaf') {
+    const ar = arOf(node);
+    return { w: Math.sqrt(ar), h: Math.sqrt(1 / ar) };
+  }
+  const kids = node.k.map(k => eSize(k, gap));
+  if (node.t === 'row') {
+    return {
+      w: kids.reduce((a, s) => a + s.w, 0) + gap * (kids.length - 1),
+      h: Math.max(...kids.map(s => s.h)),
+    };
+  }
+  return {
+    w: Math.max(...kids.map(s => s.w)),
+    h: kids.reduce((a, s) => a + s.h, 0) + gap * (kids.length - 1),
+  };
+}
+
+function ePlace(node, x, y, scale, gap, out) {
+  const size = eSize(node, gap);
+  if (node.t === 'leaf') {
+    out.push({ id: node.id, x, y, w: size.w * scale, h: size.h * scale });
+    return;
+  }
+  if (node.t === 'row') {
+    let cx = x;
+    for (const kid of node.k) {
+      const ks = eSize(kid, gap);
+      // Centre each child across the row's height — the source of the ragged edge.
+      ePlace(kid, cx, y + (size.h - ks.h) * scale / 2, scale, gap, out);
+      cx += ks.w * scale + gap * scale;
+    }
+  } else {
+    let cy = y;
+    for (const kid of node.k) {
+      const ks = eSize(kid, gap);
+      ePlace(kid, x + (size.w - ks.w) * scale / 2, cy, scale, gap, out);
+      cy += ks.h * scale + gap * scale;
+    }
+  }
+}
+
+/* --- entry point --------------------------------------------------------- */
+
+/* Returns rects in percent of the page, so the caller never needs a pixel size
+ * and the same numbers would drive a PDF at any DPI. */
+function solve(tree, policy, fill) {
+  const box = fill * 100;            // content box, percent of the square page
+  const off = (100 - box) / 2;
+  const gap = 2.0;                   // percent of page side, constant
+
+  const out = [];
+  if (policy === 'justify') {
+    let w = box, h = jHeight(tree, box, gap);
+    if (h > box) { h = box; w = jWidth(tree, box, gap); }
+    jPlace(tree, off + (box - w) / 2, off + (box - h) / 2, w, h, gap, out);
+  } else {
+    const nat = eSize(tree, gap / 10);   // gap in unit-area space
+    const scale = Math.min(box / nat.w, box / nat.h);
+    const w = nat.w * scale, h = nat.h * scale;
+    ePlace(tree, off + (box - w) / 2, off + (box - h) / 2, scale, gap / 10, out);
+  }
+  return out;
+}
+
+/* Bind a page's photo ids onto its template's leaf indices. */
+function bind(node, ids) {
+  if (node.t === 'leaf') return { t: 'leaf', id: ids[node.i] };
+  return { t: node.t, k: node.k.map(k => bind(k, ids)) };
+}
+
+/* ------------------------------------------------------------------ render */
+
+let ALIGN = 'justify';
+let FILL = 0.72;
+
+function renderInto(el, list, numbered) {
+  const frag = document.createDocumentFragment();
+
+  list.forEach((pg, idx) => {
+    const tpl = TEMPLATES[pg.tpl];
+    const rects = solve(bind(tpl.tree, pg.ids), ALIGN, FILL);
+
+    const spread = document.createElement('div');
+    spread.className = 'spread';
+
+    const page = document.createElement('div');
+    page.className = 'page' + (pg.cross ? ' cross' : '');
+    for (const r of rects) {
+      const img = document.createElement('img');
+      img.src = PHOTOS[r.id].src;
+      img.loading = 'lazy';
+      img.style.left = r.x + '%';
+      img.style.top = r.y + '%';
+      img.style.width = r.w + '%';
+      img.style.height = r.h + '%';
+      page.appendChild(img);
+    }
+    spread.appendChild(page);
+
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    cap.innerHTML =
+      '<span class="num">' + (numbered ? idx + 1 : '') + '</span>' +
+      '<span class="tpl' + (tpl.derived ? ' derived' : '') + '">' + pg.tpl + '</span>' +
+      '<span class="note">' + tpl.note + (pg.cross ? ' &middot; two lone photos' : '') + '</span>';
+    spread.appendChild(cap);
+
+    frag.appendChild(spread);
+  });
+
+  el.replaceChildren(frag);
+}
+
+function render() {
+  renderInto(document.getElementById('catalogue'), CATALOGUE, false);
+  renderInto(document.getElementById('book'), PAGES, true);
+}
+
+function renderStats() {
+  const counts = {};
+  for (const pg of PAGES) counts[TEMPLATES[pg.tpl].n] = (counts[TEMPLATES[pg.tpl].n] || 0) + 1;
+  document.getElementById('stats').innerHTML =
+    '<span><b>' + STATS.photos + '</b> photos</span>' +
+    '<span><b>' + STATS.pages + '</b> pages</span>' +
+    [1, 2, 3, 4].map(n => '<span><b>' + (counts[n] || 0) + '</b> &times;' + n + '-up</span>').join('') +
+    '<span><b>' + PAGES.filter(p => TEMPLATES[p.tpl].derived).length + '</b> on derived templates</span>';
+
+  const rows = Object.keys(TEMPLATES).map(name => {
+    const n = PAGES.filter(p => p.tpl === name).length;
+    return '<tr class="' + (n ? '' : 'zero') + '">' +
+      '<td class="mono' + (TEMPLATES[name].derived ? ' derived' : '') + '"' +
+      (TEMPLATES[name].derived ? ' style="color:var(--sig-derived)"' : '') + '>' + name + '</td>' +
+      '<td>' + TEMPLATES[name].note + '</td><td class="n">' + n + '</td></tr>';
+  });
+  document.getElementById('usage').innerHTML = rows.join('');
+}
+
+function wire(id, apply) {
+  document.getElementById(id).addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    for (const b of e.currentTarget.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b === btn));
+    apply(btn.dataset.v);
+    render();
+  });
+}
+
+wire('seg-align', v => { ALIGN = v; });
+wire('seg-margin', v => { FILL = parseFloat(v); });
+
+renderStats();
+render();
+</script>
