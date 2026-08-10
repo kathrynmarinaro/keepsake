@@ -224,6 +224,35 @@ function compose_fill(array $run, array $tpl): ?array
 }
 
 /**
+ * Is there any template at all for a page holding these shapes?
+ *
+ * The partitioner's feasibility test, and the reason it has to exist: under
+ * shape-required templates a page is not simply "n photos", it is n photos of
+ * particular shapes, and some combinations have no home. Three landscapes and a
+ * portrait is a page; two landscapes and two portraits in the wrong order may
+ * not be. A partitioner that only counted photos would happily produce pages
+ * that cannot be drawn.
+ *
+ * Cheap enough to call inside a candidate loop: at most 20 templates, and the
+ * count check rejects nearly all of them before compose_fill() runs.
+ *
+ * @param list<string> $shapes 'P', 'L', or '*' for an occupant that fits either
+ */
+function compose_accepts(array $shapes): bool
+{
+    $occ = array();
+    foreach ($shapes as $s) {
+        $occ[] = array('shape' => $s, 'ar' => COMPOSE_CANON[$s === 'L' ? 'L' : 'P']);
+    }
+
+    foreach (compose_templates() as $tpl) {
+        if (count($tpl['slots']) !== count($occ)) { continue; }
+        if (compose_fill($occ, $tpl) !== null) { return true; }
+    }
+    return false;
+}
+
+/**
  * Every template that accepts this run, cheapest choice first.
  *
  * Template choice is deliberately NOT part of the partitioner's cost function.

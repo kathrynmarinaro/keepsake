@@ -87,6 +87,11 @@
 
 declare(strict_types=1);
 
+/* The template library and its shape rules. layout.php decides HOW MANY photos
+ * share a page; compose.php decides whether those particular shapes are a page
+ * at all, which is a question the old orientation table could not ask. */
+require_once __DIR__ . '/compose.php';
+
 /* =========================================================== tuning ======= */
 
 /**
@@ -114,18 +119,20 @@ function layout_tuning(): array
         'variety_window'         => 4,
         'variety_repeat_penalty' => 0.18,
         'variety_echo_factor'    => 0.5,
-        // PLAN.md, Round 5: how many photos a page_type='photos' page may
-        // carry, as a HARD CONSTRAINT rather than a preference. Rounds 3 and
-        // 4 both tried to make 1-up pages rare by SCORING them lower
-        // (density_preference[1] down to 0.18, then an unconditional
-        // singles_penalty); both left 1-up able to win some lottery, because
-        // a score is a score. layout_partition_subgroup() now refuses to
-        // emit any page outside these bounds at all, so the only 1-photo
-        // pages left in a book are the two legitimate kinds: a
-        // photos.full_page shot (which never reaches the partitioner) and a
-        // photo with genuinely no neighbour to pair with.
-        'page_size_min'          => 2,
-        'page_size_max'          => 3,
+        // How many photos a page_type='photos' page may carry, as a HARD
+        // CONSTRAINT rather than a preference. Round 5 set this to 2..3
+        // because two earlier rounds had tried to make 1-up pages rare by
+        // SCORING them lower and a score can always be won.
+        //
+        // Round 6 opened it back to 1..4, because the thing being constrained
+        // changed underneath it. The template library is now Kathryn's own
+        // sketches, which include four-photo pages, and she added the
+        // all-portrait 2x2 herself; the book she approved has 15 four-ups out
+        // of 44 pages. And a short page no longer needs a scoring guard,
+        // because compose_accepts() refuses any page no template can draw —
+        // shape feasibility forces a single now, not preference.
+        'page_size_min'          => 1,
+        'page_size_max'          => 4,
         // How far a LONE photo may reach to ride along with its ungrouped
         // neighbours instead of taking a page of its own — see
         // layout_merge_lone_subgroups(), and config.example.php for the
@@ -1032,6 +1039,152 @@ function layout_card_schedule(int $pageCount, int $cardCount): array
  * @return list<array{count:int, card:bool}> in page order. count 0 with
  *   card true is a text that found no page to ride on and needs one of its own.
  */
+/**
+ * One occupant's shape as lib/compose.php's template library talks about it.
+ *
+ * 'flex' — a near-square photo, or one whose dimensions were never read —
+ * becomes a wildcard rather than being forced to a side. It is the same
+ * treatment a text card gets, and for the same reason: neither has a shape the
+ * templates need to respect, so pinning one to 'portrait' would rule out pages
+ * it would sit in perfectly well.
+ */
+function layout_shape_of(string $orientation): string
+{
+    if ($orientation === 'portrait')  { return 'P'; }
+    if ($orientation === 'landscape') { return 'L'; }
+    return '*';
+}
+
+/**
+ * The shapes a page would hold, given where it starts and whether a card rides
+ * along. Cards go last, matching how compose_fill() prefers to seat real photos
+ * before wildcards.
+ */
+function layout_page_shapes(array $orientations, int $offset, int $count, bool $withCard): array
+{
+    $shapes = array();
+    for ($i = 0; $i < $count; $i++) {
+        $shapes[] = layout_shape_of((string) ($orientations[$offset + $i] ?? 'flex'));
+    }
+    if ($withCard) { $shapes[] = '*'; }
+    return $shapes;
+}
+
+/**
+ * Can every page of this candidate partition actually be drawn?
+ *
+ * A size vector that was fine under the old engine can be undrawable under
+ * shape-required templates — "four photos" is a page only if those four photos'
+ * shapes are a page. Checked here rather than inside the scorer because an
+ * infeasible candidate is not a low-scoring one, it is not a candidate.
+ */
+function layout_partition_shapes_feasible(array $orientations, array $sizes, array $schedule, int $cardsLeft): bool
+{
+    $offset = 0;
+    foreach ($sizes as $pageIndex => $size) {
+        $withCard = $cardsLeft > 0 && isset($schedule[$pageIndex]);
+        if ($withCard) { $cardsLeft--; }
+
+        // A card-only page is a text page; it has no photo template to satisfy.
+        if ($size > 0 && !compose_accepts(layout_page_shapes($orientations, $offset, $size, $withCard))) {
+            return false;
+        }
+        $offset += $size;
+    }
+    return true;
+}
+
+/**
+ * A partition that is guaranteed drawable, for when scoring finds nothing.
+ *
+ * Exact dynamic programme over (photos placed, pages used), which is small
+ * enough to solve outright — a subgroup is at most a few dozen photos and a
+ * page holds at most four. Consecutive photos only: the book is a chronological
+ * record, and a partition that reordered across pages to find prettier shape
+ * matches would quietly rewrite the day.
+ *
+ * The cost is the lab's, because that is what Kathryn reviewed: one per page,
+ * so the baseline is "as few pages as possible", plus a nudge against a
+ * single-photo page inside a group that has more to say. Template variety is
+ * NOT part of it — that is chosen afterwards by least-recently-used, so page
+ * sizes and page styling stay independent decisions.
+ *
+ * Always finds something: the single-P and single-L templates between them
+ * accept any one photo, so an all-singles partition is always available.
+ */
+function layout_partition_shape_dp(array $orientations, array $schedule, int $cardsLeft, int $min, int $max, array $tuning): array
+{
+    $n = count($orientations);
+    if ($n === 0) { return array(); }
+
+    $pref   = $tuning['density_preference'];
+    $weight = (float) $tuning['density_weight'];
+    $repeat = (float) $tuning['variety_repeat_penalty'];
+
+    /* What one page costs. The 1.0 is the important term: it is what makes this
+     * minimise PAGES, and it is the whole reason the old scorer had to be
+     * replaced rather than retuned. That scorer rated pages, not books, so with
+     * the ceiling raised to four it cheerfully chose 2,1,2,1,2 over 4,4 —
+     * five pages that each score well beat two that score slightly less well.
+     * Page count was never in it.
+     *
+     * density_preference still has its say, as a modifier rather than the whole
+     * verdict, so the config keeps meaning what it says: a 1-up at 0.18 costs
+     * about 40% more than a 2-up at 1.0, which is enough to make a single the
+     * last resort without letting it be forbidden outright. */
+    $pageCost = static function (int $size) use ($pref, $weight, $min): float {
+        $c = 1.0 + (1.0 - (float) ($pref[$size] ?? 0.5)) * $weight;
+        if ($size < $min) { $c += 0.4; }
+        return $c;
+    };
+
+    /* State is (photos placed, page index, size of the page just laid), so the
+     * variety penalty can see one page back. Page index is in the key because
+     * the card schedule is fixed by index before the partition is chosen. */
+    $best = array(0 => array('0|0' => array('cost' => 0.0, 'sizes' => array(), 'cards' => $cardsLeft, 'page' => 0, 'last' => 0)));
+
+    for ($placed = 0; $placed < $n; $placed++) {
+        foreach ($best[$placed] ?? array() as $state) {
+            $withCard = $state['cards'] > 0 && isset($schedule[$state['page']]);
+            $ceiling  = min($max, $n - $placed, LAYOUT_MAX_SLOTS - ($withCard ? 1 : 0));
+
+            for ($size = 1; $size <= $ceiling; $size++) {
+                if (!compose_accepts(layout_page_shapes($orientations, $placed, $size, $withCard))) {
+                    continue;
+                }
+
+                $cost = $state['cost'] + $pageCost($size);
+                if ($size === $state['last']) { $cost += $repeat; }
+
+                $sizes   = $state['sizes'];
+                $sizes[] = $size;
+
+                $to  = $placed + $size;
+                $key = ($state['page'] + 1) . '|' . $size;
+                if (!isset($best[$to][$key]) || $best[$to][$key]['cost'] > $cost) {
+                    $best[$to][$key] = array(
+                        'cost'  => $cost,
+                        'sizes' => $sizes,
+                        'cards' => $state['cards'] - ($withCard ? 1 : 0),
+                        'page'  => $state['page'] + 1,
+                        'last'  => $size,
+                    );
+                }
+            }
+        }
+    }
+
+    $win = null;
+    foreach ($best[$n] ?? array() as $state) {
+        if ($win === null || $state['cost'] < $win['cost']) { $win = $state; }
+    }
+
+    /* Unreachable while a single-photo template exists for every shape. Kept as
+     * a loud, drawable answer rather than an empty group, because losing photos
+     * out of a book silently is the worst failure this file has. */
+    return $win === null ? array_fill(0, $n, 1) : $win['sizes'];
+}
+
 function layout_partition_subgroup(array $orientations, int $cardCount, array $recentDensities, array $tuning): array
 {
     $pages     = array();
@@ -1064,26 +1217,12 @@ function layout_partition_subgroup(array $orientations, int $cardCount, array $r
          * reason this page is short. */
         $sizes = array($total);
     } else {
-        $sizes = null;
-
-        if (layout_partition_candidate_count($total, $min, $max, LAYOUT_PARTITION_MAX_CANDIDATES)
-            <= LAYOUT_PARTITION_MAX_CANDIDATES
-        ) {
-            $bestScore = -INF;
-            foreach (layout_partition_candidates($total, $min, $max, $schedule) as $candidate) {
-                $score = layout_partition_score($orientations, $candidate, $schedule, $recentDensities, $tuning);
-                if ($score > $bestScore) {
-                    $bestScore = $score;
-                    $sizes     = $candidate;
-                }
-            }
-        }
-
-        if ($sizes === null) {
-            // Too many candidates to enumerate, or (with an impossible
-            // min/max pair) none at all. Both land on the same walk.
-            $sizes = layout_partition_greedy($orientations, $schedule, $recentDensities, $min, $max, $tuning);
-        }
+        /* One exact dynamic programme, no candidate enumeration and no greedy
+         * fallback. Both of those existed to search a space that the templates
+         * now cut down for us: a page is only a page if compose_accepts() says
+         * those shapes can be drawn, and inside that constraint the DP is
+         * small enough to solve outright. */
+        $sizes = layout_partition_shape_dp($orientations, $schedule, $cardsLeft, $min, $max, $tuning);
     }
 
     foreach ($sizes as $pageIndex => $size) {

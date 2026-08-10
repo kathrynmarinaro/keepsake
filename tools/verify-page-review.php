@@ -215,7 +215,20 @@ $pagesA = book_pages_for_layout($layoutA['layout_id']);
 $photoPagesA = array_values(array_filter($pagesA, static fn(array $p): bool => $p['page_type'] === 'photos'));
 
 $sourcePage = $photoPagesA[0];
-$targetPage = $photoPagesA[1];
+/* The destination has to have somewhere to put it. Page 2 used to be a safe
+ * assumption because a generated page held at most three photos; with the
+ * ceiling at four (Round 6) every generated page can be genuinely full, and
+ * book_page_slot_move() refusing a full page is correct behaviour rather than
+ * the bug this block is looking for. So the target is an empty page appended to
+ * the same layout — which is also a cleaner test of "lands at the next open
+ * slot on a different page" than borrowing a page that happens to have a gap. */
+q('INSERT INTO book_pages (book_layout_id, page_number, page_type) VALUES (?, ?, ?)', array(
+    $layoutA['layout_id'],
+    max(array_map(static fn(array $p): int => (int) $p['page_number'], $pagesA)) + 1,
+    'photos',
+));
+$targetPage = book_page_get((int) db()->lastInsertId());
+check('an empty target page exists to move into', $targetPage !== null);
 $sourceSlot = null;
 foreach ($sourcePage['slots'] as $slot) {
     if ($slot['photo_id'] !== null) {

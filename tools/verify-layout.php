@@ -15,9 +15,13 @@
  *      wildcard heals an otherwise lopsided 3+1 page; a lone photo scores
  *      below a matched pair (the value that keeps this engine out of the
  *      one-photo-per-page look).
- *   3. layout_variety_penalty() / layout_partition_subgroup(): 2-3 photos a
- *      page is a HARD CONSTRAINT (PLAN.md, Round 5) — every n from 2 to 10
- *      partitions into pages of 2 or 3 and nothing else, including n=7
+ *   3. layout_variety_penalty() / layout_partition_subgroup(): page sizes stay
+ *      inside the configured bounds, which Round 6 reopened to 1..4 after
+ *      Kathryn approved a book built from her own sketched templates. What
+ *      makes a short page rare is no longer the bound but shape feasibility
+ *      plus the partitioner's cost — see tools/verify-partition.php, which
+ *      owns the drawable-page invariant. Historic note: this used to assert
+ *      2-3 and nothing else, including n=7
  *      where no partition into 3s alone exists; a lone photo still gets its
  *      1-up page because there is nothing to pair it with; the same input
  *      twice gives the same partition; the large-group greedy fallback
@@ -191,7 +195,7 @@ check('one card across five pages lands in the middle', layout_card_schedule(5, 
 check('two cards across four pages are spread apart', layout_card_schedule(4, 2) === array(1, 3));
 check('more cards than pages caps at one per page', count(layout_card_schedule(2, 5)) === 2);
 
-echo "\nlayout_partition_subgroup(): 2-3 photos per page is a HARD CONSTRAINT...\n";
+echo "\nlayout_partition_subgroup(): page sizes stay inside the configured bounds...\n";
 foreach (range(2, 10) as $n) {
     $mixed = array();
     for ($i = 0; $i < $n; $i++) {
@@ -199,9 +203,10 @@ foreach (range(2, 10) as $n) {
     }
     $part  = layout_partition_subgroup($mixed, 0, array(), $TUNING);
     $sizes = array_map(static fn(array $p): int => $p['count'], $part);
+    [$boundMin, $boundMax] = layout_page_size_bounds($TUNING);
     check(
-        "n=$n partitions into pages of 2 or 3 photos, nothing else (" . implode(',', $sizes) . ')',
-        array_sum($sizes) === $n && min($sizes) >= 2 && max($sizes) <= 3
+        "n=$n partitions inside the bounds, nothing else (" . implode(',', $sizes) . ')',
+        array_sum($sizes) === $n && min($sizes) >= $boundMin && max($sizes) <= $boundMax
     );
 }
 
@@ -209,10 +214,11 @@ echo "\nlayout_partition_subgroup(): density varies across a long run...\n";
 $partition = layout_partition_subgroup(array_fill(0, 14, 'landscape'), 0, array(), $TUNING);
 $sizes = array_map(static fn(array $p): int => $p['count'], $partition);
 check('every photo is placed exactly once', array_sum($sizes) === 14);
-// Was "no page is empty / no page exceeds four photos": since Round 5 the
-// bounds are the point of the function, so the check is the real bounds.
-check('no page falls below two photos', min($sizes) >= 2);
-check('no page exceeds three photos', max($sizes) <= 3);
+// The bounds are the point of the function, so the check is the real bounds
+// rather than the literals Round 5 happened to configure.
+[$bMin, $bMax] = layout_page_size_bounds($TUNING);
+check('no page falls below the configured minimum', min($sizes) >= $bMin);
+check('no page exceeds the configured maximum', max($sizes) <= $bMax);
 check(
     'density is NOT stuck on one number across 14 identical photos (brief §4.3)',
     count(array_unique($sizes)) > 1
@@ -223,8 +229,8 @@ echo '       (14 landscapes partitioned as: ' . implode(', ', $sizes) . ")\n";
 $seven = layout_partition_subgroup(array_fill(0, 7, 'portrait'), 0, array(), $TUNING);
 $sevenSizes = array_map(static fn(array $p): int => $p['count'], $seven);
 check(
-    'n=7 (no partition into 3s alone exists) still yields a valid {2,3} composition: ' . implode('+', $sevenSizes),
-    array_sum($sevenSizes) === 7 && min($sevenSizes) >= 2 && max($sevenSizes) <= 3
+    'n=7 still yields a valid in-bounds composition: ' . implode('+', $sevenSizes),
+    array_sum($sevenSizes) === 7 && min($sevenSizes) >= $bMin && max($sevenSizes) <= $bMax
 );
 
 $onePhoto = layout_partition_subgroup(array('portrait'), 0, array(), $TUNING);
@@ -240,14 +246,16 @@ check(
         === layout_partition_subgroup($mixedRun, 1, array(2, 3), $TUNING)
 );
 
-/* Past LAYOUT_PARTITION_MAX_CANDIDATES the engine stops enumerating and walks
-   the group greedily instead — same bounds, smaller search. 60 photos with no
-   gap between them is well past that line, so this exercises the fallback. */
+/* 60 photos with no gap between them. Round 5 used this to exercise a greedy
+   fallback past LAYOUT_PARTITION_MAX_CANDIDATES; Round 6 removed both the
+   enumeration and the fallback in favour of one exact DP, so what this now
+   proves is that the DP stays correct — and fast — at a size the old path
+   refused to even enumerate. */
 $huge = layout_partition_subgroup(array_fill(0, 60, 'portrait'), 0, array(), $TUNING);
 $hugeSizes = array_map(static fn(array $p): int => $p['count'], $huge);
 check(
-    'the large-group greedy fallback obeys the same 2-3 bounds',
-    array_sum($hugeSizes) === 60 && min($hugeSizes) >= 2 && max($hugeSizes) <= 3
+    'a 60-photo group stays inside the bounds',
+    array_sum($hugeSizes) === 60 && min($hugeSizes) >= $bMin && max($hugeSizes) <= $bMax
 );
 
 $withCards = layout_partition_subgroup(array_fill(0, 9, 'portrait'), 2, array(), $TUNING);
@@ -274,7 +282,7 @@ echo "\nlayout_estimate_page_count(): under-estimates, which is the safe directi
 check('it is the FEWEST pages the bounds allow, never more', (static function (): bool {
     for ($n = 2; $n <= 40; $n++) {
         $pages = count(layout_partition_subgroup(array_fill(0, $n, 'portrait'), 0, array(), $GLOBALS['TUNING']));
-        if (layout_estimate_page_count($n, 3) > $pages) {
+        if (layout_estimate_page_count($n, layout_page_size_bounds($GLOBALS['TUNING'])[1]) > $pages) {
             return false;
         }
     }
@@ -669,14 +677,14 @@ foreach ($photoPages as $row) {
         if (!in_array($ids[0], $expectedSingles, true)) {
             $illegalPages[] = (int) $row['page_number'];
         }
-    } elseif ($count < 2 || $count > 3) {
+    } elseif ($count < 1 || $count > LAYOUT_MAX_SLOTS) {
         $illegalPages[] = (int) $row['page_number'];
     }
 }
 sort($singlePhotoPages);
 
 check(
-    'every photos page carries 2 or 3 photos, or is one of the two legitimate singles',
+    'every photos page carries a drawable number of photos',
     $illegalPages === array()
 );
 check(
@@ -855,7 +863,7 @@ foreach ($tail as $page) {
     $ids = slot_ids(array($page), 'photo_id');
     if (count($ids) === 1) {
         $tailSingles[] = $ids[0];
-    } elseif (count($ids) < 2 || count($ids) > 3) {
+    } elseif (count($ids) < 1 || count($ids) > LAYOUT_MAX_SLOTS) {
         $tailSingles[] = -1;  // forces the check below to fail, and says why
     }
 }
@@ -863,7 +871,7 @@ sort($tailSingles);
 $expectedTailSingles = array($fullPagePhoto, $marchLoose);
 sort($expectedTailSingles);
 check(
-    'the reflowed tail still holds 2-3 photos a page, bar the full_page flag and the neighbourless March photo',
+    'the reflowed tail holds a drawable number a page, bar the full_page flag and the neighbourless March photo',
     $tailSingles === $expectedTailSingles
 );
 

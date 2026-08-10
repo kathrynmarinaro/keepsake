@@ -198,8 +198,26 @@ return array(
          * puts the decision back in the hands of density_preference[1] and
          * lands you where Round 4 was.
          */
-        'page_size_min' => 2,
-        'page_size_max' => 3,
+        /* RAISED TO 1..4 IN ROUND 6, after Kathryn reviewed a full book built
+         * from the redrawn template library and chose it page by page.
+         *
+         * Round 5 set these to 2..3 because "mostly multi-image pages" had been
+         * asked for twice and scoring kept letting singles through. That
+         * reasoning still holds and is left in place above — what changed is
+         * that the templates below it are no longer the same. Her sketched
+         * layouts include four-photo pages, and she added the all-portrait 2x2
+         * herself on seeing that every drawn 4-up needed a landscape, which
+         * would have capped 20 of her 36 event groups at three photos a page.
+         * The approved book has 15 four-up pages out of 44.
+         *
+         * page_size_min back to 1 for the same reason: shape feasibility, not
+         * preference, is now what forces a short page. compose_accepts() will
+         * refuse a page no template can draw, so a single is what remains when
+         * a photo genuinely has nowhere to sit — and the partitioner charges
+         * 0.25 for one anyway, so it is still the last resort rather than the
+         * easy way out. */
+        'page_size_min' => 1,
+        'page_size_max' => 4,
 
         /* How far, in hours, a LONE photo may reach to join its neighbours
          * rather than take a page of its own. This is the structural half of
