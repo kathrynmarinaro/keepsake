@@ -31,3 +31,7 @@ Thumbs.db
 *.log
 /logs/*
 !/logs/.gitkeep
+
+# Prepared export images. A cache: every file in it is rebuildable from a
+# photo that is still on disk, and it is written at runtime on the server.
+/storage/

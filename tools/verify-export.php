@@ -348,6 +348,47 @@ function pdf_page_object_count(string $bytes): int
     return preg_match_all('#/Type\s*/Page(?![a-zA-Z])#', $bytes);
 }
 
+echo "\nimageproc_prepare_cached(): the same work is never done twice...\n";
+
+/* This is what makes a long export survivable on Kathryn's host, where nginx
+ * cuts a request off at 60 seconds however long PHP is allowed. Preparing 123
+ * photos can exceed that, and because every prepared image is kept, a run that
+ * is cut off is not wasted — the next one skips what is done and gets further.
+ * These pin the two properties that has to rest on: a hit really is reused, and
+ * anything that would change the image really does miss. */
+$cacheSrc = $fixtureAbs;
+$rectFull = array('x' => 0.0, 'y' => 0.0, 'w' => 1.0, 'h' => 1.0);
+
+$first = imageproc_prepare_cached($cacheSrc, $rectFull, 400, 400);
+check('a photo prepares', $first !== null && is_file($first));
+
+$second = imageproc_prepare_cached($cacheSrc, $rectFull, 400, 400);
+check('asking again returns the same file, not a new one', $first === $second);
+
+$mtimeBefore = $first !== null ? filemtime($first) : 0;
+imageproc_prepare_cached($cacheSrc, $rectFull, 400, 400);
+check('...and does not rewrite it', $first !== null && filemtime($first) === $mtimeBefore);
+
+$smaller = imageproc_prepare_cached($cacheSrc, $rectFull, 200, 200);
+check('a different size is a different file', $smaller !== null && $smaller !== $first);
+
+$cropped = imageproc_prepare_cached($cacheSrc, array('x' => 0.1, 'y' => 0.1, 'w' => 0.5, 'h' => 0.5), 400, 400);
+check('a different crop is a different file', $cropped !== null && $cropped !== $first);
+
+/* The source changing must invalidate, or a re-cropped photo would print at
+ * its old crop forever. */
+touch($cacheSrc, time() + 10);
+clearstatcache();
+$afterTouch = imageproc_prepare_cached($cacheSrc, $rectFull, 400, 400);
+check('editing the source invalidates the cached copy', $afterTouch !== null && $afterTouch !== $first);
+
+$dims = @getimagesize((string) $afterTouch);
+check('the cached copy is within the size it was asked for',
+    $dims !== false && $dims[0] <= 400 && $dims[1] <= 400);
+
+imageproc_prune_export_cache(0);
+check('pruning clears the cache', glob(imageproc_export_cache_dir() . '/*.jpg') === array());
+
 echo "\npdf_resolve_crop_rect(): only cut a photo that actually needs cutting...\n";
 
 /* The regression this pins cost ~50 seconds on a 123-photo book and failed the

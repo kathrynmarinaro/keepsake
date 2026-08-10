@@ -505,6 +505,101 @@ function imageproc_crop_photo(string $srcAbs, array $rect, array $sniff): array
 }
 
 /**
+ * Where prepared export images are kept between runs.
+ *
+ * Outside public/, because these are derivatives nobody should be able to
+ * fetch by guessing a URL, and because they are not part of the library — they
+ * are a cache and may be deleted at any time without losing anything.
+ */
+function imageproc_export_cache_dir(): string
+{
+    $dir = APP_ROOT . '/storage/export-cache';
+    if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) {
+        return sys_get_temp_dir() . '/keepsake-export-cache';
+    }
+    return $dir;
+}
+
+/**
+ * A print-ready copy of one photo, made once and kept.
+ *
+ * Same job as imageproc_crop_to_temp(), with the result cached under a name
+ * derived from everything that affects it: the source file and its
+ * modification time, the crop, and the target pixel budget. Change any of
+ * those and it is a different file; change none and the work is skipped.
+ *
+ * THIS IS WHAT MAKES A LONG EXPORT SURVIVABLE. Kathryn's host puts nginx in
+ * front of PHP with a 60-second ceiling, and preparing 123 photos can exceed
+ * it however fast the per-photo work gets. Because every prepared image is
+ * kept, a run that is cut off is not wasted: the next one skips everything
+ * already done and gets further. Enough attempts and it completes — and every
+ * export after that is fast, which is the case that actually matters, since a
+ * book gets exported far more often than its photos change.
+ *
+ * Returns null on failure, exactly like the uncached path, so a photo that
+ * cannot be prepared degrades to being embedded as-is rather than failing the
+ * export.
+ */
+function imageproc_prepare_cached(string $srcAbs, array $rect, ?int $maxW = null, ?int $maxH = null): ?string
+{
+    $mtime = @filemtime($srcAbs);
+    $key   = sha1(implode('|', array(
+        realpath($srcAbs) ?: $srcAbs,
+        $mtime === false ? '0' : (string) $mtime,
+        number_format((float) $rect['x'], 5, '.', ''),
+        number_format((float) $rect['y'], 5, '.', ''),
+        number_format((float) $rect['w'], 5, '.', ''),
+        number_format((float) $rect['h'], 5, '.', ''),
+        (string) ($maxW ?? 0),
+        (string) ($maxH ?? 0),
+    )));
+
+    $cached = imageproc_export_cache_dir() . '/' . $key . '.jpg';
+    if (is_file($cached) && filesize($cached) > 0) {
+        return $cached;
+    }
+
+    $made = imageproc_crop_to_temp($srcAbs, $rect, $maxW, $maxH);
+    if ($made === null) {
+        return null;
+    }
+
+    /* Renamed into place rather than written there, so a run killed mid-write
+     * cannot leave a truncated file that every later run then trusts. */
+    if (@rename($made, $cached)) {
+        return $cached;
+    }
+
+    return $made;
+}
+
+/**
+ * Delete prepared images older than a day. Called after an export, so the
+ * cache follows the book around rather than growing forever — a reflow or a
+ * re-crop changes the key and orphans the old file.
+ */
+function imageproc_prune_export_cache(int $maxAgeSeconds = 86400): void
+{
+    $dir = imageproc_export_cache_dir();
+    if (!is_dir($dir)) {
+        return;
+    }
+    /* No floor on the age. An earlier version clamped it to a minute as a
+     * safety rail, which only meant the function quietly ignored what it was
+     * asked for — 0 must mean "clear it", and clearing a cache is never
+     * dangerous: every file in here can be rebuilt from a photo that is still
+     * on disk. */
+    $cutoff = time() - max(0, $maxAgeSeconds);
+    foreach (glob($dir . '/*.jpg') ?: array() as $file) {
+        /* <= rather than <, so an age of 0 clears a file written this same
+         * second. Off-by-one seconds are not worth a surprise in a cache. */
+        if (@filemtime($file) <= $cutoff) {
+            @unlink($file);
+        }
+    }
+}
+
+/**
  * A cropped copy of $srcAbs written to a TEMP file — never touches
  * public/uploads/, the photos table, or a thumbnail. For lib/pdfexport.php:
  * a page's composition (lib/layout_render.php) always needs a real raster
@@ -556,6 +651,25 @@ function imageproc_crop_imagick(string $srcAbs, string $outAbs, float $x, float 
     $im = new Imagick();
     try {
         $im->setResourceLimit(Imagick::RESOURCETYPE_MEMORY, 512 * 1024 * 1024);
+
+        /* Ask libjpeg to decode at reduced scale when we already know we are
+         * about to shrink. A JPEG can be decoded at 1/2, 1/4 or 1/8 size almost
+         * for free — the DCT blocks are simply read at lower resolution — and
+         * that avoids building a 12-megapixel bitmap only to throw most of it
+         * away. It is the difference between an export nginx kills at 60
+         * seconds and one that finishes in a few.
+         *
+         * The hint is generous (square, on the larger edge, doubled) for two
+         * reasons: the crop happens AFTER the decode, so a small crop of a big
+         * photo still needs enough pixels to work with, and EXIF rotation means
+         * the edge that ends up wide is not always the one that started wide.
+         * libjpeg treats it as "no smaller than", so being generous only costs
+         * a scale step, while being tight would cost quality. */
+        if ($maxW !== null && $maxH !== null) {
+            $hint = max($maxW, $maxH) * 2;
+            $im->setOption('jpeg:size', $hint . 'x' . $hint);
+        }
+
         $im->readImage($srcAbs);
 
         if ($im->getNumberImages() > 1) {
@@ -586,7 +700,10 @@ function imageproc_crop_imagick(string $srcAbs, string $outAbs, float $x, float 
         if ($maxW !== null && $maxH !== null) {
             $cur = array($im->getImageWidth(), $im->getImageHeight());
             if ($cur[0] > $maxW || $cur[1] > $maxH) {
-                $im->resizeImage($maxW, $maxH, Imagick::FILTER_LANCZOS, 1, true);
+                /* thumbnailImage rather than resizeImage: it strips as it goes
+                 * and picks a cheaper path for large reductions, which is the
+                 * only kind this does. */
+                $im->thumbnailImage($maxW, $maxH, true);
                 $cw = $im->getImageWidth();
                 $ch = $im->getImageHeight();
             }

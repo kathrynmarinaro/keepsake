@@ -391,7 +391,9 @@ function pdf_draw_photos_page(\Mpdf\Mpdf $mpdf, array $page, array $geo, ?array 
             ?? array('x' => 0.0, 'y' => 0.0, 'w' => 1.0, 'h' => 1.0);
         list($maxW, $maxH) = pdf_print_pixel_budget($wMm, $hMm);
 
-        $prepared = imageproc_crop_to_temp($srcAbs, $cropRect, $maxW, $maxH);
+        /* Cached, so a run that nginx cuts off is not wasted work — see
+         * imageproc_prepare_cached(). */
+        $prepared = imageproc_prepare_cached($srcAbs, $cropRect, $maxW, $maxH);
 
         /* $paint = true, $constrain = FALSE. Constrain is what makes mPDF keep
          * the image's own aspect and resize the box to suit; the box is already
@@ -739,11 +741,12 @@ function pdf_export_build(int $yearProjectId): array
 
     $bytes = $mpdf->Output('', 'S');
 
-    // pdf_draw_photos_page() -> imageproc_crop_to_temp() wrote one
-    // scratch JPEG per photo slot into this directory; mPDF has already read
-    // every one of them into $bytes by the time Output() returns, so nothing
-    // downstream needs them to survive this request.
+    /* The old scratch directory is still swept — nothing writes to it on the
+     * normal path any more, but a fallback might. The prepared images are NOT
+     * swept: they are a cache that makes the next export fast and lets an
+     * interrupted one resume, so they are only aged out. */
     pdf_cleanup_export_crops();
+    imageproc_prune_export_cache();
 
     $filename = 'Keepsake-' . $project['year'] . '.pdf';
 
