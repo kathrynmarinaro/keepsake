@@ -529,6 +529,35 @@ CREATE TABLE IF NOT EXISTS book_pages (
   -- around its absence rather than leaving an empty template page behind.
   snapshot_id      INT UNSIGNED NULL,
 
+  -- Kathryn's rewrite of the line that prints at the foot of the page.
+  --
+  -- NULL, the default for every page, means "no rewrite yet": the foot line is
+  -- DERIVED at render time by joining the captions of the photos on the page,
+  -- in slot order. Captions are therefore still authored PER PHOTO, which is
+  -- what she asked for and for a concrete reason — she will not know which
+  -- photo lands on which page, so a page-level caption box would ask her to
+  -- describe a page she cannot picture. While this stays NULL, editing a
+  -- photo's caption keeps flowing through to the page.
+  --
+  -- Setting it freezes that page's line to exactly what she typed. That is the
+  -- point of it: the derived join is a first draft, and the reason she asked to
+  -- edit the line in place is that it reads differently sitting under the
+  -- photos than it does in a caption field.
+  --
+  -- NOT a contradiction of book_page_photos' "NO CAPTION COLUMN" note below.
+  -- That rule is about a SLOT's caption, which is still photos.caption alone
+  -- and still has exactly one home. This is page-level text with no other
+  -- source, and it deliberately does NOT write back into the photos it was
+  -- derived from: one edited page must never silently rewrite a caption that
+  -- also appears under that photo on another page or in the timeline.
+  --
+  -- A reflow can move photos out from under a frozen line, leaving it
+  -- describing photos that are no longer there. Kept anyway, and visibly, for
+  -- the same reason the manual crop override is kept: something she typed is
+  -- worth more than the tidiness of discarding it, and a wrong line on a page
+  -- she is looking at is a one-tap fix.
+  caption_override TEXT NULL,
+
   PRIMARY KEY (id),
 
   -- Serves rendering a layout in order (Phase 6's page-by-page review, and

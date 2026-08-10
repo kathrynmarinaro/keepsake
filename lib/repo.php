@@ -952,6 +952,81 @@ function book_page_get(int $id): ?array
     return $row ?: null;
 }
 
+/**
+ * The line that prints at the foot of a page, as it should read right now.
+ *
+ * Two sources, in order: Kathryn's rewrite if she has made one, otherwise the
+ * captions of the page's photos joined in slot order. Captions are authored per
+ * photo — she will not know which photo lands on which page, so asking her to
+ * caption a page directly would be asking about a page she cannot picture —
+ * and this is where they become one line.
+ *
+ * Returns '' when there is nothing to print, so a caller can test one thing.
+ * A page whose rewrite is the empty string counts as deliberately blank: the
+ * override is set, so the derived join does not come back.
+ *
+ * @param array $page  a book_pages row
+ * @param list<array> $slots that page's slots in slot order, each with a
+ *   'caption' key where the slot holds a photo
+ */
+function book_page_caption(array $page, array $slots): string
+{
+    if ($page['caption_override'] !== null) {
+        return trim((string) $page['caption_override']);
+    }
+
+    $parts = array();
+    foreach ($slots as $slot) {
+        $c = trim((string) ($slot['caption'] ?? ''));
+        if ($c !== '') { $parts[] = $c; }
+    }
+
+    /* Middle dot rather than a full stop or a semicolon: the parts are
+     * independent captions about different photos, not clauses of a sentence,
+     * and punctuation that implies a sentence would read as a mistake once two
+     * captions with different subjects land side by side. */
+    return implode(' · ', $parts);
+}
+
+/**
+ * Set or clear a page's caption rewrite. Null restores the derived line —
+ * clearing is how she gets back to "whatever the photos say", which is why it
+ * is not the same as saving an empty string.
+ *
+ * Deliberately does NOT touch photos.caption. One page's edit must never
+ * rewrite a caption that also appears under that photo elsewhere; see the
+ * column comment in schema.sql.
+ */
+function book_page_set_caption(int $pageId, ?string $text): bool
+{
+    if (book_page_get($pageId) === null) {
+        return false;
+    }
+
+    $value = $text === null ? null : trim($text);
+    q('UPDATE book_pages SET caption_override = ? WHERE id = ?', array($value, $pageId));
+    return true;
+}
+
+/**
+ * One page's slots in slot order, with the photo fields a caption needs.
+ *
+ * The single-page counterpart to book_layout_pages_with_content(), which loads
+ * a whole layout in two queries and is the wrong tool when an endpoint has just
+ * changed one page and wants to answer with that page's new state.
+ */
+function book_page_slots(int $pageId): array
+{
+    return q(
+        'SELECT bpp.*, p.caption, p.thumb_path, p.width, p.height
+           FROM book_page_photos bpp
+           LEFT JOIN photos p ON p.id = bpp.photo_id
+          WHERE bpp.book_page_id = ?
+          ORDER BY bpp.slot_number',
+        array($pageId)
+    )->fetchAll();
+}
+
 /** One book_page_photos (filled slot) row, or null. */
 function book_page_slot_get(int $id): ?array
 {

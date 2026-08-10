@@ -127,3 +127,14 @@ public_html/keepsake/ :
       column is already there and nothing more is needed. Existing pages
       keep working with no crop override (NULL = auto-fit) until you
       adjust one by hand.
+
+  [ ] Editable page captions. Adds one nullable column, same situation —
+      run this once against your live database:
+
+          ALTER TABLE book_pages
+            ADD COLUMN caption_override TEXT NULL;
+
+      Same "duplicate column" note as above if you run it twice. Until you
+      rewrite a page's caption by hand, every page keeps showing the line
+      built from its photos' own captions, so nothing changes on a book
+      you have already made.
