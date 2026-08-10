@@ -29,6 +29,19 @@ require_login_page();
 
 header('Content-Type: text/plain; charset=utf-8');
 
+/* If the build dies in a way try/catch cannot see — a fatal, a memory ceiling,
+ * the process being killed — the page would otherwise just stop mid-sentence
+ * and tell us nothing. This makes the last words useful. */
+register_shutdown_function(static function (): void {
+    $last = error_get_last();
+    if ($last !== null && in_array($last['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR), true)) {
+        printf("\n\nFATAL — the script was stopped, not an exception it could catch:\n\n");
+        printf("  %s\n  at %s line %d\n", $last['message'], $last['file'], $last['line']);
+        printf("\n  peak memory %.0f MB\n", memory_get_peak_usage(true) / 1048576);
+        print "\nSend me these lines.\n";
+    }
+});
+
 /* The ceilings first, so they are on the page whatever happens below —
  * including if the build dies hard enough to take the script with it. */
 $memLimit = ini_get('memory_limit');
@@ -84,7 +97,15 @@ if ($layoutId === null) {
     exit;
 }
 
-$pages = book_pages_for_layout((int) $layoutId);
+/* book_layout_pages_with_content(), NOT book_pages_for_layout().
+ *
+ * The difference caused a false alarm worth not repeating: the latter selects
+ * the slot rows only, with no join to photos, so original_path reads as empty
+ * for every slot and this page cheerfully reported all 123 photos missing from
+ * disk. The export uses this loader, so the diagnostic has to as well —
+ * checking a different query than the one under investigation is how you
+ * diagnose a problem that does not exist. */
+$pages = book_layout_pages_with_content((int) $layoutId);
 printf("Active layout #%d, %d pages\n", (int) $layoutId, count($pages));
 
 /* How many photos, and how big the originals are. This is what actually drives
