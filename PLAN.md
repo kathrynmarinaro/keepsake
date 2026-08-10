@@ -1512,3 +1512,88 @@ PDF through the changed engine and passes unmodified.
 `README.md`. Still not browser-tested, same standing caveat as every round
 above — the constraint is proven against the SQLite harness and a real
 rendered PDF, not looked at on a phone.
+
+---
+
+## Round 6 — the layout Kathryn drew
+
+The rounds above kept tuning a model she had never agreed to. She looked at a
+full book built from it and said the photos were being cropped and squeezed
+into shapes she did not want, which was the accurate diagnosis: **79% of her
+library is portrait 3:4**, so an engine that manufactured shape variety was
+mutilating photos that were already a good shape. Then she drew the layouts she
+did want on sticky notes, and every frame in them is a natural photo shape with
+white space taking up the slack.
+
+**The model inverted.** A photo's real aspect ratio is now an INPUT to the
+layout. `lib/compose.php` holds 20 templates — 15 transcribed from her
+drawings, 5 derived to fill shape combinations the drawings leave with nowhere
+to go — and solves each page from the occupants' own ratios. Four rules, each
+settled against a rendered proof rather than argued in the abstract:
+
+1. A slot declares the shape it takes and only ever receives it.
+2. Photos keep their own ratio.
+3. Except where photos of the same orientation sit side by side: those are
+   drawn at one identical size, centre-cropping whichever misses the group's
+   target. Padding the odd one out with white space was built first and
+   rejected on sight. Across her 123 photos this costs 4 crops.
+4. A row of MIXED orientations is never normalised — it makes a rectangle, so
+   the lower band of a 2×2 may be shorter than the upper. Forcing equal widths
+   there was the one change she rejected outright.
+
+**How it was settled.** `tools/layout-lab2.php` builds a self-contained HTML
+proof of the whole book from exported CSV and a folder of thumbnails, with the
+solver running in the browser so alignment and margin options are toggles
+rather than rebuilds. Five rounds of "look at it, point at a page number" —
+pages 10, 11 and 21 each named a real geometric fault — and the page mix she
+approved is 44 pages: 5 singles, 14 two-ups, 10 three-ups, 15 four-ups.
+`tools/verify-parity.mjs` drives both solvers over the real book and compares
+rectangle for rectangle at zero tolerance, so the shipped engine cannot drift
+from the proof she signed off on.
+
+**The scorer had to go, not be retuned.** `layout_partition_score()` rates
+PAGES, not books — page count was never a term in it. Harmless while the
+ceiling was three; wrong the moment it was four, where it chose 2,1,2,1,2 over
+4,4 because five pages that each score well beat two that score slightly less
+well. This is Round 5's own lesson a second time: anything decided by a score
+can be won by a score. Page count is now structural, inside one exact DP that
+also refuses any page no template can draw, and `density_preference` survives
+as a modifier within it. Candidate enumeration and the greedy fallback are
+gone; the DP solves a 60-photo group the old path would not even enumerate.
+
+**One event boundary is now crossed, deliberately.** Two leftover lone photos,
+from different occasions, may share a page — never a photo folded INTO an
+event, only two orphans seated together, and only when adjacent. Pairs only.
+
+**Captions became a page-level thing.** They are still authored per photo,
+because she will not know which photo lands on which page. The foot of the page
+joins them, and rewriting that line saves `book_pages.caption_override`.
+Clearing it and blanking it are different operations on purpose.
+
+**Two renderers, one layout, structurally.** `compose_solve()` returns
+rectangles in percent of the trim; the browser positions them absolutely, and
+mPDF — which ignores CSS `left`/`top` entirely — rebuilds the same solved tree
+as nested tables sized from those rectangles. Neither renderer does geometry of
+its own. `lib/layout_render.php` is down to two crop helpers; its composition
+tree, aspect algebra and geometry resolver were deleted rather than left
+looking authoritative.
+
+**Cropping is Kathryn's control now.** The engine reshapes a photo only to
+match same-shape neighbours. "Adjust crop" changed from "fix what the layout
+did to this photo" to "trim this photo because I want it trimmed".
+
+**A real bug worth recording:** the PDF exporter was handed a template choice
+never declared as a parameter, so every photo page silently exported as a line
+of grey text — and the entire existing export suite still passed, because not
+one assertion looked at whether a page had a photograph on it. A book of blank
+pages was the most expensive way this exporter could fail and the one thing it
+could do unnoticed. Now fenced.
+
+**Files:** `lib/compose.php` (new), `lib/layout.php`, `lib/layout_render.php`,
+`lib/pdfexport.php`, `lib/repo.php`, `public/layout.php`,
+`public/api/book-pages-caption.php` (new), `public/assets/layout.js`,
+`public/assets/styles.css`, `schema.sql`, `DEPLOY.txt`, `config.example.php`,
+and six `tools/verify-*` scripts. Still not looked at on a phone — the standing
+caveat from every round above — and the next real check is generating a book
+from the live database and reading the PDF, where file paths, missing photos
+and text cards are exercised together for the first time.

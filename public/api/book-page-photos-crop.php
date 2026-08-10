@@ -10,7 +10,11 @@
  * non-destructive (a "Reflow from here" or a drag can move this same photo
  * into a differently-shaped slot without warning).
  *
- * rect: null clears the override back to auto-fit.
+ * rect: null clears the override. What that returns to is no longer "auto-fit
+ * to whatever cell the engine chose" — since Round 6 the layout draws a photo
+ * at its own shape, so clearing an override usually means the photo is simply
+ * uncropped. The one exception is a photo the composer matched to same-shape
+ * neighbours, where a centred crop to the group's ratio comes back.
  */
 
 declare(strict_types=1);

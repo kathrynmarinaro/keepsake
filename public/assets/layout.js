@@ -58,7 +58,14 @@
  *      patches that one slot's background-image/img in place — this one
  *      genuinely IS fully described by "this one slot's own crop changed",
  *      since it can never reshape the page (the target aspect a crop is
- *      locked to is exactly the box the tree already gave this slot).
+ *      locked to is exactly the box the solver already gave this slot).
+ *
+ *      Since Round 6 this is the ONLY cropping the app does on Kathryn's
+ *      behalf. The engine used to crop every photo to whatever cell it landed
+ *      in; it no longer reshapes a photo at all, except to match same-shape
+ *      neighbours. So this control changed from "fix what the layout did to
+ *      this photo" to "trim this photo because I want it trimmed", which is
+ *      the job she asked it to keep.
  */
 
 import { apiPost, ApiError } from './api.js';
