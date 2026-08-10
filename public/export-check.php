@@ -41,19 +41,46 @@ printf("Imagick available     %s\n", class_exists('Imagick') ? 'yes' : 'no (GD i
 printf("GD available          %s\n", function_exists('imagecreatetruecolor') ? 'yes' : 'NO — this would break cropping');
 print str_repeat('-', 60) . "\n";
 
-$year = isset($_GET['year']) ? (int) $_GET['year'] : (int) date('Y');
-$project = year_project_get_by_year($year);
+/* Pick the year to test. An explicit ?year= wins; otherwise take the newest
+ * year that actually HAS an active layout, rather than assuming the current
+ * calendar year — the book being worked on is usually last year's, and
+ * defaulting to today's just reports "nothing to export" about a year nobody
+ * asked about. */
+$all = year_project_list();
+
+print "Years in the app:\n";
+foreach ($all as $row) {
+    printf("  %d  project #%-3d %s\n", (int) $row['year'], (int) $row['id'],
+        $row['active_book_layout_id'] !== null
+            ? 'active layout #' . (int) $row['active_book_layout_id']
+            : '(no active layout)');
+}
+print "\n";
+
+$project = null;
+if (isset($_GET['year'])) {
+    $project = year_project_get_by_year((int) $_GET['year']);
+    if ($project === null) {
+        printf("No year project for %d.\n", (int) $_GET['year']);
+        exit;
+    }
+} else {
+    foreach ($all as $row) {
+        if ($row['active_book_layout_id'] !== null) { $project = $row; break; }
+    }
+}
 
 if ($project === null) {
-    printf("No year project for %d. Add ?year=YYYY to the URL for a different year.\n", $year);
+    print "No year has an active book layout yet — generate one on the Layout screen.\n";
     exit;
 }
 
-printf("Year %d, project #%d\n", $year, (int) $project['id']);
+$year = (int) $project['year'];
+printf("Testing year %d, project #%d\n", $year, (int) $project['id']);
 
 $layoutId = $project['active_book_layout_id'];
 if ($layoutId === null) {
-    print "No active book layout — generate one on the Layout screen first.\n";
+    printf("Year %d has no active book layout. Add ?year=YYYY to test another.\n", $year);
     exit;
 }
 
