@@ -28,6 +28,9 @@
  *      obeys the same bounds; and within all that, density still VARIES
  *      across a run of identically-shaped photos rather than sticking on
  *      one number.
+ *   3c. layout_pair_lone_subgroups(): two leftover orphans, from different
+ *      occasions, sharing a page — the one place an event boundary is
+ *      crossed, and only ever between two photos that both ended up alone.
  *   3b. layout_merge_lone_subgroups(): the structural half of "fewer 1-up
  *      pages" — a lone photo inside an event group joins its neighbours
  *      however wide the gap, an ungrouped one only within
@@ -194,6 +197,48 @@ check('no pages means no schedule', layout_card_schedule(0, 3) === array());
 check('one card across five pages lands in the middle', layout_card_schedule(5, 1) === array(2));
 check('two cards across four pages are spread apart', layout_card_schedule(4, 2) === array(1, 3));
 check('more cards than pages caps at one per page', count(layout_card_schedule(2, 5)) === 2);
+
+echo "\nlayout_pair_lone_subgroups(): two orphans from different occasions share a page...\n";
+
+/* The one place an event boundary is crossed, added in Round 6 after Kathryn
+ * reviewed these exact pages in the layout lab and asked for them. It never
+ * puts a photo INTO an event — it seats two photos that each ended up alone. */
+$paired = layout_pair_lone_subgroups(array(
+    sub(1, array('2024-03-01 10:00:00')),
+    sub(2, array('2024-06-01 10:00:00')),
+));
+check('two adjacent lone groups become one group of two', count($paired) === 1 && count($paired[0]['photos']) === 2);
+check('the paired group belongs to neither event', $paired[0]['event_group_id'] === null);
+check('its photos are in chronological order',
+    $paired[0]['photos'][0]['captured_at'] === '2024-03-01 10:00:00');
+check('its date range spans both', $paired[0]['start_date'] === '2024-03-01' && $paired[0]['end_date'] === '2024-06-01');
+
+/* An event between two orphans is a wall. Reaching over it would put two photos
+ * together whose only relationship is that something else happened in between. */
+$walled = layout_pair_lone_subgroups(array(
+    sub(1, array('2024-03-01 10:00:00')),
+    sub(2, array('2024-04-01 10:00:00', '2024-04-01 11:00:00')),
+    sub(3, array('2024-06-01 10:00:00')),
+));
+check('a real event between two orphans keeps them apart', count($walled) === 3);
+check('...and neither orphan was altered',
+    $walled[0]['event_group_id'] === 1 && $walled[2]['event_group_id'] === 3);
+
+/* Pairs only. Five orphans are two pages of two and one of one — not a 4-up and
+ * a single, because these are not one occasion and a 4-up reads as an event. */
+$five = layout_pair_lone_subgroups(array(
+    sub(1, array('2024-01-01 10:00:00')),
+    sub(2, array('2024-02-01 10:00:00')),
+    sub(3, array('2024-03-01 10:00:00')),
+    sub(4, array('2024-04-01 10:00:00')),
+    sub(5, array('2024-05-01 10:00:00')),
+));
+check('five orphans pair off two at a time, leaving one alone',
+    array_map(static fn(array $g): int => count($g['photos']), $five) === array(2, 2, 1));
+
+check('a group that was never lone is untouched',
+    layout_pair_lone_subgroups(array(sub(1, array('2024-01-01 10:00:00', '2024-01-01 11:00:00'))))[0]['event_group_id'] === 1);
+check('an empty book pairs to nothing', layout_pair_lone_subgroups(array()) === array());
 
 echo "\nlayout_partition_subgroup(): page sizes stay inside the configured bounds...\n";
 foreach (range(2, 10) as $n) {

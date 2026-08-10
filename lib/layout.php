@@ -862,6 +862,61 @@ function layout_text_is_long(string $text, int $threshold): bool
 }
 
 /**
+ * Two leftover lone photos, from DIFFERENT occasions, sharing a page.
+ *
+ * Runs after layout_merge_lone_subgroups() has done everything it is allowed
+ * to, and picks up what it deliberately would not: that pass never crosses an
+ * event-group boundary, because folding a stray photo into "the Myrtle Beach
+ * trip" would make the book claim something Kathryn didn't say.
+ *
+ * This makes a weaker claim, and that is why it is allowed to cross. It never
+ * puts a photo INTO an event. It takes two photos that each ended up alone and
+ * seats them on one page, which asserts nothing about either occasion beyond
+ * the fact that both happened — and Kathryn reviewed exactly these pages in the
+ * layout lab, where they were outlined so they could not be missed, and asked
+ * for them in the book.
+ *
+ * ONLY ADJACENT SINGLETONS PAIR. A lone photo with a real event between it and
+ * the next lone photo stays alone: the event is a wall, and reaching over it
+ * would put two photos together whose only relationship is that a third thing
+ * happened in between. This is what makes the rule chronological rather than
+ * merely tidy.
+ *
+ * PAIRS ONLY, never three or four. A run of five lone photos becomes two pages
+ * of two and one page of one, not a 4-up and a single. These photos are not one
+ * occasion, and a 4-up reads as an event; two photos read as two photos.
+ *
+ * The merged group's event_group_id becomes NULL, because it now belongs to
+ * neither event. That is the honest answer, and it keeps
+ * layout_subgroup_same_bucket() from ever treating this page as part of an
+ * event a later pass might merge more photos into.
+ *
+ * Pure; expects chronological order and returns it.
+ */
+function layout_pair_lone_subgroups(array $subgroups): array
+{
+    $list = array_values($subgroups);
+    $out  = array();
+
+    for ($i = 0; $i < count($list); $i++) {
+        $isLone = count($list[$i]['photos']) === 1;
+        $nextIsLone = isset($list[$i + 1]) && count($list[$i + 1]['photos']) === 1;
+
+        if ($isLone && $nextIsLone) {
+            $merged = layout_subgroup_absorb($list[$i], $list[$i + 1]);
+            $merged['event_group_id'] = null;
+            $out[] = $merged;
+            $i++;   // the partner is consumed; a third lone photo starts a new pair
+            continue;
+        }
+
+        $out[] = $list[$i];
+    }
+
+    return $out;
+}
+
+/**
  * Which page-group (if any) each short text belongs to. Pure.
  *
  * Brief §4.3 places a quote/anecdote by DATE: one whose entry_date falls
@@ -1322,6 +1377,13 @@ function layout_plan(array $content, array $tuning, array $historySeed = array()
      * here, before text assignment, so a quote attaches to the page-group
      * that will actually exist rather than to one about to disappear. */
     $subgroups = layout_merge_lone_subgroups($subgroups, (float) $tuning['lone_merge_gap_hours']);
+
+    /* Whatever is still alone after that pass may pair with an adjacent orphan,
+     * across event boundaries — the one place the boundary is crossed, and only
+     * ever between two photos that both ended up with nobody. Runs BEFORE text
+     * assignment so a text lands on the page as it will actually be printed
+     * rather than on a group that is about to be merged out from under it. */
+    $subgroups = layout_pair_lone_subgroups($subgroups);
 
     /* ---- 3. text: long ones always stand alone, short ones look for a page */
     $threshold = (int) $tuning['text_page_chars'];
