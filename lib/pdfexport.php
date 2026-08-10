@@ -52,15 +52,19 @@
  * Kathryn wants a more magazine-style bleed treatment on interior spreads —
  * flagged in the Phase 7 report, not decided unilaterally here.
  *
- * POST-LAUNCH REWORK: a page_type='photos' page's SHAPE (which photo gets
- * how much of the page) now comes from lib/layout_render.php's ONE
- * composition tree, shared verbatim with public/layout.php's on-screen
- * preview — see pdf_render_photos_page_html()'s own comment for why, and
- * PLAN.md for the two on-screen mockups ("letterboxed" vs "asymmetric")
- * Kathryn chose between before this was built. Every photo is pre-cropped
- * to the exact box mPDF will draw it into (imageproc_crop_to_temp()) rather
- * than relying on `object-fit`, which this library's <img> support doesn't
- * reliably honor — see pdf_resolve_crop_rect().
+ * ROUND 6: a page's shape comes from lib/compose.php's solved rectangles,
+ * the same ones public/layout.php draws — see pdf_render_photos_page_html().
+ *
+ * A photo is pre-cropped (imageproc_crop_to_temp()) ONLY when its box is not
+ * its own shape, which now means only where the composer matched it to
+ * same-shape neighbours. Everything else is embedded untouched. That is a
+ * correctness point as well as a speed one: cropping is done here rather than
+ * with `object-fit` because mPDF's <img> support does not honour it, but
+ * running every photo through a decode and re-encode it did not need cost
+ * about 0.4s each and re-compressed the original for nothing. On a 123-photo
+ * book that was ~50 seconds of waste — enough to trip the execution limit on
+ * shared hosting and fail the export outright, which is exactly what it did.
+ * See pdf_resolve_crop_rect().
  *
  * FAIL SOFT, PER PLAN.md:
  *   - No cover photo picked (year_projects.cover_photo_id IS NULL): the
@@ -438,12 +442,33 @@ function pdf_resolve_crop_rect(array $slot, float $wMm, float $hMm): ?array
         );
     }
 
+    /* NULL WHEN THERE IS NOTHING TO CUT, which since Round 6 is nearly always.
+     *
+     * The caller reads null as "embed the original untouched". That matters far
+     * more than it sounds: a rect covering the whole frame still sent every
+     * photo through a decode and re-encode of a 12-megapixel JPEG, which cost
+     * about 0.4s each and re-compressed an image that did not need touching. On
+     * a 123-photo book that is roughly 50 seconds of pure waste, which is
+     * enough to trip the execution limit on shared hosting and fail the export
+     * outright.
+     *
+     * Under the old engine the rect was always a genuine crop, so the work was
+     * always real and this branch would have been dead code. Under the new one
+     * a photo's box IS its own shape unless the composer matched it to
+     * same-shape neighbours, so the crop is real for a handful of photos and a
+     * no-op for the rest. */
     $w = (int) ($slot['width'] ?? 0);
     $h = (int) ($slot['height'] ?? 0);
     if ($w <= 0 || $h <= 0 || $hMm <= 0) {
+        // Nothing to compute a crop from. Embed the original, same as before.
         return null;
     }
-    return layout_auto_crop_rect($w, $h, $wMm / $hMm);
+
+    $auto  = layout_auto_crop_rect($w, $h, $wMm / $hMm);
+    $whole = $auto['x'] <= 1e-4 && $auto['y'] <= 1e-4
+        && $auto['w'] >= 1.0 - 1e-4 && $auto['h'] >= 1.0 - 1e-4;
+
+    return $whole ? null : $auto;
 }
 
 /** A short run of text, matching public/layout.php's page_snippet() — this
@@ -464,9 +489,13 @@ function pdf_snippet(string $text, int $len = 90): string
  */
 function pdf_render_photo_cell_sized(array $slot, float $wMm, float $hMm): string
 {
-    $hasCaption = !empty($slot['caption']);
-    $captionMm  = $hasCaption ? max(6.0, min(14.0, $hMm * 0.18)) : 0.0;
-    $imgHmm     = max(4.0, $hMm - $captionMm);
+    /* NO PER-SLOT CAPTION BAND ANY MORE. A photo's caption prints as part of the
+     * page's foot line (book_page_caption()), which is what the preview shows
+     * and what Kathryn chose. Reserving a band here would have printed captions
+     * twice AND — worse — shortened the box the composer sized, so the box
+     * would no longer match the photo's shape and every captioned photo would
+     * have been silently cropped to fit it. The photo fills its rectangle. */
+    $imgHmm = $hMm;
 
     $srcAbs = pdf_resolve_photo_file($slot);
     if ($srcAbs === null) {
@@ -480,13 +509,7 @@ function pdf_render_photo_cell_sized(array $slot, float $wMm, float $hMm): strin
         $img = '<img src="' . pdf_esc($imgSrc) . '" style="width:100%;height:' . round($imgHmm, 2) . 'mm;display:block;">';
     }
 
-    $caption = $hasCaption
-        ? '<div style="height:' . round($captionMm, 2) . 'mm;overflow:hidden;font-size:8pt;'
-            . 'font-family:sans-serif;color:#333;line-height:1.25;margin-top:1mm;">'
-            . pdf_esc(pdf_snippet((string) $slot['caption'])) . '</div>'
-        : '';
-
-    return $img . $caption;
+    return $img;
 }
 
 /** A text-card slot sized to at most $wMm x $hMm — text reflows to fit

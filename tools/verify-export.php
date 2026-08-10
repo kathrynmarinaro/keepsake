@@ -344,6 +344,45 @@ function pdf_page_object_count(string $bytes): int
     return preg_match_all('#/Type\s*/Page(?![a-zA-Z])#', $bytes);
 }
 
+echo "\npdf_resolve_crop_rect(): only cut a photo that actually needs cutting...\n";
+
+/* The regression this pins cost ~50 seconds on a 123-photo book and failed the
+ * export outright on shared hosting. Every photo was being sent through a
+ * decode and re-encode of a 12-megapixel JPEG to apply a crop rect covering the
+ * whole frame — real work, zero effect, plus a needless re-compression of the
+ * original. Nothing noticed, because every existing assertion here asked
+ * whether a PDF came out, not what it cost to make one. */
+$portrait = array('width' => 3024, 'height' => 4032, 'crop_x' => null, 'crop_w' => null,
+                  'crop_y' => null, 'crop_h' => null);
+
+check('a photo in a box of its own shape is not cropped at all',
+    pdf_resolve_crop_rect($portrait, 75.0, 100.0) === null);
+
+check('...and the same holds for a landscape',
+    pdf_resolve_crop_rect(array('width' => 4032, 'height' => 3024, 'crop_x' => null,
+        'crop_w' => null, 'crop_y' => null, 'crop_h' => null), 100.0, 75.0) === null);
+
+/* The one case where a crop IS real now: the composer matched an odd-ratio
+ * photo to its same-shape neighbours, so its box is the group's shape. */
+$odd = pdf_resolve_crop_rect(array('width' => 1080, 'height' => 1920, 'crop_x' => null,
+    'crop_w' => null, 'crop_y' => null, 'crop_h' => null), 75.0, 100.0);
+check('a 9:16 photo matched into a 3:4 box does get a real crop',
+    $odd !== null && $odd['h'] < 0.99);
+check('...centred, so the crop takes equal bites top and bottom',
+    $odd !== null && abs($odd['y'] - (1.0 - $odd['h']) / 2.0) < 1e-9);
+
+/* A manual override is always honoured, whatever the box. */
+$manual = pdf_resolve_crop_rect(array('width' => 3024, 'height' => 4032, 'crop_x' => 0.1,
+    'crop_y' => 0.2, 'crop_w' => 0.5, 'crop_h' => 0.5), 75.0, 100.0);
+check('a manual crop is never discarded as a no-op',
+    $manual !== null && abs($manual['x'] - 0.1) < 1e-9 && abs($manual['w'] - 0.5) < 1e-9);
+
+/* Fail soft, unchanged by any of this: with no stored dimensions there is
+ * nothing to compute a crop from, so the original is embedded untouched. */
+check('a photo with no dimensions is embedded untouched',
+    pdf_resolve_crop_rect(array('width' => 0, 'height' => 0, 'crop_x' => null,
+        'crop_w' => null, 'crop_y' => null, 'crop_h' => null), 75.0, 100.0) === null);
+
 echo "\npdf_export_build(): the real PDF, end to end...\n";
 $export = pdf_export_build($yp);
 
