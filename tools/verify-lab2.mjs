@@ -22,11 +22,11 @@ let checked = 0, bad = [];
 const EPS = 1e-4;
 
 for (const [label, list] of [['book', PAGES], ['catalogue', CATALOGUE]]) {
-  for (const policy of ['justify', 'even']) {
+  for (const policy of ['grid', 'ratio', 'even']) {
     for (const fill of [0.60, 0.72, 0.85]) {
       list.forEach((pg, i) => {
         const tpl = TEMPLATES[pg.tpl];
-        const rects = solve(bind(tpl.tree, pg.ids), policy, fill);
+        const rects = solve(bind(tpl.tree, pg.ids), policy, fill, tpl.grid);
         const where = `${label}[${i}] ${pg.tpl} ${policy} ${fill}`;
 
         if (rects.length !== tpl.n) bad.push(`${where}: ${rects.length} rects, want ${tpl.n}`);
@@ -50,6 +50,20 @@ for (const [label, list] of [['book', PAGES], ['catalogue', CATALOGUE]]) {
             const ox = Math.min(p.x + p.w, q.x + q.w) - Math.max(p.x, q.x);
             const oy = Math.min(p.y + p.h, q.y + q.h) - Math.max(p.y, q.y);
             if (ox > 0.01 && oy > 0.01) bad.push(`${where}: ${p.id} overlaps ${q.id} by ${ox.toFixed(3)}x${oy.toFixed(3)}`);
+          }
+        }
+        /* 4. The complaint that prompted the grid policy: in a 2x2 the top and
+         * bottom dividers must be the same line. Checked as "every photo has
+         * the same width, and there are exactly two distinct left edges" —
+         * which is what a person means by the lines agreeing. */
+        if (tpl.grid && policy === 'grid') {
+          const w0 = rects[0].w;
+          if (rects.some(r => Math.abs(r.w - w0) > 0.01)) {
+            bad.push(`${where}: grid cells differ in width (${rects.map(r => r.w.toFixed(2)).join(', ')})`);
+          }
+          const lefts = [...new Set(rects.map(r => r.x.toFixed(3)))];
+          if (lefts.length !== 2) {
+            bad.push(`${where}: ${lefts.length} distinct column edges, want 2 (${lefts.join(', ')})`);
           }
         }
         checked++;

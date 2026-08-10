@@ -18,12 +18,15 @@
  *     a photo of that shape. Kathryn chose "shapes are required" over "shapes
  *     are illustrative" explicitly. The cost is that some templates fire rarely;
  *     the benefit is that a page always looks like the sketch it came from.
- *   - Geometry is solved, not tabulated. See lab2_* in the emitted JS.
+ *   - Geometry is solved, not tabulated. See the solver in the emitted JS.
+ *   - Same-shape photos share a cell width, so the dividing lines in a 2x2
+ *     agree. A photo whose ratio does not match its cell gains white space
+ *     rather than losing pixels; on white paper that space is invisible.
  *
- * WHY THE GEOMETRY LIVES IN JAVASCRIPT. Kathryn asked to compare two alignment
- * policies and three margin levels rather than pick blind, which is six
- * renderings of every page. Emitting six copies of the markup would inline the
- * base64 thumbnails six times and blow past the artifact size limit, so the
+ * WHY THE GEOMETRY LIVES IN JAVASCRIPT. Kathryn asked to compare alignment
+ * policies and margin levels rather than pick blind, which is nine renderings
+ * of every page. Emitting a copy of the markup per combination would inline the
+ * base64 thumbnails once per copy and blow past the artifact size limit, so the
  * thumbnails and the PAGE PLAN are emitted once and the solver runs in the
  * browser. Toggling a policy is then instant, which is the whole point — you
  * cannot judge white space by reloading.
@@ -222,6 +225,7 @@ function lab2_templates(): array
              * capped 20 of her 36 event groups at three photos a page. Four
              * portraits in a 2x2 make one large rectangle, which is her phrase
              * for it and an accurate description of the block it produces. */
+            'grid'    => true,
             'note'  => 'four portraits, 2x2',
         ),
         'quad-PPLL' => array(
@@ -230,6 +234,7 @@ function lab2_templates(): array
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 0), array('t' => 'leaf', 'i' => 1))),
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 2), array('t' => 'leaf', 'i' => 3))),
             )),
+            'grid'    => true,
             'note'  => 'two portraits over two landscapes',
         ),
         'pinwheel' => array(
@@ -244,6 +249,7 @@ function lab2_templates(): array
              * consequence of the photos' own ratios, not something a template
              * can dial. So they transcribe to the same entry. Flagged for
              * Kathryn rather than faked into two. */
+            'grid'    => true,
             'note'  => 'portrait/landscape, landscape/portrait',
         ),
         'col3L-heroP' => array(
@@ -292,7 +298,23 @@ function lab2_templates(): array
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 0), array('t' => 'leaf', 'i' => 1))),
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 2), array('t' => 'leaf', 'i' => 3))),
             )),
+            'grid'    => true,
             'note'    => 'three portraits and a landscape, 2x2',
+            'derived' => true,
+        ),
+        'quad-PPLP' => array(
+            'slots' => array($P, $P, $L, $P),
+            'tree'  => array('t' => 'col', 'k' => array(
+                array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 0), array('t' => 'leaf', 'i' => 1))),
+                array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 2), array('t' => 'leaf', 'i' => 3))),
+            )),
+            /* quad-PPPL with the bottom row flipped. Asked for so the most-used
+             * 4-up has two versions rather than one, which matters because it
+             * carries a fifth of the book: the template-rotation pass can now
+             * alternate them and the same arrangement stops reappearing on
+             * consecutive pages. */
+            'grid'    => true,
+            'note'    => 'three portraits and a landscape, landscape at bottom left',
             'derived' => true,
         ),
         'quad-LLLL' => array(
@@ -301,6 +323,7 @@ function lab2_templates(): array
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 0), array('t' => 'leaf', 'i' => 1))),
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 2), array('t' => 'leaf', 'i' => 3))),
             )),
+            'grid'    => true,
             'note'    => 'four landscapes, 2x2',
             'derived' => true,
         ),
@@ -571,6 +594,7 @@ foreach ($templates as $name => $tpl) {
         'note'    => $tpl['note'],
         'n'       => count($tpl['slots']),
         'derived' => !empty($tpl['derived']),
+        'grid'    => !empty($tpl['grid']),
     );
 }
 

@@ -102,7 +102,8 @@
     <div>
       <div class="ctl-label">Alignment</div>
       <div class="seg" id="seg-align">
-        <button data-v="justify" aria-pressed="true">Clean outer block</button>
+        <button data-v="grid" aria-pressed="true">Aligned grid</button>
+        <button data-v="ratio" aria-pressed="false">Ratio widths</button>
         <button data-v="even" aria-pressed="false">Equal gaps</button>
       </div>
     </div>
@@ -119,11 +120,11 @@
   <div class="stats" id="stats"></div>
 
   <div class="legend">
-    <p><b>Clean outer block</b> gives every photo in a row the same height, so the group forms a tidy rectangle. <b>Equal gaps</b> gives every photo the same <em>area</em> instead, so a landscape and a portrait carry equal visual weight — but the outer edge goes ragged.</p>
+    <p><b>Aligned grid</b> keeps a clean outer block and additionally puts same-shape photos on equal-width cells, so the dividing lines in a 2&times;2 agree; an odd-ratio photo keeps its shape and gains a little white space instead of being cropped. <b>Ratio widths</b> is the previous behaviour, where each photo's own ratio set its width &mdash; the version where page 10's lines disagreed. <b>Equal gaps</b> gives every photo the same <em>area</em>, so the outer edge goes ragged.</p>
     <p><span class="tag-derived">Cyan template names</span> are ones I derived to fill gaps your sketches don't cover. A <span class="tag-cross">dashed magenta edge</span> marks a page pairing two lone photos from different events.</p>
   </div>
 
-  <h2 class="section">The 19 templates</h2>
+  <h2 class="section" id="tpl-heading">Templates</h2>
   <p class="sub">Every template drawn once, on stand-in photos, whether or not the book below uses it. This is the set to accept or strike — the book is only what the partitioner made of it.</p>
   <div id="catalogue"></div>
 
@@ -165,54 +166,110 @@ const ITERS = 40;
 
 function arOf(node) { return PHOTOS[node.id].ar; }
 
+/* Is this row laid out on equal-width cells rather than by aspect ratio?
+ *
+ * Letting every photo's own ratio set its own width is right for a row of
+ * mixed shapes, and wrong the moment two rows sit above each other: page 10 of
+ * the first build put a 0.750 portrait beside a 0.681 one, so the top divider
+ * landed off-centre while the bottom row's two identical landscapes divided
+ * dead centre, and the two lines visibly disagreed. Kathryn's rule — similar
+ * shapes should be the same size — is the fix.
+ *
+ * So a row gets equal-width cells when it is part of a 2x2 (where the columns
+ * must agree with the row above), or when every photo in it is the same
+ * orientation (where differing widths read as a mistake rather than a
+ * composition). A photo whose ratio does not match its cell keeps its own ratio
+ * and is centred in the cell with the leftover as white space — which is
+ * invisible on white paper, and is the only way to hold the grid without
+ * cropping.
+ */
+/* level 0 = never (the original ratio-width behaviour, kept for comparison)
+ * level 1 = only where every photo in the row is the same orientation
+ * level 2 = always, because this row belongs to a 2x2 whose columns must agree */
+function isEqRow(node, level) {
+  if (!level) return false;
+  if (node.t !== 'row') return false;
+  if (!node.k.every(k => k.t === 'leaf')) return false;
+  if (level === 2) return true;
+  return node.k.every(k => PHOTOS[k.id].s === PHOTOS[node.k[0].id].s);
+}
+
+/* Cell width in a row of n equal columns spanning w. */
+function eqCol(node, w, gap) { return (w - gap * (node.k.length - 1)) / node.k.length; }
+
 /* --- justify ------------------------------------------------------------- */
 
-function jHeight(node, w, gap) {
+function jHeight(node, w, gap, grid) {
   if (node.t === 'leaf') return w / arOf(node);
+  if (isEqRow(node, grid)) {
+    // Row height is set by the TALLEST photo at the shared cell width.
+    const c = eqCol(node, w, gap);
+    return Math.max(...node.k.map(k => c / arOf(k)));
+  }
   if (node.t === 'col') {
     let h = gap * (node.k.length - 1);
-    for (const kid of node.k) h += jHeight(kid, w, gap);
+    for (const kid of node.k) h += jHeight(kid, w, gap, grid);
     return h;
   }
   // row: find the shared height h whose total width is w.
   let lo = 0, hi = w * 8;
   for (let i = 0; i < ITERS; i++) {
     const mid = (lo + hi) / 2;
-    (jWidth(node, mid, gap) < w) ? (lo = mid) : (hi = mid);
+    (jWidth(node, mid, gap, grid) < w) ? (lo = mid) : (hi = mid);
   }
   return (lo + hi) / 2;
 }
 
-function jWidth(node, h, gap) {
+function jWidth(node, h, gap, grid) {
   if (node.t === 'leaf') return h * arOf(node);
+  if (isEqRow(node, grid)) {
+    /* Closed form: row height is cellWidth / min(ar), so the width that yields
+     * height h is h * min(ar) * n, plus the gaps. */
+    const minAr = Math.min(...node.k.map(k => arOf(k)));
+    return h * minAr * node.k.length + gap * (node.k.length - 1);
+  }
   if (node.t === 'row') {
     let w = gap * (node.k.length - 1);
-    for (const kid of node.k) w += jWidth(kid, h, gap);
+    for (const kid of node.k) w += jWidth(kid, h, gap, grid);
     return w;
   }
   // col: find the shared width w whose total height is h.
   let lo = 0, hi = h * 8;
   for (let i = 0; i < ITERS; i++) {
     const mid = (lo + hi) / 2;
-    (jHeight(node, mid, gap) < h) ? (lo = mid) : (hi = mid);
+    (jHeight(node, mid, gap, grid) < h) ? (lo = mid) : (hi = mid);
   }
   return (lo + hi) / 2;
 }
 
-function jPlace(node, x, y, w, h, gap, out) {
+function jPlace(node, x, y, w, h, gap, grid, out) {
   if (node.t === 'leaf') { out.push({ id: node.id, x, y, w, h }); return; }
+
+  if (isEqRow(node, grid)) {
+    const c = eqCol(node, w, gap);
+    let cx = x;
+    for (const kid of node.k) {
+      /* The photo keeps its ratio and fills the cell's width; whatever height
+       * it comes up short by becomes white space above and below it. */
+      const ph = c / arOf(kid);
+      out.push({ id: kid.id, x: cx, y: y + (h - ph) / 2, w: c, h: ph });
+      cx += c + gap;
+    }
+    return;
+  }
+
   if (node.t === 'row') {
     let cx = x;
     for (const kid of node.k) {
-      const kw = jWidth(kid, h, gap);
-      jPlace(kid, cx, y, kw, h, gap, out);
+      const kw = jWidth(kid, h, gap, grid);
+      jPlace(kid, cx, y, kw, h, gap, grid, out);
       cx += kw + gap;
     }
   } else {
     let cy = y;
     for (const kid of node.k) {
-      const kh = jHeight(kid, w, gap);
-      jPlace(kid, x, cy, w, kh, gap, out);
+      const kh = jHeight(kid, w, gap, grid);
+      jPlace(kid, x, cy, w, kh, gap, grid, out);
       cy += kh + gap;
     }
   }
@@ -267,16 +324,17 @@ function ePlace(node, x, y, scale, gap, out) {
 
 /* Returns rects in percent of the page, so the caller never needs a pixel size
  * and the same numbers would drive a PDF at any DPI. */
-function solve(tree, policy, fill) {
+function solve(tree, policy, fill, tplGrid) {
   const box = fill * 100;            // content box, percent of the square page
   const off = (100 - box) / 2;
   const gap = 2.0;                   // percent of page side, constant
 
   const out = [];
-  if (policy === 'justify') {
-    let w = box, h = jHeight(tree, box, gap);
-    if (h > box) { h = box; w = jWidth(tree, box, gap); }
-    jPlace(tree, off + (box - w) / 2, off + (box - h) / 2, w, h, gap, out);
+  if (policy !== 'even') {
+    const level = (policy === 'ratio') ? 0 : (tplGrid ? 2 : 1);
+    let w = box, h = jHeight(tree, box, gap, level);
+    if (h > box) { h = box; w = jWidth(tree, box, gap, level); }
+    jPlace(tree, off + (box - w) / 2, off + (box - h) / 2, w, h, gap, level, out);
   } else {
     const nat = eSize(tree, gap / 10);   // gap in unit-area space
     const scale = Math.min(box / nat.w, box / nat.h);
@@ -297,7 +355,7 @@ function bind(node, ids) {
 /* Kathryn's picks, after comparing all six combinations in the lab: a clean
  * outer block at the tight margin. The toggles stay so the comparison is still
  * reproducible, but this is the pair the book is being built around. */
-let ALIGN = 'justify';
+let ALIGN = 'grid';
 let FILL = 0.85;
 
 function renderInto(el, list, numbered) {
@@ -305,7 +363,7 @@ function renderInto(el, list, numbered) {
 
   list.forEach((pg, idx) => {
     const tpl = TEMPLATES[pg.tpl];
-    const rects = solve(bind(tpl.tree, pg.ids), ALIGN, FILL);
+    const rects = solve(bind(tpl.tree, pg.ids), ALIGN, FILL, tpl.grid);
 
     const spread = document.createElement('div');
     spread.className = 'spread';
@@ -375,6 +433,7 @@ function wire(id, apply) {
 wire('seg-align', v => { ALIGN = v; });
 wire('seg-margin', v => { FILL = parseFloat(v); });
 
+document.getElementById('tpl-heading').textContent = 'The ' + CATALOGUE.length + ' templates';
 renderStats();
 render();
 </script>
