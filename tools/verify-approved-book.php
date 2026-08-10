@@ -70,23 +70,36 @@ $yearId = (int) db()->lastInsertId();
 
 $photos = fixture('approved-book-photos.csv');
 
-/* The event-group export is one row short: 8 photos reference group 16 and no
- * row for it came across. Those photos are therefore loaded UNGROUPED, which is
- * the faithful reading of the export and — on this data — the better book.
+/* GROUP 16 IS STALE DATA, and the reason this fixture cannot reproduce the
+ * approved proof exactly.
  *
- * Reconstructing the group from its photos was tried and rejected by the
- * chronology check below. Group 16's 8 photos run from 2025-03-22 to
- * 2025-11-29, so treating them as one event puts March and November on the same
- * page and makes the book read March, November, March. Whatever group 16 was,
- * it was not one occasion.
+ * Eight photos carry event_group_id 16 and no row for that group came across in
+ * the export, so they load here UNGROUPED. That turns out to be the right
+ * answer, though not for the reason it first looked like.
  *
- * This is also the entire remaining gap against the approved proof. The lab
- * grouped straight off the photos' event_group_id column, so it DID keep those
- * eight together and gave them two 4-up pages — which is why the proof is 44
- * pages and this is 47. If group 16 is a real event in the live database and
- * only the export dropped it, the live book will be the 44-page one; if it is a
- * stale id, 47 is right and two pages of the approved proof were wrong. That is
- * a question about her data, not about this engine. */
+ * Kathryn said some photos had the wrong date on upload and she corrected them
+ * afterwards. The timestamps confirm it precisely: every duplicated time-of-day
+ * in the whole 123-photo library belongs to group 16 and to nothing else —
+ * 21:20:16 on three different days, 15:56:36 on two more. That is what editing a
+ * DATE while the time rides along looks like. Those photos originally shared a
+ * timestamp, the grouper put them in one event on that basis, and correcting the
+ * dates never re-ran it. So group 16 is a grouping of dates that no longer
+ * exist, and its members now span 2025-03-22 to 2025-11-29.
+ *
+ * Reconstructing the group from its photos was tried, and the chronology check
+ * below rejected it: eight photos across eight months on two pages made the book
+ * read March, November, March.
+ *
+ * The lab grouped straight off the event_group_id column, so it kept those eight
+ * together and gave them two 4-up pages. That is why the approved proof is 44
+ * pages and this is 47, and it means two pages of that proof were built on a
+ * grouping Kathryn's own date corrections had already invalidated.
+ *
+ * Re-running the app's auto-grouper over the corrected dates splits them into
+ * five sensible events — 03-22, 06-19, 07-23..24, 11-16, 11-26..29 — and the
+ * book comes out at 46 pages. That is the number to pin once the live data has
+ * been regrouped; until then this fixture is a faithful copy of an export taken
+ * mid-repair, and the mix is reported rather than asserted. */
 
 $groupIds = array();
 foreach (fixture('approved-book-groups.csv') as $row) {
@@ -166,7 +179,8 @@ check('every photo reached the book, exactly once (' . $placed . ' of ' . count(
 printf("       page mix: %s\n",
     implode(', ', array_map(static fn($n, $c): string => "{$c}x{$n}-up", array_keys($dist), $dist)));
 printf("       approved proof: 5x1-up, 14x2-up, 10x3-up, 15x4-up across 44 pages\n");
-printf("       the difference is group 16 — see this file's note on the missing export row\n");
+printf("       regrouped on the corrected dates it is 46 pages: 6x1, 16x2, 11x3, 13x4\n");
+printf("       see this file's note on group 16 — stale grouping, not an engine fault\n");
 
 /* Every page must be drawable. A page the composer cannot place is a page that
  * prints as grey text, which is exactly how the export bug got through. */
