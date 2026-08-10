@@ -1589,6 +1589,17 @@ one assertion looked at whether a page had a photograph on it. A book of blank
 pages was the most expensive way this exporter could fail and the one thing it
 could do unnoticed. Now fenced.
 
+**Events are no longer split by time.** The day/close-timing clustering
+(`subgroup_gap_hours`, ~5h) now applies only to UNGROUPED photos. An event group
+is already Kathryn's statement that these photos are one occasion, and re-cutting
+it by a five-hour gap overrules her with a heuristic — event group 2 is eight
+photos from January 15th to 23rd, which clustering turned into eight single-day
+groups that could only pair into 2-ups. She reviewed a proof that kept them
+together and preferred it. This also settled a disagreement already in the file:
+`layout_merge_lone_subgroups()` had always merged across any gap inside an event
+on exactly this reasoning, while the line above it split that same event apart on
+the gap it then ignored.
+
 **Files:** `lib/compose.php` (new), `lib/layout.php`, `lib/layout_render.php`,
 `lib/pdfexport.php`, `lib/repo.php`, `public/layout.php`,
 `public/api/book-pages-caption.php` (new), `public/assets/layout.js`,

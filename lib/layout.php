@@ -1353,7 +1353,33 @@ function layout_plan(array $content, array $tuning, array $historySeed = array()
 
     $subgroups = array();
     foreach ($buckets as $key => $rows) {
-        foreach (layout_subgroup_photos($rows, (float) $tuning['subgroup_gap_hours']) as $cluster) {
+        /* AN EVENT GROUP IS NOT SPLIT BY TIME.
+         *
+         * The day/close-timing clustering below applies only to UNGROUPED
+         * photos. An event group is already Kathryn's statement that these
+         * photos are one occasion — she made it, by hand or by accepting the
+         * grouper's suggestion — and re-cutting it by a five-hour gap
+         * overrules her with a heuristic. Event group 2 of her 2025 book is
+         * eight photos taken between January 15th and January 23rd: clustered,
+         * that became eight single-day groups which could only pair up into
+         * 2-ups, and she reviewed a proof that kept them together and
+         * preferred it.
+         *
+         * This also settles a disagreement that was already in the file.
+         * layout_merge_lone_subgroups() has always merged across ANY gap
+         * inside an event, on the stated grounds that "the event is already
+         * the statement that these photos are one occasion" — while this line
+         * was busy splitting that same event apart on the gap it then ignored.
+         * One of the two had to go.
+         *
+         * Ungrouped photos keep the clustering, and for the reason it was
+         * written: with no event asserting they belong together, the gap is
+         * the only evidence there is. */
+        $clusters = $key === 'u'
+            ? layout_subgroup_photos($rows, (float) $tuning['subgroup_gap_hours'])
+            : array($rows);
+
+        foreach ($clusters as $cluster) {
             $first = $cluster[0];
             $last  = $cluster[count($cluster) - 1];
             $subgroups[] = array(
