@@ -1,18 +1,21 @@
 <?php
 /**
- * Does the PDF put a photo where the solver said, in millimetres?
+ * Does the PDF put each photo exactly where the composer said, in millimetres?
  *
- * The browser and mPDF now draw the same solved layout, but they draw it very
- * differently — the browser positions rectangles absolutely, mPDF cannot do
- * that at all and rebuilds the arrangement as nested tables. Two renderings of
- * one layout is exactly the arrangement that drifted before, so the agreement
- * needs a test rather than a comment.
+ * This file exists because its predecessor did not ask that question. It
+ * checked the millimetre sizes in the HTML the exporter emitted, which were
+ * correct — and then mPDF ignored them. Its table engine stretches a
+ * `width:100%` table to fill its container and treats explicit column widths as
+ * ratios, so a photo asked to be 251pt wide came out 250pt (a coincidence) and
+ * one asked to be 335pt tall came out 121pt. Kathryn's first successful export
+ * had every page squashed into the top-left corner and I had a green test suite
+ * saying the geometry was right.
  *
- * This renders a page's HTML and reads the millimetre sizes back out of it,
- * comparing them against the rectangles compose_solve_tree() produced. It does
- * not run mPDF: mPDF's job is to honour explicit table sizes, and if it stops
- * doing that no arithmetic here would catch it anyway. What can silently go
- * wrong is this file computing a size of its own, and that is what is checked.
+ * So the exporter now places photos with mPDF's coordinate API, which is exact,
+ * and this checks THAT — by handing pdf_draw_photos_page() an Mpdf that records
+ * what it was asked to draw instead of drawing it. No PDF is produced and no
+ * image is read; the question is only whether the numbers reaching the drawing
+ * API are the numbers the composer solved.
  *
  * Usage: php tools/verify-pdf-geometry.php
  */
@@ -24,7 +27,32 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 
-require __DIR__ . '/../lib/compose.php';
+$root = dirname(__DIR__);
+
+if (!function_exists('cfg')) {
+    function cfg(string $path, $default = null)
+    {
+        $node = $GLOBALS['config'] ?? array();
+        foreach (explode('.', $path) as $key) {
+            if (!is_array($node) || !array_key_exists($key, $node)) {
+                return $default;
+            }
+            $node = $node[$key];
+        }
+        return $node;
+    }
+}
+$GLOBALS['config'] = require $root . '/config.example.php';
+
+define('APP_ROOT', $root);
+define('PUBLIC_DIR', $root . '/public');
+define('UPLOAD_DIR', PUBLIC_DIR . '/uploads');
+
+require $root . '/lib/imageproc.php';
+require $root . '/lib/layout.php';
+require $root . '/lib/layout_render.php';
+require $root . '/vendor/autoload.php';
+require $root . '/lib/pdfexport.php';
 
 $failures = 0;
 $checks   = 0;
@@ -36,126 +64,168 @@ function check(string $label, bool $ok): void
     printf("  %-4s %s\n", $ok ? 'ok' : 'FAIL', $label);
 }
 
-/* pdfexport.php pulls in the world — bootstrap, the database, mPDF. Only two
- * pure functions are under test, so they are loaded on their own out of the
- * file's source rather than by requiring it. Brittle if either is renamed,
- * which is why the extraction fails loudly instead of skipping. */
-$src = (string) file_get_contents(__DIR__ . '/../lib/pdfexport.php');
-foreach (array('pdf_render_solved_node', 'pdf_esc', 'pdf_clip_text', 'pdf_render_photo_cell_sized',
-               'pdf_render_text_cell_sized', 'pdf_resolve_crop_rect', 'pdf_snippet',
-               'pdf_resolve_photo_file') as $fn) {
-    if (strpos($src, 'function ' . $fn . '(') === false) {
-        fwrite(STDERR, "pdfexport.php no longer defines $fn — update this test\n");
-        exit(2);
-    }
-}
-
-/* Stubs for everything the cell renderers reach for. A photo that resolves to
- * no file on disk takes pdfexport's own placeholder branch, which still emits
- * the sized cell — the geometry, which is all this file is about. */
-function pdf_resolve_photo_file(array $photo): ?string { return null; }
-function pdf_esc(?string $raw): string { return htmlspecialchars((string) $raw, ENT_QUOTES, 'UTF-8'); }
-function pdf_clip_text(?string $text): string { return (string) $text; }
-function pdf_snippet(string $text, int $len = 90): string { return $text; }
-function pdf_resolve_crop_rect(array $slot, float $w, float $h): ?array { return null; }
-function pdf_render_text_cell_sized(array $slot, float $wMm, float $hMm): string
+/**
+ * An Mpdf that writes nothing down and remembers everything it was asked to do.
+ *
+ * Subclassed rather than faked with a plain object because
+ * pdf_draw_photos_page() type-hints the real class — and that hint is worth
+ * keeping, so the test bends instead. Built without the constructor, since
+ * nothing here needs a real document, fonts or a temp directory.
+ */
+final class RecordingMpdf extends \Mpdf\Mpdf
 {
-    return '<div style="height:' . round($hMm, 2) . 'mm;">card</div>';
-}
-function pdf_render_photo_cell_sized(array $slot, float $wMm, float $hMm): string
-{
-    return '<div class="leaf" data-w="' . round($wMm, 3) . '" data-h="' . round($hMm, 3) . '"></div>';
-}
+    /* Named 'drawn'/'placed' rather than the obvious 'images': Mpdf already
+     * declares a typed $images property, and redeclaring it is a fatal. */
+    /** @var list<array{x:float,y:float,w:float,h:float,file:string}> */
+    public array $drawn = array();
+    /** @var list<array{x:float,y:float,w:float,h:float,html:string}> */
+    public array $placed = array();
 
-/* The one function actually under test, lifted out of the file. */
-$body = null;
-if (preg_match('/function pdf_render_solved_node\(.*?\n\}\n/s', $src, $m)) {
-    $body = $m[0];
-}
-if ($body === null) {
-    fwrite(STDERR, "could not extract pdf_render_solved_node()\n");
-    exit(2);
-}
-eval($body);
+    public function __construct() {}   // deliberately does not call parent
 
-const TRIM_MM = 215.9;   // 8.5in square, the book's trim
-
-$templates = compose_templates();
-$RATIOS    = array('P' => array(0.75, 0.5625, 0.681), 'L' => array(4 / 3, 1.778));
-
-foreach ($templates as $name => $tpl) {
-    /* One occupant set per template, cycling the awkward ratios so matched
-     * groups and mixed rows both get exercised. */
-    $occ = array();
-    foreach ($tpl['slots'] as $i => $shape) {
-        $occ[] = array('shape' => $shape, 'ar' => $RATIOS[$shape][$i % count($RATIOS[$shape])]);
+    public function Image(
+        $file, $x = 0, $y = 0, $w = 0, $h = 0, $type = '', $link = '',
+        $paint = true, $constrain = true, $watermark = false,
+        $shownoimg = true, $allowvector = true
+    ) {
+        $this->drawn[] = array('x' => (float) $x, 'y' => (float) $y,
+            'w' => (float) $w, 'h' => (float) $h, 'file' => (string) $file);
+        return array();
     }
 
-    $tree  = compose_solve_tree($tpl, $occ);
-    $leaves = compose_flatten($tree);
+    public function WriteFixedPosHTML($html, $x, $y, $w, $h, $overflow = 'visible', $bounding = array())
+    {
+        $this->placed[] = array('x' => (float) $x, 'y' => (float) $y,
+            'w' => (float) $w, 'h' => (float) $h, 'html' => (string) $html);
+    }
 
+    public function WriteHTML($html, $mode = 0, $init = true, $close = true) {}
+}
+
+$geo      = pdf_export_geometry();
+$originMm = (float) $geo['content_margin_mm'];
+$boxMm    = (float) $geo['content_width_mm'];
+
+/* Slots that resolve to no file on disk, so nothing is decoded or cropped —
+ * the placement maths is what is under test, not imageproc. */
+function slot_for(int $id, int $w, int $h): array
+{
+    return array(
+        'photo_id' => $id, 'quote_id' => null, 'anecdote_id' => null,
+        'width' => $w, 'height' => $h, 'caption' => null,
+        'original_path' => 'uploads/original/does-not-exist-' . $id . '.jpg',
+        'thumb_path'    => 'uploads/thumb/does-not-exist-' . $id . '.jpg',
+        'crop_x' => null, 'crop_y' => null, 'crop_w' => null, 'crop_h' => null,
+    );
+}
+
+$RATIOS = array('P' => array(array(3024, 4032), array(1080, 1920)),
+                'L' => array(array(4032, 3024), array(1920, 1080)));
+
+foreach (compose_templates() as $name => $tpl) {
     $slots = array();
-    $order = array();
     foreach ($tpl['slots'] as $i => $shape) {
-        $slots[$i] = array('photo_id' => $i + 1, 'caption' => null);
-        $order[$i] = $i;
+        list($w, $h) = $RATIOS[$shape][$i % count($RATIOS[$shape])];
+        $slots[] = slot_for($i + 1, $w, $h);
     }
 
-    $html = pdf_render_solved_node($tree, $slots, $order, TRIM_MM, TRIM_MM);
+    $occ    = compose_occupants($slots);
+    $cands  = compose_candidates($occ, array());
+    if ($cands === array()) { check("$name: has a template", false); continue; }
+
+    /* Force THIS template rather than whichever the rotation would pick, so the
+     * check is about placement and not about selection. */
+    $choice = null;
+    foreach ($cands as $c) { if ($c['name'] === $name) { $choice = $c; break; } }
+    if ($choice === null) { check("$name: accepts its own slots", false); continue; }
+
+    $expected = compose_solve($tpl, compose_bind($occ, $tpl, $choice['order']));
+
+    $mpdf = new RecordingMpdf();
+    pdf_draw_photos_page($mpdf, array('slots' => $slots, 'page_type' => 'photos'), $geo, $choice, '');
+
+    $drawn = array_merge($mpdf->drawn, $mpdf->placed);
     $checks++;
 
-    preg_match_all('/data-w="([0-9.]+)" data-h="([0-9.]+)"/', $html, $m, PREG_SET_ORDER);
-    if (count($m) !== count($leaves)) {
-        check("$name: emits one cell per photo", false);
+    if (count($drawn) !== count($expected)) {
+        check("$name: draws one box per photo (got " . count($drawn) . ' of ' . count($expected) . ')', false);
         continue;
     }
 
-    /* Every leaf's drawn size must be its solved rectangle, converted once. */
+    /* Placement is in absolute page millimetres; the solver works in percent of
+     * the content box. This conversion is the thing that used to be wrong. */
     $wrong = array();
-    foreach ($leaves as $k => $leaf) {
-        $wantW = $leaf['w'] / 100.0 * TRIM_MM;
-        $wantH = $leaf['h'] / 100.0 * TRIM_MM;
-        if (abs((float) $m[$k][1] - $wantW) > 0.01 || abs((float) $m[$k][2] - $wantH) > 0.01) {
-            $wrong[] = sprintf('slot %d drew %smm x %smm, solved %.2f x %.2f',
-                $leaf['slot'], $m[$k][1], $m[$k][2], $wantW, $wantH);
+    foreach ($expected as $k => $rect) {
+        $wantX = $originMm + $rect['x'] / 100.0 * $boxMm;
+        $wantY = $originMm + $rect['y'] / 100.0 * $boxMm;
+        $wantW = $rect['w'] / 100.0 * $boxMm;
+        $wantH = $rect['h'] / 100.0 * $boxMm;
+        $got   = $drawn[$k];
+
+        foreach (array('x' => $wantX, 'y' => $wantY, 'w' => $wantW, 'h' => $wantH) as $axis => $want) {
+            if (abs($got[$axis] - $want) > 0.01) {
+                $wrong[] = sprintf('slot %d %s: drew %.2fmm, solved %.2fmm', $k, $axis, $got[$axis], $want);
+            }
         }
     }
-    check("$name: every photo drawn at its solved size", $wrong === array());
-    foreach ($wrong as $w) { fwrite(STDERR, "       $w\n"); }
+    check("$name: every photo drawn at its solved millimetres", $wrong === array());
+    foreach (array_slice($wrong, 0, 4) as $w) { fwrite(STDERR, "       $w\n"); }
 
-    /* Nothing may exceed the trim — a table that overflows silently pushes the
-     * page onto a second sheet in mPDF, which is a broken book, not a broken
-     * pixel. */
+    /* Nothing may sit outside the safety margin — that is content the printer
+     * may trim off. */
     $checks++;
-    $over = false;
-    foreach ($leaves as $leaf) {
-        if ($leaf['x'] + $leaf['w'] > 100.0001 || $leaf['y'] + $leaf['h'] > 100.0001) { $over = true; }
+    $escaped = 0;
+    foreach ($drawn as $d) {
+        if ($d['x'] < $originMm - 0.01 || $d['y'] < $originMm - 0.01
+            || $d['x'] + $d['w'] > $originMm + $boxMm + 0.01
+            || $d['y'] + $d['h'] > $originMm + $boxMm + 0.01) {
+            $escaped++;
+        }
     }
-    check("$name: stays inside the trim", !$over);
+    check("$name: nothing crosses the safety margin", $escaped === 0);
 }
 
-/* A matched group must come out of the PDF renderer identical too, not merely
- * identical in the solver. */
-$tpl  = $templates['quad-PPPP'];
-$occ  = array(
-    array('shape' => 'P', 'ar' => 0.5625), array('shape' => 'P', 'ar' => 0.75),
-    array('shape' => 'P', 'ar' => 0.75),   array('shape' => 'P', 'ar' => 0.752),
-);
-$tree  = compose_solve_tree($tpl, $occ);
-$slots = array();
-foreach (array(0, 1, 2, 3) as $i) { $slots[$i] = array('photo_id' => $i + 1, 'caption' => null); }
-$html = pdf_render_solved_node($tree, $slots, array(0, 1, 2, 3), TRIM_MM, TRIM_MM);
-preg_match_all('/data-w="([0-9.]+)" data-h="([0-9.]+)"/', $html, $m, PREG_SET_ORDER);
+/* The caption sits below the photos, inside the page, and does not overlap
+ * them — the property the preview and the print are supposed to share. */
+$tpl    = compose_templates()['quad-PPPP'];
+$slots  = array(slot_for(1, 3024, 4032), slot_for(2, 3024, 4032),
+                slot_for(3, 3024, 4032), slot_for(4, 3024, 4032));
+$occ    = compose_occupants($slots);
+$choice = compose_candidates($occ, array())[0];
+
+$mpdf = new RecordingMpdf();
+pdf_draw_photos_page($mpdf, array('slots' => $slots, 'page_type' => 'photos'), $geo, $choice,
+    'A caption that runs long enough to be worth placing carefully');
+
+/* The placeholders for the missing files also go through WriteFixedPosHTML, so
+ * the caption is found by its text rather than by being the only one. */
+$captions = array_values(array_filter(
+    $mpdf->placed,
+    static fn(array $p): bool => strpos($p['html'], 'worth placing carefully') !== false
+));
+
 $checks++;
-$same = true;
-foreach ($m as $cell) {
-    if ($cell[1] !== $m[0][1] || $cell[2] !== $m[0][2]) { $same = false; }
+check('a captioned page draws exactly one caption', count($captions) === 1);
+if ($captions !== array()) {
+    $cap    = $captions[0];
+    $lowest = 0.0;
+    foreach (array_merge($mpdf->drawn, $mpdf->placed) as $img) {
+        if (strpos($img['html'] ?? '', 'worth placing carefully') !== false) { continue; }
+        $lowest = max($lowest, $img['y'] + $img['h']);
+    }
+    check('the caption sits below every photo', $cap['y'] >= $lowest - 0.01);
+    check('...and stays on the page', $cap['y'] + $cap['h'] <= $originMm + $boxMm + 0.01);
 }
-check('a matched 2x2 prints four identical cells', $same);
 
-printf("\n%d checks\n", $checks);
+/* A page with nothing on it must not throw, and must not draw. */
+$mpdf = new RecordingMpdf();
+pdf_draw_photos_page($mpdf, array('slots' => array(), 'page_type' => 'photos'), $geo, null, '');
+$checks++;
+check('an empty page draws no photos', $mpdf->drawn === array());
+
+printf("\n%d page drawings checked\n", $checks);
 if ($failures > 0) {
     printf("FAILED (%d)\n", $failures);
     exit(1);
 }
-print "OK — the PDF draws the solved layout, to the millimetre\n";
+print "OK — the PDF draws the solved layout, to the hundredth of a millimetre\n";

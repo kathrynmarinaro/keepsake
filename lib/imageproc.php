@@ -523,7 +523,7 @@ function imageproc_crop_photo(string $srcAbs, array $rect, array $sniff): array
  * @return string|null absolute path to the temp JPEG, or null on failure
  *   (caller falls back to the uncropped original — see pdf_photo_html()).
  */
-function imageproc_crop_to_temp(string $srcAbs, array $rect): ?string
+function imageproc_crop_to_temp(string $srcAbs, array $rect, ?int $maxW = null, ?int $maxH = null): ?string
 {
     $x = max(0.0, min(1.0, (float) $rect['x']));
     $y = max(0.0, min(1.0, (float) $rect['y']));
@@ -540,8 +540,8 @@ function imageproc_crop_to_temp(string $srcAbs, array $rect): ?string
     try {
         // Same choice imageproc_crop_photo() makes, for the same reason.
         class_exists('Imagick')
-            ? imageproc_crop_imagick($srcAbs, $outAbs, $x, $y, $w, $h)
-            : imageproc_crop_gd($srcAbs, $outAbs, $x, $y, $w, $h, $srcAbs);
+            ? imageproc_crop_imagick($srcAbs, $outAbs, $x, $y, $w, $h, $maxW, $maxH)
+            : imageproc_crop_gd($srcAbs, $outAbs, $x, $y, $w, $h, $srcAbs, $maxW, $maxH);
     } catch (Throwable $e) {
         error_log('imageproc_crop_to_temp: ' . $e->getMessage());
         return null;
@@ -551,7 +551,7 @@ function imageproc_crop_to_temp(string $srcAbs, array $rect): ?string
 }
 
 /** @return array{0:int,1:int} */
-function imageproc_crop_imagick(string $srcAbs, string $outAbs, float $x, float $y, float $w, float $h): array
+function imageproc_crop_imagick(string $srcAbs, string $outAbs, float $x, float $y, float $w, float $h, ?int $maxW = null, ?int $maxH = null): array
 {
     $im = new Imagick();
     try {
@@ -577,9 +577,35 @@ function imageproc_crop_imagick(string $srcAbs, string $outAbs, float $x, float 
         $im->cropImage($cw, $ch, $cx, $cy);
         $im->setImagePage(0, 0, 0, 0);
 
+        /* Down to what the page can actually show, if the caller said what that
+         * is. A phone photo is routinely 3-4x the pixels a 300dpi print of a
+         * quarter-page slot can use, and embedding the surplus is what turned
+         * Kathryn's book into a 400 MB download. Scaled AFTER the crop, so the
+         * limit describes what lands on paper rather than what was on the
+         * card. */
+        if ($maxW !== null && $maxH !== null) {
+            $cur = array($im->getImageWidth(), $im->getImageHeight());
+            if ($cur[0] > $maxW || $cur[1] > $maxH) {
+                $im->resizeImage($maxW, $maxH, Imagick::FILTER_LANCZOS, 1, true);
+                $cw = $im->getImageWidth();
+                $ch = $im->getImageHeight();
+            }
+        }
+
+        /* To sRGB before the profile is stripped. iPhones shoot Display P3;
+         * dropping that profile without converting leaves P3 numbers to be read
+         * as sRGB, which is what made the reds in her book look scorched. */
+        try {
+            if ($im->getImageColorspace() !== Imagick::COLORSPACE_SRGB) {
+                $im->transformImageColorspace(Imagick::COLORSPACE_SRGB);
+            }
+        } catch (Throwable $e) {
+            // An unreadable colorspace is not worth failing an export over.
+        }
+
         $im->stripImage();
         $im->setImageFormat('jpeg');
-        $im->setImageCompressionQuality(92);
+        $im->setImageCompressionQuality(88);
         if (!$im->writeImage($outAbs)) {
             throw new RuntimeException('crop_write_failed');
         }
@@ -590,7 +616,7 @@ function imageproc_crop_imagick(string $srcAbs, string $outAbs, float $x, float 
 }
 
 /** @return array{0:int,1:int} */
-function imageproc_crop_gd(string $srcAbs, string $outAbs, float $x, float $y, float $w, float $h, string $orientSrc): array
+function imageproc_crop_gd(string $srcAbs, string $outAbs, float $x, float $y, float $w, float $h, string $orientSrc, ?int $maxW = null, ?int $maxH = null): array
 {
     $data = @file_get_contents($srcAbs);
     if ($data === false) {
@@ -615,6 +641,23 @@ function imageproc_crop_gd(string $srcAbs, string $outAbs, float $x, float $y, f
         $cropped = imagecrop($img, array('x' => $cx, 'y' => $cy, 'width' => $cw, 'height' => $ch));
         if ($cropped === false) {
             throw new RuntimeException('crop_failed');
+        }
+
+        /* Same ceiling the Imagick path applies, for hosts without it. GD has no
+         * colour management, so this scales but cannot convert — a wide-gamut
+         * original will still print a little hot here. Imagick is what Kathryn's
+         * host has, and it does convert. */
+        if ($maxW !== null && $maxH !== null && ($cw > $maxW || $ch > $maxH)) {
+            $ratio = min($maxW / $cw, $maxH / $ch);
+            $nw    = max(1, (int) round($cw * $ratio));
+            $nh    = max(1, (int) round($ch * $ratio));
+            $small = imagescale($cropped, $nw, $nh, IMG_BICUBIC_FIXED);
+            if ($small !== false) {
+                imagedestroy($cropped);
+                $cropped = $small;
+                $cw = $nw;
+                $ch = $nh;
+            }
         }
 
         try {

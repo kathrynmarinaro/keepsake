@@ -361,5 +361,16 @@ return array(
          * real disagreement to reconcile, not just a number to confirm.
          */
         'safety_margin_in' => 0.5,
+
+        /* Resolution photos are embedded at, in dots per inch of their FINAL
+         * printed size. 300 is what commercial printing asks for and what it
+         * can resolve; above it the extra pixels only make the file bigger.
+         *
+         * This exists because the first successful export was over 400 MB: a
+         * phone photo is three or four times 300dpi once it is a quarter of a
+         * page, and all of that surplus was being embedded. Lower it to shrink
+         * a proof you only mean to look at on screen; do not raise it expecting
+         * a better print. */
+        'print_dpi' => 300,
     ),
 );

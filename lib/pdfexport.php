@@ -333,115 +333,112 @@ function pdf_render_title_html(array $project): string
  * shape and that crop is a no-op; it does real work only where the solver
  * matched a photo to its neighbours' ratio.
  */
-function pdf_render_photos_page_html(array $page, array $geo, ?array $choice, string $caption): string
+function pdf_draw_photos_page(\Mpdf\Mpdf $mpdf, array $page, array $geo, ?array $choice, string $caption): void
 {
     $slots = $page['slots'];
 
-    if ($slots === array()) {
-        // Phase 6's known gap (PLAN.md's Phase 6 note): moving the only
-        // photo off a page can leave an empty book_pages row behind until a
-        // reflow. Fail soft here too — a quiet blank page, not a crash.
-        return '<div style="text-align:center;padding-top:45%;color:#999;font-family:sans-serif;">'
-            . '(empty page)</div>';
+    if ($slots === array() || $choice === null) {
+        /* Phase 6's known gap (a page emptied by a drag), or shapes no template
+         * accepts. Both fail soft and visibly rather than silently. */
+        $mpdf->WriteHTML('<div style="text-align:center;padding-top:45%;color:#999;'
+            . 'font-family:sans-serif;">'
+            . ($slots === array() ? '(empty page)' : '(no template fits this page)')
+            . '</div>');
+        return;
     }
 
-    if ($choice === null) {
-        /* No template accepts these shapes. Same call as the preview: a page
-         * that is visibly wrong beats one that looks plausible and isn't. */
-        return '<div style="text-align:center;padding-top:45%;color:#999;font-family:sans-serif;">'
-            . '(no template fits this page)</div>';
+    $tpl   = compose_templates()[$choice['name']];
+    $occ   = compose_bind(compose_occupants($slots), $tpl, $choice['order']);
+    $rects = compose_solve($tpl, $occ);
+
+    /* Percentages are of the CONTENT box; the drawing API wants absolute
+     * millimetres from the physical page edge, so the margin goes back on. */
+    $boxMm    = (float) $geo['content_width_mm'];
+    $tallMm   = (float) $geo['content_height_mm'];
+    $originMm = (float) $geo['content_margin_mm'];
+
+    $bottomPct = 0.0;
+
+    foreach ($rects as $rect) {
+        $slot = $slots[$choice['order'][$rect['slot']]] ?? null;
+        if ($slot === null) { continue; }
+
+        $xMm = $originMm + $rect['x'] / 100.0 * $boxMm;
+        $yMm = $originMm + $rect['y'] / 100.0 * $tallMm;
+        $wMm = $rect['w'] / 100.0 * $boxMm;
+        $hMm = $rect['h'] / 100.0 * $tallMm;
+
+        $bottomPct = max($bottomPct, $rect['y'] + $rect['h']);
+
+        if ($slot['photo_id'] === null) {
+            $mpdf->WriteFixedPosHTML(pdf_render_text_card_html($slot), $xMm, $yMm, $wMm, $hMm);
+            continue;
+        }
+
+        $srcAbs = pdf_resolve_photo_file($slot);
+        if ($srcAbs === null) {
+            /* Deliberately visible: a photo missing from disk should be noticed
+             * in a proof, not papered over. */
+            $mpdf->WriteFixedPosHTML(
+                '<div style="border:0.5mm dashed #bbb;text-align:center;font-family:sans-serif;'
+                . 'font-size:9pt;color:#888;">Photo not found</div>',
+                $xMm, $yMm, $wMm, $hMm
+            );
+            continue;
+        }
+
+        $cropRect = pdf_resolve_crop_rect($slot, $wMm, $hMm)
+            ?? array('x' => 0.0, 'y' => 0.0, 'w' => 1.0, 'h' => 1.0);
+        list($maxW, $maxH) = pdf_print_pixel_budget($wMm, $hMm);
+
+        $prepared = imageproc_crop_to_temp($srcAbs, $cropRect, $maxW, $maxH);
+
+        /* $paint = true, $constrain = FALSE. Constrain is what makes mPDF keep
+         * the image's own aspect and resize the box to suit; the box is already
+         * the photo's shape (or the shape it was matched to), so the rectangle
+         * the composer solved is the one that gets drawn. */
+        $mpdf->Image($prepared ?? $srcAbs, $xMm, $yMm, $wMm, $hMm, '', '', true, false);
     }
 
-    $tpl  = compose_templates()[$choice['name']];
-    $occ  = compose_bind(compose_occupants($slots), $tpl, $choice['order']);
-    $tree = compose_solve_tree($tpl, $occ);
-
-    $pageMm = (float) $geo['content_width_mm'];
-    $tallMm = (float) $geo['content_height_mm'];
-
-    /* The solved block sits somewhere inside the trim, and mPDF cannot be told
-     * to put it there. A spacer row above and a spacer cell to the left place
-     * it — crude, but it is the one construct mPDF sizes reliably. */
-    $blockX = $tree['x'] / 100.0 * $pageMm;
-    $blockY = $tree['y'] / 100.0 * $tallMm;
-    $blockW = $tree['w'] / 100.0 * $pageMm;
-    $blockH = $tree['h'] / 100.0 * $tallMm;
-
-    $inner = pdf_render_solved_node($tree, $slots, $choice['order'], $pageMm, $tallMm);
-
-    $html = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
-        . '<tr><td style="height:' . round($blockY, 2) . 'mm;"></td></tr>'
-        . '<tr><td style="height:' . round($blockH, 2) . 'mm;vertical-align:top;">'
-        . '<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>'
-        . '<td style="width:' . round($blockX, 2) . 'mm;"></td>'
-        . '<td style="width:' . round($blockW, 2) . 'mm;vertical-align:top;">' . $inner . '</td>'
-        . '</tr></table></td></tr>';
-
-    /* The foot caption, centred in the white space under the photos — the same
-     * midpoint the preview uses, so the printed line sits where the screen said
-     * it would. Given as a fixed-height row so a long caption cannot push the
-     * page taller than the trim. */
     if ($caption !== '') {
-        $footMm = max(0.0, $tallMm - ($blockY + $blockH));
-        $html .= '<tr><td style="height:' . round($footMm, 2) . 'mm;vertical-align:middle;'
-            . 'text-align:center;font-family:sans-serif;font-size:8.5pt;color:#444;'
-            . 'line-height:1.3;overflow:hidden;">' . pdf_esc(pdf_clip_text($caption)) . '</td></tr>';
-    }
+        /* Centred in the white space under the photos, on the same midpoint the
+         * preview uses. */
+        $footCentreMm = $originMm + ($bottomPct + 100.0) / 200.0 * $tallMm;
+        $footHMm      = max(6.0, ($originMm + $tallMm) - $footCentreMm);
 
-    return $html . '</table>';
+        $mpdf->WriteFixedPosHTML(
+            '<div style="font-family:sans-serif;font-size:8.5pt;line-height:1.3;color:#444;'
+            . 'text-align:center;">' . pdf_esc(pdf_clip_text($caption)) . '</div>',
+            $originMm,
+            max($originMm, $footCentreMm - $footHMm / 2),
+            $boxMm,
+            $footHMm
+        );
+    }
 }
 
 /**
- * One node of a solved composition tree, as nested <table>s.
+ * The most pixels worth embedding for a box of $wMm x $hMm, at print
+ * resolution.
  *
- * Sizes come from the rectangles, never from a weight recomputed here. Sibling
- * spacing is read as the distance between one child's far edge and the next
- * child's near edge, so the gap on paper is the gap the solver actually left
- * and there is no constant in this file that could drift from it.
+ * Print wants 300dpi at final size and gains nothing above it — the press
+ * cannot resolve more, and the surplus is pure file size. A phone photo is
+ * routinely three or four times that for a quarter-page slot, which is how
+ * Kathryn's first successful export came out over 400 MB and took an age to
+ * download.
+ *
+ * Rounded up a little (the +2) so a photo that lands almost exactly on the
+ * budget is not scaled by a hair for nothing.
  */
-function pdf_render_solved_node(array $node, array $slots, array $order, float $pageMm, float $tallMm): string
+function pdf_print_pixel_budget(float $wMm, float $hMm): array
 {
-    if ($node['t'] === 'leaf') {
-        $slot = $slots[$order[$node['slot']]] ?? null;
-        if ($slot === null) {
-            return '';
-        }
-        $wMm = $node['w'] / 100.0 * $pageMm;
-        $hMm = $node['h'] / 100.0 * $tallMm;
+    $dpi      = max(72.0, (float) cfg('export.print_dpi', 300));
+    $perMm    = $dpi / 25.4;
 
-        return $slot['photo_id'] !== null
-            ? pdf_render_photo_cell_sized($slot, $wMm, $hMm)
-            : pdf_render_text_cell_sized($slot, $wMm, $hMm);
-    }
-
-    $kids  = $node['k'];
-    $count = count($kids);
-
-    if ($node['t'] === 'row') {
-        $html = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tr>';
-        foreach ($kids as $i => $kid) {
-            $wMm = $kid['w'] / 100.0 * $pageMm;
-            $gap = $i < $count - 1
-                ? max(0.0, ($kids[$i + 1]['x'] - ($kid['x'] + $kid['w'])) / 100.0 * $pageMm)
-                : 0.0;
-            $html .= '<td style="width:' . round($wMm, 2) . 'mm;padding:0 ' . round($gap, 2)
-                . 'mm 0 0;vertical-align:top;">'
-                . pdf_render_solved_node($kid, $slots, $order, $pageMm, $tallMm) . '</td>';
-        }
-        return $html . '</tr></table>';
-    }
-
-    $html = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;">';
-    foreach ($kids as $i => $kid) {
-        $hMm = $kid['h'] / 100.0 * $tallMm;
-        $gap = $i < $count - 1
-            ? max(0.0, ($kids[$i + 1]['y'] - ($kid['y'] + $kid['h'])) / 100.0 * $tallMm)
-            : 0.0;
-        $html .= '<tr><td style="height:' . round($hMm, 2) . 'mm;padding:0 0 ' . round($gap, 2)
-            . 'mm 0;vertical-align:top;">'
-            . pdf_render_solved_node($kid, $slots, $order, $pageMm, $tallMm) . '</td></tr>';
-    }
-    return $html . '</table>';
+    return array(
+        max(1, (int) ceil($wMm * $perMm) + 2),
+        max(1, (int) ceil($hMm * $perMm) + 2),
+    );
 }
 
 /**
@@ -503,46 +500,7 @@ function pdf_snippet(string $text, int $len = 90): string
     return mb_strlen($text) > $len ? mb_substr($text, 0, $len - 1) . '…' : $text;
 }
 
-/**
- * One photo slot, sized to EXACTLY $wMm x $hMm — a caption (if any) takes a
- * small reserved band off the bottom rather than growing the cell, so a long
- * caption can't push the row below it out of place; the image is pre-cropped
- * to fill the remaining band exactly (pdf_resolve_crop_rect()), rather than
- * leaning on `object-fit` — see this file's header on why.
- */
-function pdf_render_photo_cell_sized(array $slot, float $wMm, float $hMm): string
-{
-    /* NO PER-SLOT CAPTION BAND ANY MORE. A photo's caption prints as part of the
-     * page's foot line (book_page_caption()), which is what the preview shows
-     * and what Kathryn chose. Reserving a band here would have printed captions
-     * twice AND — worse — shortened the box the composer sized, so the box
-     * would no longer match the photo's shape and every captioned photo would
-     * have been silently cropped to fit it. The photo fills its rectangle. */
-    $imgHmm = $hMm;
 
-    $srcAbs = pdf_resolve_photo_file($slot);
-    if ($srcAbs === null) {
-        $img = '<div style="width:100%;height:' . round($imgHmm, 2) . 'mm;border:0.5mm dashed #bbb;'
-            . 'display:table-cell;text-align:center;vertical-align:middle;color:#888;'
-            . 'font-family:sans-serif;font-size:9pt;">Photo not found on disk</div>';
-    } else {
-        $rect      = pdf_resolve_crop_rect($slot, $wMm, $imgHmm);
-        $croppedAbs = $rect !== null ? imageproc_crop_to_temp($srcAbs, $rect) : null;
-        $imgSrc     = $croppedAbs ?? $srcAbs;
-        $img = '<img src="' . pdf_esc($imgSrc) . '" style="width:100%;height:' . round($imgHmm, 2) . 'mm;display:block;">';
-    }
-
-    return $img;
-}
-
-/** A text-card slot sized to at most $wMm x $hMm — text reflows to fit
- *  rather than needing an exact fill, so this just caps the box and lets
- *  pdf_render_text_card_html() render as it always has. */
-function pdf_render_text_cell_sized(array $slot, float $wMm, float $hMm): string
-{
-    return '<div style="width:100%;max-height:' . round($hMm, 2) . 'mm;overflow:hidden;">'
-        . pdf_render_text_card_html($slot) . '</div>';
-}
 
 /** A quote/anecdote text card — riding along on a photo page (brief §4.3:
  *  "occupy one of the page's slots") or standing alone on its own page. */
@@ -647,23 +605,16 @@ function pdf_render_snapshot_page_html(array $page): string
         . '</tr></table>';
 }
 
-/** One book_pages row, dispatched by page_type. $geo only matters for
- *  page_type='photos' — see pdf_render_photos_page_html(). */
-function pdf_render_page_html(array $page, array $geo, ?array $choice = null): string
+/**
+ * HTML for the page types that are ordinary document flow. A photos page is
+ * NOT one of them any more — see pdf_draw_photos_page(), which places it at
+ * absolute coordinates because mPDF's table engine will not hold a given size.
+ */
+function pdf_render_page_html(array $page): string
 {
-    switch ($page['page_type']) {
-        case 'snapshot':
-            return pdf_render_snapshot_page_html($page);
-        case 'text':
-            return pdf_render_text_page_html($page);
-        default:
-            return pdf_render_photos_page_html(
-                $page,
-                $geo,
-                $choice,
-                book_page_caption($page, $page['slots'])
-            );
-    }
+    return $page['page_type'] === 'snapshot'
+        ? pdf_render_snapshot_page_html($page)
+        : pdf_render_text_page_html($page);
 }
 
 /* ------------------------------------------------------------- orchestration */
@@ -738,8 +689,12 @@ function pdf_export_build(int $yearProjectId): array
     // schema.sql's own comment on book_pages for why). Every page but the
     // very last one carries page-break-after so mPDF starts a fresh
     // physical page for what follows.
-    $mpdf->WriteHTML(pdf_wrap_page(pdf_render_cover_html($geo, $project, $coverPhoto), true));
-    $mpdf->WriteHTML(pdf_wrap_page(pdf_render_title_html($project), $pages !== array()));
+    $mpdf->WriteHTML(pdf_wrap_page(pdf_render_cover_html($geo, $project, $coverPhoto), false));
+    $mpdf->AddPage();
+    $mpdf->WriteHTML(pdf_wrap_page(pdf_render_title_html($project), false));
+    if ($pages !== array()) {
+        $mpdf->AddPage();
+    }
 
     /* Template choice for the WHOLE book at once, exactly as public/layout.php
      * does it — see compose_assign(). Doing it per page would pick the same
@@ -759,15 +714,32 @@ function pdf_export_build(int $yearProjectId): array
         $choices[$photoPages[$i]] = $choice;
     }
 
+    /* Explicit AddPage() between pages rather than page-break-after in markup.
+     * A photos page is drawn with the coordinate API, which paints onto the
+     * CURRENT page, so the break has to be something this loop does between
+     * pages rather than something buried in the markup of one. */
     $lastIndex = count($pages) - 1;
     foreach ($pages as $index => $page) {
-        $html = pdf_render_page_html($page, $geo, $choices[(int) $page['id']] ?? null);
-        $mpdf->WriteHTML(pdf_wrap_page($html, $index !== $lastIndex));
+        if ($page['page_type'] === 'photos') {
+            pdf_draw_photos_page(
+                $mpdf,
+                $page,
+                $geo,
+                $choices[(int) $page['id']] ?? null,
+                book_page_caption($page, $page['slots'])
+            );
+        } else {
+            $mpdf->WriteHTML(pdf_wrap_page(pdf_render_page_html($page), false));
+        }
+
+        if ($index !== $lastIndex) {
+            $mpdf->AddPage();
+        }
     }
 
     $bytes = $mpdf->Output('', 'S');
 
-    // pdf_render_photo_cell_sized() -> imageproc_crop_to_temp() wrote one
+    // pdf_draw_photos_page() -> imageproc_crop_to_temp() wrote one
     // scratch JPEG per photo slot into this directory; mPDF has already read
     // every one of them into $bytes by the time Output() returns, so nothing
     // downstream needs them to survive this request.
