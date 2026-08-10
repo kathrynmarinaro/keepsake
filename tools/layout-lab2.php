@@ -574,6 +574,28 @@ foreach ($templates as $name => $tpl) {
 
 /* --------------------------------------------------------------- emit */
 
+/* SAMPLE CAPTIONS. photos.caption is the only captioning mechanism a photo has
+ * and Kathryn has not written any yet — all 123 rows are empty — so there is
+ * nothing real to lay out. These stand-ins exist to show what a caption DOES to
+ * a page, which is the thing being reviewed: how much height it takes, whether
+ * a narrow column wraps it, and what a page looks like when only some photos
+ * carry one. They say what they are rather than inventing memories, because the
+ * decision here is typographic and inventing plausible captions about her
+ * family would make it harder to read the shape, not easier.
+ *
+ * Assigned by id modulo 7 so roughly two photos in five carry one, split across
+ * three lengths. Deterministic, so a caption does not move between rebuilds and
+ * a page can be discussed by number. */
+function lab2_sample_caption(int $id): ?string
+{
+    switch ($id % 7) {
+        case 0: return 'A long caption, the kind that runs on far enough to wrap onto a second or third line when the column it sits under is a narrow one';
+        case 1: return 'A caption of about average length, roughly a line';
+        case 2: return 'A short caption';
+        default: return null;
+    }
+}
+
 $photoJs = array();
 foreach ($photos as $p) {
     $bin = @file_get_contents($p['file']);
@@ -581,6 +603,7 @@ foreach ($photos as $p) {
     $photoJs[$p['id']] = array(
         'ar'  => round($p['w'] / $p['h'], 6),
         's'   => $p['shape'],
+        'cap' => lab2_sample_caption($p['id']),
         'src' => 'data:image/webp;base64,' . base64_encode($bin),
     );
 }

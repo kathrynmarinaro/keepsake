@@ -75,6 +75,15 @@
   }
   .page img { position: absolute; display: block; object-fit: cover; }
   .page.cross { outline: 2px dashed var(--sig-cross); outline-offset: 3px; }
+  /* Caption type is sized against the PAGE, not the viewport, so what you see
+     is the proportion that prints. 1.7% of an 8.5in page is about 8.7pt, which
+     is the size the PDF exporter already uses. */
+  .cap-under, .cap-foot {
+    position: absolute; color: #333; font-size: 1.7cqw; line-height: 1.3;
+    padding-top: 0.9cqw; overflow: hidden;
+  }
+  .cap-foot { left: 7.5%; right: 7.5%; bottom: 4%; text-align: center; color: #555; }
+  .page { container-type: inline-size; }
 
   .cap {
     max-width: var(--page); margin: 9px auto 0; display: flex; gap: 10px;
@@ -106,6 +115,14 @@
         <button data-v="grid" aria-pressed="true">Matched shapes</button>
         <button data-v="ratio" aria-pressed="false">Ratio widths</button>
         <button data-v="even" aria-pressed="false">Equal gaps</button>
+      </div>
+    </div>
+    <div>
+      <div class="ctl-label">Captions</div>
+      <div class="seg" id="seg-caption">
+        <button data-v="none" aria-pressed="true">None</button>
+        <button data-v="under" aria-pressed="false">Under photo</button>
+        <button data-v="foot" aria-pressed="false">Page foot</button>
       </div>
     </div>
     <div>
@@ -405,14 +422,45 @@ function bind(node, ids) {
  * outer block at the tight margin. The toggles stay so the comparison is still
  * reproducible, but this is the pair the book is being built around. */
 let ALIGN = 'grid';
+let CAPS = 'none';
 let FILL = 0.85;
+
+/* ---------------------------------------------------------------- captions
+ *
+ * photos.caption is the only captioning mechanism a photo has, and it prints
+ * under its own photo. Two things about that interact with everything settled
+ * so far, which is why this is a toggle rather than a detail left to the end:
+ *
+ *   - A caption needs vertical room, and it cannot come out of the photo's
+ *     height alone or the photo would change ratio. So the band is reserved
+ *     inside the cell and the photo is scaled down to fit what is left, keeping
+ *     its shape and staying centred.
+ *
+ *   - Reserving the band per-photo would break matched groups the moment only
+ *     some of them carry a caption: two portraits side by side, one captioned,
+ *     would no longer be the same size. So within a matched group the band is
+ *     reserved for EVERY cell as soon as ANY cell needs one. That is the whole
+ *     reason a page can look like it has mysterious white space under an
+ *     uncaptioned photo, and it is worth seeing before signing off.
+ */
+const CAP_BAND = 0.16;   // share of a cell's height reserved when captioned
+const FOOT_BAND = 0.13;  // share of the page reserved by the page-foot style
+
+function capOf(id) { return PHOTOS[id].cap; }
+
+/* Cell heights are reserved per matched group, so ask the group, not the photo. */
+function bandFor(rect, rects) {
+  if (CAPS !== 'under') return 0;
+  const peers = rect.grp !== undefined ? rects.filter(r => r.grp === rect.grp) : [rect];
+  return peers.some(r => capOf(r.id)) ? CAP_BAND : 0;
+}
 
 function renderInto(el, list, numbered) {
   const frag = document.createDocumentFragment();
 
   list.forEach((pg, idx) => {
     const tpl = TEMPLATES[pg.tpl];
-    const rects = solve(bind(tpl.tree, pg.ids), ALIGN, FILL);
+    const rects = solve(bind(tpl.tree, pg.ids), ALIGN, FILL * (CAPS === 'foot' ? 1 - FOOT_BAND : 1));
 
     const spread = document.createElement('div');
     spread.className = 'spread';
@@ -420,14 +468,41 @@ function renderInto(el, list, numbered) {
     const page = document.createElement('div');
     page.className = 'page' + (pg.cross ? ' cross' : '');
     for (const r of rects) {
+      const band = bandFor(r, rects) * r.h;
+      /* Shrink to the remaining box while keeping the cell's shape, so a
+         matched group stays matched and nothing changes ratio. */
+      const k = band ? (r.h - band) / r.h : 1;
+      const iw = r.w * k, ih = r.h * k;
+
       const img = document.createElement('img');
       img.src = PHOTOS[r.id].src;
       img.loading = 'lazy';
-      img.style.left = r.x + '%';
+      img.style.left = (r.x + (r.w - iw) / 2) + '%';
       img.style.top = r.y + '%';
-      img.style.width = r.w + '%';
-      img.style.height = r.h + '%';
+      img.style.width = iw + '%';
+      img.style.height = ih + '%';
       page.appendChild(img);
+
+      if (CAPS === 'under' && capOf(r.id)) {
+        const c = document.createElement('div');
+        c.className = 'cap-under';
+        c.textContent = capOf(r.id);
+        c.style.left = (r.x + (r.w - iw) / 2) + '%';
+        c.style.top = (r.y + ih) + '%';
+        c.style.width = iw + '%';
+        c.style.height = (r.h - ih) + '%';
+        page.appendChild(c);
+      }
+    }
+
+    if (CAPS === 'foot') {
+      const lines = rects.map(r => capOf(r.id)).filter(Boolean);
+      if (lines.length) {
+        const f = document.createElement('div');
+        f.className = 'cap-foot';
+        f.textContent = lines.join('  \u00b7  ');
+        page.appendChild(f);
+      }
     }
     spread.appendChild(page);
 
@@ -499,6 +574,7 @@ function wire(id, apply) {
 }
 
 wire('seg-align', v => { ALIGN = v; });
+wire('seg-caption', v => { CAPS = v; });
 wire('seg-margin', v => { FILL = parseFloat(v); });
 
 document.getElementById('tpl-heading').textContent = 'The ' + CATALOGUE.length + ' templates';
