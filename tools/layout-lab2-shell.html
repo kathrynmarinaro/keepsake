@@ -73,7 +73,7 @@
     background: var(--paper); border: 1px solid var(--rule); border-radius: 2px;
     margin: 0 auto; box-shadow: 0 1px 3px rgba(0,0,0,0.07);
   }
-  .page img { position: absolute; display: block; object-fit: fill; }
+  .page img { position: absolute; display: block; object-fit: cover; }
   .page.cross { outline: 2px dashed var(--sig-cross); outline-offset: 3px; }
 
   .cap {
@@ -84,6 +84,7 @@
   .cap .tpl { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); }
   .cap .tpl.derived { color: var(--sig-derived); }
   .cap .note { color: var(--faint); }
+  .cap .crop { color: var(--sig-cross); }
 
   .usage { margin-top: 44px; border-top: 1px solid var(--rule); padding-top: 22px; }
   .usage h2 { font-size: 15px; margin: 0 0 12px; }
@@ -95,14 +96,14 @@
 </style>
 
 <div class="wrap">
-  <h1>Layout Lab 2 — no cropping</h1>
-  <p class="sub">Every photo at its true aspect ratio. Templates transcribed from your sticky notes; a slot only ever receives the shape it asks for. Page is a true 8.5&Prime; square.</p>
+  <h1>Layout Lab 2 — shape-driven</h1>
+  <p class="sub">Templates transcribed from your sticky notes; a slot only ever receives the shape it asks for. Photos keep their own ratio except where two of the same shape sit side by side, which are matched to each other. Page is a true 8.5&Prime; square.</p>
 
   <div class="controls">
     <div>
       <div class="ctl-label">Alignment</div>
       <div class="seg" id="seg-align">
-        <button data-v="grid" aria-pressed="true">Aligned grid</button>
+        <button data-v="grid" aria-pressed="true">Matched shapes</button>
         <button data-v="ratio" aria-pressed="false">Ratio widths</button>
         <button data-v="even" aria-pressed="false">Equal gaps</button>
       </div>
@@ -120,8 +121,8 @@
   <div class="stats" id="stats"></div>
 
   <div class="legend">
-    <p><b>Aligned grid</b> keeps a clean outer block and additionally puts same-shape photos on equal-width cells, so the dividing lines in a 2&times;2 agree; an odd-ratio photo keeps its shape and gains a little white space instead of being cropped. <b>Ratio widths</b> is the previous behaviour, where each photo's own ratio set its width &mdash; the version where page 10's lines disagreed. <b>Equal gaps</b> gives every photo the same <em>area</em>, so the outer edge goes ragged.</p>
-    <p><span class="tag-derived">Cyan template names</span> are ones I derived to fill gaps your sketches don't cover. A <span class="tag-cross">dashed magenta edge</span> marks a page pairing two lone photos from different events.</p>
+    <p><b>Matched shapes</b> draws a row or column of same-orientation photos at one identical size, centre-cropping any that miss the target ratio. A mixed row &mdash; a landscape beside a portrait &mdash; is left alone and simply makes a rectangle, so the lower band of a 2&times;2 can be shorter than the upper. <b>Ratio widths</b> crops nothing and lets every photo set its own width. <b>Equal gaps</b> gives every photo the same <em>area</em>, so the outer edge goes ragged.</p>
+    <p>Pages that crop are called out under the page, with how much of the photo is lost. <span class="tag-derived">Cyan template names</span> are ones I derived to fill gaps your sketches don't cover. A <span class="tag-cross">dashed magenta edge</span> marks a page pairing two lone photos from different events.</p>
   </div>
 
   <h2 class="section" id="tpl-heading">Templates</h2>
@@ -146,8 +147,13 @@ const CATALOGUE = /*CATALOGUE*/;
 
 /* ---------------------------------------------------------------- geometry
  *
- * Two placement policies over the same composition tree. Neither ever changes a
- * photo's aspect ratio; that is the invariant the whole lab exists to hold.
+ * Three placement policies over the same composition tree.
+ *
+ * A photo's ratio is changed in exactly one situation: when it shares a row or
+ * column with photos of the same orientation and does not match them. Kathryn
+ * asked for that explicitly after seeing the alternative — a 9:16 padded out
+ * with white space next to three 3:4s reads as a mistake, and she would rather
+ * spend a crop than look at it. Everywhere else the ratio is still untouchable.
  *
  * JUSTIFY. A row's children all share one height, a column's all share one
  * width. That is what makes the block come out as a tight rectangle with
@@ -183,77 +189,120 @@ function arOf(node) { return PHOTOS[node.id].ar; }
  * invisible on white paper, and is the only way to hold the grid without
  * cropping.
  */
-/* level 0 = never (the original ratio-width behaviour, kept for comparison)
- * level 1 = only where every photo in the row is the same orientation
- * level 2 = always, because this row belongs to a 2x2 whose columns must agree */
-function isEqRow(node, level) {
-  if (!level) return false;
-  if (node.t !== 'row') return false;
+/* A UNIFORM group is a row or column whose children are all photos of the same
+ * orientation. Those get identical cells; everything else is laid out by ratio.
+ *
+ * The first attempt at this applied equal-width cells to every row inside a 2x2,
+ * including mixed ones, and page 21 showed why that is wrong: a 4:3 landscape
+ * and a 3:4 portrait forced to the same width have completely different heights,
+ * so the landscape sat in a pool of white. Kathryn's correction was that the
+ * bottom row should just make a rectangle even if it ends up shorter than the
+ * row above — which is exactly ratio layout. So uniformity is about the photos
+ * in the group, never about the template shape.
+ */
+function isUniform(node) {
+  if (node.t === 'leaf') return false;
   if (!node.k.every(k => k.t === 'leaf')) return false;
-  if (level === 2) return true;
   return node.k.every(k => PHOTOS[k.id].s === PHOTOS[node.k[0].id].s);
 }
 
-/* Cell width in a row of n equal columns spanning w. */
-function eqCol(node, w, gap) { return (w - gap * (node.k.length - 1)) / node.k.length; }
+/* The one ratio every photo in a uniform group is drawn at.
+ *
+ * Padding the odd photo out with white space was the first answer and Kathryn
+ * rejected it: she wants same-shape photos to be the same shape, and is willing
+ * to spend a crop to get it. So the group picks a single target ratio and any
+ * photo that misses it is centre-cropped to fit.
+ *
+ * The target is the most common ratio in the group, because cropping the
+ * minority loses the least. Ties — which is every two-photo group with two
+ * different ratios — go to whichever is closest to the canonical shape for that
+ * orientation, since 90 of the 97 portraits in this library are exactly 3:4 and
+ * matching them keeps the book consistent page to page, not just within a page.
+ */
+function normTarget(node) {
+  const canon = PHOTOS[node.k[0].id].s === 'L' ? 4 / 3 : 3 / 4;
+  const tally = new Map();
+  for (const k of node.k) {
+    const ar = arOf(k);
+    tally.set(ar, (tally.get(ar) || 0) + 1);
+  }
+  let best = null;
+  for (const [ar, n] of tally) {
+    const rank = [-n, Math.abs(Math.log(ar / canon))];
+    if (best === null || rank < best.rank) best = { rank, ar };
+  }
+  return best.ar;
+}
+
+/* Fraction of a photo's area lost when centre-cropped from its own ratio to the
+ * group's target. Zero when it already matches. */
+function cropLoss(ar, target) { return 1 - Math.min(ar, target) / Math.max(ar, target); }
+
+/* Cell size along the divided axis, for n equal cells spanning s. */
+function eqCol(node, s, gap) { return (s - gap * (node.k.length - 1)) / node.k.length; }
 
 /* --- justify ------------------------------------------------------------- */
 
-function jHeight(node, w, gap, grid) {
+function jHeight(node, w, gap, norm) {
   if (node.t === 'leaf') return w / arOf(node);
-  if (isEqRow(node, grid)) {
-    // Row height is set by the TALLEST photo at the shared cell width.
-    const c = eqCol(node, w, gap);
-    return Math.max(...node.k.map(k => c / arOf(k)));
+  if (norm && isUniform(node)) {
+    const t = normTarget(node);
+    if (node.t === 'row') return eqCol(node, w, gap) / t;
+    return node.k.length * (w / t) + gap * (node.k.length - 1);
   }
   if (node.t === 'col') {
     let h = gap * (node.k.length - 1);
-    for (const kid of node.k) h += jHeight(kid, w, gap, grid);
+    for (const kid of node.k) h += jHeight(kid, w, gap, norm);
     return h;
   }
   // row: find the shared height h whose total width is w.
   let lo = 0, hi = w * 8;
   for (let i = 0; i < ITERS; i++) {
     const mid = (lo + hi) / 2;
-    (jWidth(node, mid, gap, grid) < w) ? (lo = mid) : (hi = mid);
+    (jWidth(node, mid, gap, norm) < w) ? (lo = mid) : (hi = mid);
   }
   return (lo + hi) / 2;
 }
 
-function jWidth(node, h, gap, grid) {
+function jWidth(node, h, gap, norm) {
   if (node.t === 'leaf') return h * arOf(node);
-  if (isEqRow(node, grid)) {
-    /* Closed form: row height is cellWidth / min(ar), so the width that yields
-     * height h is h * min(ar) * n, plus the gaps. */
-    const minAr = Math.min(...node.k.map(k => arOf(k)));
-    return h * minAr * node.k.length + gap * (node.k.length - 1);
+  if (norm && isUniform(node)) {
+    const t = normTarget(node);
+    if (node.t === 'row') return h * t * node.k.length + gap * (node.k.length - 1);
+    return eqCol(node, h, gap) * t;
   }
   if (node.t === 'row') {
     let w = gap * (node.k.length - 1);
-    for (const kid of node.k) w += jWidth(kid, h, gap, grid);
+    for (const kid of node.k) w += jWidth(kid, h, gap, norm);
     return w;
   }
   // col: find the shared width w whose total height is h.
   let lo = 0, hi = h * 8;
   for (let i = 0; i < ITERS; i++) {
     const mid = (lo + hi) / 2;
-    (jHeight(node, mid, gap, grid) < h) ? (lo = mid) : (hi = mid);
+    (jHeight(node, mid, gap, norm) < h) ? (lo = mid) : (hi = mid);
   }
   return (lo + hi) / 2;
 }
 
-function jPlace(node, x, y, w, h, gap, grid, out) {
-  if (node.t === 'leaf') { out.push({ id: node.id, x, y, w, h }); return; }
+function jPlace(node, x, y, w, h, gap, norm, out) {
+  if (node.t === 'leaf') { out.push({ id: node.id, x, y, w, h, crop: 0 }); return; }
 
-  if (isEqRow(node, grid)) {
-    const c = eqCol(node, w, gap);
-    let cx = x;
+  if (norm && isUniform(node)) {
+    /* Every cell in the group is the same size, full stop. A photo that does
+     * not match the target ratio is centre-cropped into its cell by the
+     * renderer (object-fit: cover), which is what Kathryn asked for over the
+     * white-space padding this replaced. */
+    const t = normTarget(node);
+    const row = node.t === 'row';
+    const c = eqCol(node, row ? w : h, gap);
+    const cw = row ? c : c * t;
+    const ch = row ? c / t : c;
+    const grp = out.length;   // cells of one group share the index of its first
+    let cx = x, cy = y;
     for (const kid of node.k) {
-      /* The photo keeps its ratio and fills the cell's width; whatever height
-       * it comes up short by becomes white space above and below it. */
-      const ph = c / arOf(kid);
-      out.push({ id: kid.id, x: cx, y: y + (h - ph) / 2, w: c, h: ph });
-      cx += c + gap;
+      out.push({ id: kid.id, x: cx, y: cy, w: cw, h: ch, crop: cropLoss(arOf(kid), t), grp: grp });
+      if (row) { cx += cw + gap; } else { cy += ch + gap; }
     }
     return;
   }
@@ -261,15 +310,15 @@ function jPlace(node, x, y, w, h, gap, grid, out) {
   if (node.t === 'row') {
     let cx = x;
     for (const kid of node.k) {
-      const kw = jWidth(kid, h, gap, grid);
-      jPlace(kid, cx, y, kw, h, gap, grid, out);
+      const kw = jWidth(kid, h, gap, norm);
+      jPlace(kid, cx, y, kw, h, gap, norm, out);
       cx += kw + gap;
     }
   } else {
     let cy = y;
     for (const kid of node.k) {
-      const kh = jHeight(kid, w, gap, grid);
-      jPlace(kid, x, cy, w, kh, gap, grid, out);
+      const kh = jHeight(kid, w, gap, norm);
+      jPlace(kid, x, cy, w, kh, gap, norm, out);
       cy += kh + gap;
     }
   }
@@ -299,7 +348,7 @@ function eSize(node, gap) {
 function ePlace(node, x, y, scale, gap, out) {
   const size = eSize(node, gap);
   if (node.t === 'leaf') {
-    out.push({ id: node.id, x, y, w: size.w * scale, h: size.h * scale });
+    out.push({ id: node.id, x, y, w: size.w * scale, h: size.h * scale, crop: 0 });
     return;
   }
   if (node.t === 'row') {
@@ -324,17 +373,17 @@ function ePlace(node, x, y, scale, gap, out) {
 
 /* Returns rects in percent of the page, so the caller never needs a pixel size
  * and the same numbers would drive a PDF at any DPI. */
-function solve(tree, policy, fill, tplGrid) {
+function solve(tree, policy, fill) {
   const box = fill * 100;            // content box, percent of the square page
   const off = (100 - box) / 2;
   const gap = 2.0;                   // percent of page side, constant
 
   const out = [];
   if (policy !== 'even') {
-    const level = (policy === 'ratio') ? 0 : (tplGrid ? 2 : 1);
-    let w = box, h = jHeight(tree, box, gap, level);
-    if (h > box) { h = box; w = jWidth(tree, box, gap, level); }
-    jPlace(tree, off + (box - w) / 2, off + (box - h) / 2, w, h, gap, level, out);
+    const norm = (policy !== 'ratio');
+    let w = box, h = jHeight(tree, box, gap, norm);
+    if (h > box) { h = box; w = jWidth(tree, box, gap, norm); }
+    jPlace(tree, off + (box - w) / 2, off + (box - h) / 2, w, h, gap, norm, out);
   } else {
     const nat = eSize(tree, gap / 10);   // gap in unit-area space
     const scale = Math.min(box / nat.w, box / nat.h);
@@ -363,7 +412,7 @@ function renderInto(el, list, numbered) {
 
   list.forEach((pg, idx) => {
     const tpl = TEMPLATES[pg.tpl];
-    const rects = solve(bind(tpl.tree, pg.ids), ALIGN, FILL, tpl.grid);
+    const rects = solve(bind(tpl.tree, pg.ids), ALIGN, FILL);
 
     const spread = document.createElement('div');
     spread.className = 'spread';
@@ -384,10 +433,15 @@ function renderInto(el, list, numbered) {
 
     const cap = document.createElement('div');
     cap.className = 'cap';
+    const cropped = rects.filter(r => r.crop > 0.005);
+    const cropNote = cropped.length
+      ? ' &middot; <span class="crop">' + cropped.length + ' cropped, up to ' +
+        Math.round(Math.max(...cropped.map(r => r.crop)) * 100) + '%</span>'
+      : '';
     cap.innerHTML =
       '<span class="num">' + (numbered ? idx + 1 : '') + '</span>' +
       '<span class="tpl' + (tpl.derived ? ' derived' : '') + '">' + pg.tpl + '</span>' +
-      '<span class="note">' + tpl.note + (pg.cross ? ' &middot; two lone photos' : '') + '</span>';
+      '<span class="note">' + tpl.note + (pg.cross ? ' &middot; two lone photos' : '') + cropNote + '</span>';
     spread.appendChild(cap);
 
     frag.appendChild(spread);
@@ -401,6 +455,18 @@ function render() {
   renderInto(document.getElementById('book'), PAGES, true);
 }
 
+/* Cropping is the one thing in this lab that destroys information, so the cost
+ * of it is reported at the top rather than left to be discovered page by page. */
+function cropStat() {
+  let n = 0, worst = 0;
+  for (const pg of PAGES) {
+    for (const r of solve(bind(TEMPLATES[pg.tpl].tree, pg.ids), ALIGN, FILL)) {
+      if (r.crop > 0.005) { n++; worst = Math.max(worst, r.crop); }
+    }
+  }
+  return { n, worst: Math.round(worst * 100) };
+}
+
 function renderStats() {
   const counts = {};
   for (const pg of PAGES) counts[TEMPLATES[pg.tpl].n] = (counts[TEMPLATES[pg.tpl].n] || 0) + 1;
@@ -408,7 +474,8 @@ function renderStats() {
     '<span><b>' + STATS.photos + '</b> photos</span>' +
     '<span><b>' + STATS.pages + '</b> pages</span>' +
     [1, 2, 3, 4].map(n => '<span><b>' + (counts[n] || 0) + '</b> &times;' + n + '-up</span>').join('') +
-    '<span><b>' + PAGES.filter(p => TEMPLATES[p.tpl].derived).length + '</b> on derived templates</span>';
+    '<span><b>' + PAGES.filter(p => TEMPLATES[p.tpl].derived).length + '</b> on derived templates</span>' +
+    '<span><b>' + cropStat().n + '</b> photos cropped, worst <b>' + cropStat().worst + '%</b></span>';
 
   const rows = Object.keys(TEMPLATES).map(name => {
     const n = PAGES.filter(p => p.tpl === name).length;
@@ -426,6 +493,7 @@ function wire(id, apply) {
     if (!btn) return;
     for (const b of e.currentTarget.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b === btn));
     apply(btn.dataset.v);
+    renderStats();
     render();
   });
 }

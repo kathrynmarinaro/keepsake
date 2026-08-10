@@ -12,16 +12,20 @@
  *
  * So this lab inverts the model:
  *
- *   - NO CROPPING, ANYWHERE. A photo's aspect ratio is an input to the layout,
- *     never an output of it. There is no 'cover' fit in this file at all.
+ *   - A photo's aspect ratio is an input to the layout, not an output of it.
+ *     The engine never reshapes a photo to fill a slot it was assigned.
  *   - Templates declare the SHAPE of each slot ('P'/'L') and only ever receive
  *     a photo of that shape. Kathryn chose "shapes are required" over "shapes
  *     are illustrative" explicitly. The cost is that some templates fire rarely;
  *     the benefit is that a page always looks like the sketch it came from.
  *   - Geometry is solved, not tabulated. See the solver in the emitted JS.
- *   - Same-shape photos share a cell width, so the dividing lines in a 2x2
- *     agree. A photo whose ratio does not match its cell gains white space
- *     rather than losing pixels; on white paper that space is invisible.
+ *   - The one exception, added at Kathryn's request in review: photos of the
+ *     SAME orientation sitting side by side are drawn at one identical size,
+ *     centre-cropping whichever misses the target ratio. Padding the odd one
+ *     out with white space was tried first and rejected — a 9:16 floating
+ *     beside three 3:4s reads as a mistake. A row of MIXED orientations is
+ *     never normalised; it just makes a rectangle, which is why the lower band
+ *     of a 2x2 is allowed to be shorter than the upper one.
  *
  * WHY THE GEOMETRY LIVES IN JAVASCRIPT. Kathryn asked to compare alignment
  * policies and margin levels rather than pick blind, which is nine renderings
@@ -129,11 +133,11 @@ usort($photos, fn(array $a, array $b): int => array($a['captured_at'], $a['id'])
  * top-to-bottom) and is what the partitioner matches against. 'tree' is the
  * composition: a row/col nesting whose leaves are indices into 'slots'.
  *
- * There is no geometry here — no weights, no percentages, no sizes. Under a
- * no-crop model the photos' own aspect ratios plus the nesting fully determine
- * the page, so a template that tried to also specify proportions would either
- * be redundant or be a lie. This is why the two asymmetric 4-up sketches
- * collapse into one entry (see notes below).
+ * There is no geometry here — no weights, no percentages, no sizes. The photos'
+ * own aspect ratios plus the nesting fully determine the page, so a template
+ * that tried to also specify proportions would either be redundant or be a lie.
+ * This is why the two asymmetric 4-up sketches collapse into one entry (see
+ * notes below).
  */
 function lab2_templates(): array
 {
@@ -225,7 +229,6 @@ function lab2_templates(): array
              * capped 20 of her 36 event groups at three photos a page. Four
              * portraits in a 2x2 make one large rectangle, which is her phrase
              * for it and an accurate description of the block it produces. */
-            'grid'    => true,
             'note'  => 'four portraits, 2x2',
         ),
         'quad-PPLL' => array(
@@ -234,7 +237,6 @@ function lab2_templates(): array
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 0), array('t' => 'leaf', 'i' => 1))),
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 2), array('t' => 'leaf', 'i' => 3))),
             )),
-            'grid'    => true,
             'note'  => 'two portraits over two landscapes',
         ),
         'pinwheel' => array(
@@ -249,7 +251,6 @@ function lab2_templates(): array
              * consequence of the photos' own ratios, not something a template
              * can dial. So they transcribe to the same entry. Flagged for
              * Kathryn rather than faked into two. */
-            'grid'    => true,
             'note'  => 'portrait/landscape, landscape/portrait',
         ),
         'col3L-heroP' => array(
@@ -298,7 +299,6 @@ function lab2_templates(): array
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 0), array('t' => 'leaf', 'i' => 1))),
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 2), array('t' => 'leaf', 'i' => 3))),
             )),
-            'grid'    => true,
             'note'    => 'three portraits and a landscape, 2x2',
             'derived' => true,
         ),
@@ -313,7 +313,6 @@ function lab2_templates(): array
              * carries a fifth of the book: the template-rotation pass can now
              * alternate them and the same arrangement stops reappearing on
              * consecutive pages. */
-            'grid'    => true,
             'note'    => 'three portraits and a landscape, landscape at bottom left',
             'derived' => true,
         ),
@@ -323,7 +322,6 @@ function lab2_templates(): array
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 0), array('t' => 'leaf', 'i' => 1))),
                 array('t' => 'row', 'k' => array(array('t' => 'leaf', 'i' => 2), array('t' => 'leaf', 'i' => 3))),
             )),
-            'grid'    => true,
             'note'    => 'four landscapes, 2x2',
             'derived' => true,
         ),
@@ -594,7 +592,6 @@ foreach ($templates as $name => $tpl) {
         'note'    => $tpl['note'],
         'n'       => count($tpl['slots']),
         'derived' => !empty($tpl['derived']),
-        'grid'    => !empty($tpl['grid']),
     );
 }
 
