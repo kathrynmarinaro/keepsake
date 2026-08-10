@@ -1,0 +1,114 @@
+<title>Keepsake — Layout Lab</title>
+<style>
+  :root {
+    --paper: #EDEFEE; --paper-deep: #E4E8E5; --ink: #1D2422; --ink-soft: #57625D;
+    --accent: #D9692F; --accent-soft: #F0E2D8; --line: #C6CBC7;
+    --page-paper: #FFFEFB; --page-edge: rgba(29,36,34,0.20);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #191E1C; --paper-deep: #212724; --ink: #ECEEEA; --ink-soft: #A3ACA6;
+      --accent: #E8874C; --accent-soft: #33261D; --line: #3A423E;
+      --page-paper: #FBFAF6; --page-edge: rgba(0,0,0,0.55);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #191E1C; --paper-deep: #212724; --ink: #ECEEEA; --ink-soft: #A3ACA6;
+    --accent: #E8874C; --accent-soft: #33261D; --line: #3A423E;
+    --page-paper: #FBFAF6; --page-edge: rgba(0,0,0,0.55);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink); margin: 0; padding: 0 22px 90px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  .mono { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; }
+
+  header.top { padding: 52px 0 26px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; margin: 0 0 13px;
+  }
+  h1 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 16px; line-height: 1.1; }
+  .lede { max-width: 68ch; color: var(--ink-soft); font-size: 16px; margin: 0; }
+  .lede strong { color: var(--ink); font-weight: 640; }
+
+  nav.jump { position: sticky; top: 0; z-index: 5; background: var(--paper); padding: 14px 0 12px; border-bottom: 1px solid var(--line); margin-bottom: 34px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  nav.jump a {
+    font-size: 13px; font-weight: 650; text-decoration: none; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; background: var(--paper-deep);
+  }
+  nav.jump a:hover, nav.jump a:focus-visible { border-color: var(--accent); color: var(--accent); }
+  nav.jump span { font-size: 12.5px; color: var(--ink-soft); margin-left: auto; }
+
+  .variant { margin-bottom: 62px; scroll-margin-top: 72px; }
+  .vhead { margin-bottom: 20px; }
+  .vhead h2 { font-size: 22px; font-weight: 750; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .vhead h2 b {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 27px; height: 27px; border-radius: 6px; margin-right: 9px;
+    background: var(--accent); color: #fff; font-size: 14px; font-weight: 800; vertical-align: 2px;
+  }
+  .vhead p { margin: 0; color: var(--ink-soft); font-size: 14.5px; max-width: 72ch; }
+  .stat { margin-top: 7px !important; font-size: 12px !important; letter-spacing: 0.01em; color: var(--ink-soft); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); gap: 26px 20px; }
+
+  .pg { margin: 0; }
+  .paper {
+    position: relative; aspect-ratio: 1/1; background: var(--page-paper);
+    box-shadow: 0 5px 16px -7px var(--page-edge); border-radius: 2px; overflow: hidden;
+  }
+  .sl { position: absolute; background-size: cover; background-position: center; background-repeat: no-repeat; border-radius: 1px; }
+  .sl.contain { background-size: contain; }
+  .sl.visiting { outline: 1.5px dashed rgba(217,105,47,0.85); outline-offset: -1.5px; }
+
+  figcaption {
+    margin-top: 7px; font-size: 11px; color: var(--ink-soft);
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    display: flex; align-items: center; gap: 7px;
+  }
+  figcaption span {
+    background: var(--paper-deep); border: 1px solid var(--line); border-radius: 3px;
+    padding: 1px 5px; font-weight: 600; color: var(--ink);
+  }
+
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-soft); margin: 26px 0 0; padding-top: 16px; border-top: 1px solid var(--line); }
+  .legend b { color: var(--ink); }
+  .swatch { display: inline-block; width: 16px; height: 11px; border: 1.5px dashed var(--accent); vertical-align: -1px; margin-right: 4px; border-radius: 2px; }
+
+  footer.foot { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-soft); font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; }
+
+  /*IMAGES*/
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <p class="eyebrow mono">Keepsake · layout lab · step 2 of 3</p>
+    <h1>Three layout voices, your real 2025 photos</h1>
+    <p class="lede">All <!--PHOTOCOUNT--> photos from your 2025 album, laid out three different ways at
+    8.5&#8243; square. <strong>The photos and their order are identical in all three</strong> — the only
+    thing changing is the design voice. Scroll each, then tell me which pages you like and which you
+    don't; naming specific page numbers is the most useful thing you can give me.</p>
+  </header>
+
+  <nav class="jump">
+    <a href="#vA">A · Quiet</a>
+    <a href="#vB">B · Editorial</a>
+    <a href="#vC">C · Dense</a>
+    <span class="mono">page shape is the real 8.5&#8243; square trim</span>
+  </nav>
+
+  <!--SECTIONS-->
+
+  <p class="legend">
+    <span><span class="swatch"></span><b>dashed outline</b> = a lone photo that paired across event boundaries</span>
+    <span><b>caption under each page</b> = the template that page used</span>
+  </p>
+
+  <footer class="foot">keepsake · tools/layout-lab.php · prototype only, not the shipping engine</footer>
+</div>
