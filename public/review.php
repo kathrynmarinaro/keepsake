@@ -542,6 +542,11 @@ function render_photo_cell(array $p, array $eventGroups): string
           prior run or by hand, is left alone. Clear a photo's "Event group"
           field (its own edit panel) to make it eligible again.
         </p>
+        <p class="hint">
+          You rarely need this now: correcting a photo's date re-groups that
+          photo automatically, which is the case it used to be needed for.
+          Assigning a group by hand still overrides it and is never undone.
+        </p>
         <button type="button" class="btn-secondary" id="run-grouping-btn">Group photos</button>
       </div>
 
