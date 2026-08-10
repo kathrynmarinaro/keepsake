@@ -97,7 +97,11 @@ if (!function_exists('cfg')) {
 }
 $GLOBALS['config'] = require __DIR__ . '/../config.example.php';
 
-require __DIR__ . '/../vendor/autoload.php';
+/* NOT requiring vendor/autoload.php here, deliberately. It used to, and that
+ * hid a real failure for the entire life of the feature: nothing in the app
+ * loaded the autoloader, so PDF export threw "Class not found" on the server
+ * while this file passed. lib/pdfexport.php now loads it, and this test proves
+ * that by not doing it first. */
 require __DIR__ . '/../lib/imageproc.php';
 require __DIR__ . '/../lib/grouping.php';
 require __DIR__ . '/../lib/layout.php';

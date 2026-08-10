@@ -104,6 +104,43 @@ foreach ($pages as $page) {
 printf("Photos on pages       %d\n", $photoCount);
 printf("Missing from disk     %d%s\n", $missing, $missing > 0 ? '  <-- these print as placeholders' : '');
 printf("Largest original      %.1f MB\n", $biggest / 1048576);
+
+/* When photos cannot be found, WHERE the app looked matters more than the fact
+ * that it failed. The preview finds them fine because the browser fetches them
+ * over the web; the PDF has to open them on disk, which is a different question
+ * with a different answer. */
+if ($missing > 0) {
+    print "\n";
+    print "Photos are missing on disk — where the app looked:\n\n";
+    printf("  PUBLIC_DIR   %s   %s\n", PUBLIC_DIR, is_dir(PUBLIC_DIR) ? 'exists' : 'MISSING');
+    printf("  UPLOAD_DIR   %s   %s\n", UPLOAD_DIR, is_dir(UPLOAD_DIR) ? 'exists' : 'MISSING');
+
+    if (is_dir(UPLOAD_DIR)) {
+        $entries = @scandir(UPLOAD_DIR) ?: array();
+        $entries = array_values(array_diff($entries, array('.', '..')));
+        printf("  uploads holds %d entries%s\n", count($entries),
+            $entries === array() ? '  <-- empty' : ': ' . implode(', ', array_slice($entries, 0, 6))
+                . (count($entries) > 6 ? ', ...' : ''));
+    }
+
+    print "\n  What the database says, for the first few photos:\n";
+    $shown = 0;
+    foreach ($pages as $page) {
+        foreach ($page['slots'] as $slot) {
+            if ($slot['photo_id'] === null || $shown >= 3) { continue; }
+            $shown++;
+            $orig  = (string) ($slot['original_path'] ?? '');
+            $thumb = (string) ($slot['thumb_path'] ?? '');
+            printf("\n    photo #%d\n", (int) $slot['photo_id']);
+            printf("      original_path  %s\n", $orig === '' ? '(empty)' : $orig);
+            printf("      thumb_path     %s\n", $thumb === '' ? '(empty)' : $thumb);
+            printf("      looked for     %s\n", PUBLIC_DIR . '/' . $orig);
+            printf("      is it there?   %s\n", is_file(PUBLIC_DIR . '/' . $orig) ? 'YES' : 'no');
+            printf("      thumb there?   %s\n", is_file(PUBLIC_DIR . '/' . $thumb) ? 'YES' : 'no');
+        }
+    }
+    print "\n";
+}
 print str_repeat('-', 60) . "\n";
 print "Building the PDF...\n\n";
 

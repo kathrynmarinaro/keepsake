@@ -109,6 +109,29 @@ require_once __DIR__ . '/imageproc.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/layout_render.php';
 
+/* THE COMPOSER AUTOLOADER, loaded here and nowhere else.
+ *
+ * This is the app's only Composer dependency and this is its only consumer, so
+ * the autoloader belongs with it rather than in bootstrap.php, where every
+ * page that never touches mPDF would pay to load it.
+ *
+ * It was missing entirely until now, and the consequence was that PDF export
+ * could never have worked on the server: `new \Mpdf\Mpdf` threw "Class not
+ * found" every time, and api/export.php turned that into its generic "Could not
+ * build the PDF". The reason no test caught it is worth remembering — 
+ * tools/verify-export.php required the autoloader ITSELF before calling in, so
+ * it was testing a world production never had. A test that arranges a
+ * precondition the real caller does not is not testing the real caller.
+ *
+ * Guarded by class_exists so a caller that has already autoloaded (the test
+ * harness, or a future front controller) is not made to load it twice. */
+if (!class_exists(\Mpdf\Mpdf::class, false)) {
+    $pdfAutoload = dirname(__DIR__) . '/vendor/autoload.php';
+    if (is_file($pdfAutoload)) {
+        require_once $pdfAutoload;
+    }
+}
+
 /** See this file's header. Generous on purpose — never hit by real content. */
 const PDF_EXPORT_MAX_TEXT_CHARS = 4000;
 
@@ -683,6 +706,15 @@ function pdf_export_resolve_layout(int $yearProjectId): array
  */
 function pdf_export_build(int $yearProjectId): array
 {
+    /* Said plainly and early, because the alternative is a "Class not found"
+     * fatal from deep inside this function that reads like an application bug
+     * rather than a missing upload. vendor/ is not in git and has to be put on
+     * the server by hand — see tools/build-deploy.php, which refuses to make a
+     * bundle without it. */
+    if (!class_exists(\Mpdf\Mpdf::class)) {
+        throw new RuntimeException('pdf_library_missing');
+    }
+
     list($project, $layout) = pdf_export_resolve_layout($yearProjectId);
 
     $pages = book_layout_pages_with_content((int) $layout['id']);

@@ -487,6 +487,13 @@ function render_page(array $page, ?array $choice): string
               <a class="link-btn" href="layout.php?year=<?= h((string) $project['year']) ?>&amp;layout=<?= $id ?>">
                 <?= $isOpen ? 'Viewing' : 'View pages' ?>
               </a>
+              <?php if (!$isActive): ?>
+                <?php /* Only ever offered for a version that is NOT active — the
+                         endpoint refuses the active one too, but a button you
+                         cannot use is worse than one that is not there. */ ?>
+                <button class="btn-danger" type="button" data-act="delete-layout"
+                        data-layout="<?= $id ?>" data-version="<?= (int) $layout['version'] ?>">Delete</button>
+              <?php endif; ?>
             </div>
           </div>
         </div>

@@ -39,6 +39,12 @@
  *      patch that's "fully described by these two nodes", so this now
  *      follows the same reload rule reflow/generate/activate already use.
  *
+ *   7. Deleting a layout version — removes one generated version and its
+ *      pages (api/book-layouts-delete.php), after a confirm that names what
+ *      is lost. Never offered for the ACTIVE version: deleting that would
+ *      leave the year with no book at all, and the endpoint refuses it too.
+ *      Reloads, since the version list is what changed.
+ *
  *   6. The page's foot caption — the one line that prints under the photos.
  *      Normally derived from the page's photos' own captions; typing over it
  *      saves an override on the PAGE (api/book-pages-caption.php), and
@@ -87,6 +93,34 @@ document.addEventListener('click', async (event) => {
   if (!button) { return; }
 
   const action = button.dataset.act;
+
+  if (action === 'delete-layout') {
+    /* Confirmed, and specific about what is actually lost. The layout itself is
+       regenerable from photos, groups and captions that this does not touch —
+       what goes for good is any hand editing done to THAT version: a swapped
+       photo, a moved one, an adjusted crop, a rewritten page caption. */
+    const version = button.dataset.version;
+    if (!window.confirm(
+      'Delete version ' + version + '?\n\n'
+      + 'Its pages go with it, including any photos you swapped or moved and any '
+      + 'captions you rewrote on them. Your photos are not touched, and you can '
+      + 'always generate a new version.'
+    )) {
+      return;
+    }
+
+    button.disabled = true;
+    try {
+      await apiPost('api/book-layouts-delete.php', {
+        layout_id: Number(button.dataset.layout),
+      });
+      window.location.reload();
+    } catch (err) {
+      button.disabled = false;
+      showSnackbar(describe(err));
+    }
+    return;
+  }
 
   if (action === 'generate' || action === 'activate') {
     /* Generating a full year's book is the one action here that can take a

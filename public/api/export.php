@@ -41,6 +41,13 @@ if ($project === null) {
 try {
     $export = pdf_export_build((int) $project['id']);
 } catch (Throwable $e) {
+    if ($e->getMessage() === 'pdf_library_missing') {
+        json_error(
+            'pdf_library_missing',
+            500,
+            'The PDF library is not installed on the server. The vendor folder is missing or incomplete.'
+        );
+    }
     if ($e->getMessage() === 'no_active_layout') {
         json_error(
             'no_active_layout',

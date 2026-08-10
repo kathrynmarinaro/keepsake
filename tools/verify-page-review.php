@@ -440,6 +440,41 @@ year_project_set_cover_photo($ypA, null);
 check('cover_photo_id can be cleared back to null', year_project_get($ypA)['cover_photo_id'] === null);
 check('subtitle survives clearing the cover photo', year_project_get($ypA)['subtitle'] === 'The Test Trip');
 
+echo "\nbook_layout_delete(): removing a version she has decided against...\n";
+
+/* Kathryn generates a version every time she wants to see a change, so a year
+ * accumulates them — hers had seven for 2025. These pin the two things that
+ * matter about removing one: the pages go with it, and deleting the ACTIVE
+ * version is exactly the mistake the API guard exists to prevent. */
+$doomed = book_layout_create($ypA);
+q('INSERT INTO book_pages (book_layout_id, page_number, page_type) VALUES (?, ?, ?)',
+    array($doomed, 1, 'photos'));
+$doomedPage = (int) db()->lastInsertId();
+q('INSERT INTO book_page_photos (book_page_id, slot_number, photo_id) VALUES (?, ?, ?)',
+    array($doomedPage, 1, $movedPhotoId));
+
+check('the throwaway version has a page', count(book_pages_for_layout($doomed)) === 1);
+
+book_layout_delete($doomed);
+
+check('the version is gone', book_layout_get($doomed) === null);
+check('...and its pages went with it',
+    (int) q('SELECT COUNT(*) AS n FROM book_pages WHERE book_layout_id = ?', array($doomed))
+        ->fetch()['n'] === 0);
+check('...and its slots went with the pages',
+    (int) q('SELECT COUNT(*) AS n FROM book_page_photos WHERE book_page_id = ?', array($doomedPage))
+        ->fetch()['n'] === 0);
+check('the photo itself is untouched — deleting a layout is not deleting photos',
+    photo_get($movedPhotoId) !== null);
+
+/* Why the endpoint refuses the active version: nothing else does. */
+$activeId = (int) year_project_get($ypA)['active_book_layout_id'];
+check('the year has an active version to protect', $activeId > 0);
+book_layout_delete($activeId);
+check('deleting the active one leaves the year with no book at all, which is why '
+    . 'api/book-layouts-delete.php refuses to',
+    year_project_get($ypA)['active_book_layout_id'] === null);
+
 echo "\n";
 if ($failures > 0) {
     fwrite(STDERR, "$failures CHECK(S) FAILED\n");
