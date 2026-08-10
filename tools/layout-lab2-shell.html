@@ -110,8 +110,8 @@
       <div class="ctl-label">Margins</div>
       <div class="seg" id="seg-margin">
         <button data-v="0.60" aria-pressed="false">Generous</button>
-        <button data-v="0.72" aria-pressed="true">Moderate</button>
-        <button data-v="0.85" aria-pressed="false">Tight</button>
+        <button data-v="0.72" aria-pressed="false">Moderate</button>
+        <button data-v="0.85" aria-pressed="true">Tight</button>
       </div>
     </div>
   </div>
@@ -294,8 +294,11 @@ function bind(node, ids) {
 
 /* ------------------------------------------------------------------ render */
 
+/* Kathryn's picks, after comparing all six combinations in the lab: a clean
+ * outer block at the tight margin. The toggles stay so the comparison is still
+ * reproducible, but this is the pair the book is being built around. */
 let ALIGN = 'justify';
-let FILL = 0.72;
+let FILL = 0.85;
 
 function renderInto(el, list, numbered) {
   const frag = document.createDocumentFragment();
