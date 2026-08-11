@@ -487,9 +487,9 @@ if (count($snapMpdf->placed) === 2) {
     $expectY = $originMm + $insetMm;
     $expectH = $tallMm - (2 * $insetMm);
 
-    check('the hero starts at the page inset',
-        abs($heroBox['x'] - $expectX) < 0.01 && abs($heroBox['y'] - $expectY) < 0.01,
-        sprintf('hero at %.2f,%.2f expected %.2f,%.2f', $heroBox['x'], $heroBox['y'], $expectX, $expectY));
+    check('the hero starts at the page inset horizontally',
+        abs($heroBox['x'] - $expectX) < 0.01,
+        sprintf('hero x %.2f, expected %.2f', $heroBox['x'], $expectX));
 
     /* THE HERO IS THE BOOK'S PORTRAIT SHAPE — COMPOSE_CANON['P'], the same
        ratio every portrait slot the layout engine solves uses. It filled the
@@ -504,6 +504,17 @@ if (count($snapMpdf->placed) === 2) {
         abs(($heroBox['w'] / $heroBox['h']) - COMPOSE_CANON['P']) < 0.001,
         sprintf('ratio %.4f', $heroBox['w'] / $heroBox['h']));
 
+    /* AND BECAUSE IT IS SHORTER THAN THE COLUMN, IT IS CENTRED IN IT. Holding
+       the hero at the top inset left all the slack in one lump at the foot of
+       the page, which reads as a page that ran out rather than a composed one.
+       Same slack, split in two. */
+    $expectHeroY = $expectY + max(0.0, ($expectH - $heroBox['h']) / 2.0);
+    check('the hero is centred down the column',
+        abs($heroBox['y'] - $expectHeroY) < 0.01,
+        sprintf('hero y %.2f, expected %.2f', $heroBox['y'], $expectHeroY));
+    check('...with equal slack above and below it',
+        abs(($heroBox['y'] - $expectY) - (($expectY + $expectH) - ($heroBox['y'] + $heroBox['h']))) < 0.01);
+
     /* The TEXT panel still gets the full height: it is what the sections flow
        down, and a short one simply leaves white space under itself. */
     check('the text panel is full height',
@@ -513,9 +524,19 @@ if (count($snapMpdf->placed) === 2) {
     check('the hero does not run past the page',
         $heroBox['y'] + $heroBox['h'] <= $originMm + $tallMm + 0.01);
 
+    /* Side by side is about x: the two panels no longer share a top edge,
+       because the text panel is full height and centres its content inside
+       itself while the hero is a shorter box centred in the same column. What
+       must hold is that they overlap vertically and never overlap across. */
     check('the two panels are side by side, not stacked',
         $textBox['x'] > $heroBox['x'] + $heroBox['w'] - 0.01
-        && abs($textBox['y'] - $heroBox['y']) < 0.01);
+        && $textBox['y'] < $heroBox['y'] + $heroBox['h']
+        && $heroBox['y'] < $textBox['y'] + $textBox['h']);
+
+    /* Both halves centre on the same line, which is what makes them look like
+       one composition rather than two panels that happen to be adjacent. */
+    check('and share a centre line',
+        abs(($heroBox['y'] + $heroBox['h'] / 2) - ($textBox['y'] + $textBox['h'] / 2)) < 0.01);
 
     /* 45/55 of the space left after the gutter. */
     $contentW = $boxMm - (2 * $insetMm);

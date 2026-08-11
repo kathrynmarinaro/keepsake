@@ -2079,7 +2079,12 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
  * page". The pill in the page's toolbar, outside this block, stays. */
 .ks-snapshot {
   display: flex;
-  align-items: flex-start;
+  /* CENTRED ON THE PAGE, both panels on one centre line — what
+     pdf_draw_snapshot_page() draws. They were top-aligned, which was right
+     while the hero filled the column and wrong once it became a 3:4
+     rectangle: the page then sat in its top two-thirds with a band of white
+     under it. */
+  align-items: center;
   gap: 4%;
   height: 100%;
 }

@@ -771,6 +771,19 @@ function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
      * one is shorter. */
     $heroH = min($boxH, $heroW / COMPOSE_CANON['P']);
 
+    /* VERTICALLY CENTRED ON THE PAGE, both panels, on one centre line.
+     *
+     * They were pinned to the top of the content box, which was right while the
+     * hero filled the column and wrong the moment it became a 3:4 rectangle:
+     * a birthday page then sat in the top two-thirds with a band of white under
+     * it. Centring is what a page with room on it should do with the room.
+     *
+     * The hero has a known height, so it is placed outright. The TEXT panel
+     * keeps the full box — a page with a lot of sections needs all of it — and
+     * centres its own content inside that box instead, so the two share a
+     * centre line whichever is taller. */
+    $heroY = $boxY + max(0.0, ($boxH - $heroH) / 2.0);
+
     /* ---- the hero column ---- */
 
     $heroAbs = null;
@@ -789,21 +802,21 @@ function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
             $maxW,
             $maxH
         );
-        $mpdf->Image($prepared ?? $heroAbs, $boxX, $boxY, $heroW, $heroH, '', '', true, false);
+        $mpdf->Image($prepared ?? $heroAbs, $boxX, $heroY, $heroW, $heroH, '', '', true, false);
     } else {
         /* Visible rather than blank, the same call pdf_draw_photos_page()
            makes for a photo missing from disk: a proof should show you that
            there is no hero, not quietly print a narrower page. */
         $mpdf->WriteFixedPosHTML(
             '<div style="border:0.5mm dashed #bbb;height:100%;"></div>',
-            $boxX, $boxY, $heroW, $heroH
+            $boxX, $heroY, $heroW, $heroH
         );
     }
 
     /* ---- the text column ---- */
 
     $mpdf->WriteFixedPosHTML(
-        pdf_render_snapshot_text_html($page),
+        pdf_render_snapshot_text_html($page, $boxH),
         $textX, $boxY, $textW, $boxH
     );
 }
@@ -815,7 +828,7 @@ function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
  * on-screen preview in lib/views/book.php has one thing to mirror rather than
  * a sequence of mPDF calls.
  */
-function pdf_render_snapshot_text_html(array $page): string
+function pdf_render_snapshot_text_html(array $page, ?float $heightMm = null): string
 {
     $title    = trim((string) ($page['snapshot_title'] ?? ''));
     $sections = $page['snapshot_sections'] ?? array();
@@ -852,7 +865,20 @@ function pdf_render_snapshot_text_html(array $page): string
         $html .= '</div>';
     }
 
-    return $html . '</div>';
+    $html .= '</div>';
+
+    if ($heightMm === null) {
+        return $html;
+    }
+
+    /* Centred in the panel it was given, on the same centre line as the hero.
+     * The full-height cell with vertical-align:middle is how mPDF centres —
+     * the same construction pdf_render_text_card_html() uses, and verified the
+     * same way, out of a real PDF's text positions. */
+    return '<table style="width:100%;height:' . round($heightMm, 2) . 'mm;">'
+        . '<tr><td style="vertical-align:middle;height:' . round($heightMm, 2) . 'mm;padding:0;">'
+        . $html
+        . '</td></tr></table>';
 }
 
 /**
