@@ -1381,28 +1381,71 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
  */
 .photopicker-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  /* FOUR ACROSS, asked for: smaller cells in exchange for seeing the whole
+     photo in each one. */
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
   max-height: 60vh;
   overflow-y: auto;
   padding: 4px 0;
+
+  /* NEVER REDISTRIBUTE THE ROWS. Once enough photos push the grid up against
+     that max-height, the container's block size is definite, and the default
+     alignment then sizes the auto rows to FILL it — five rows of 101px holding
+     items 142px tall, each one drawn over the row beneath. `start` sizes every
+     row from its content and lets the rest scroll, which is the only thing a
+     scrolling grid should do. */
+  align-content: start;
 }
-.photopicker-item {
+
+/* WHY THESE ARE `.sheet-panel .photopicker-item` AND NOT JUST `.photopicker-item`.
+ *
+ * `.sheet-panel button` above dresses every button in a sheet as a full-width
+ * tappable OPTION row: display:flex, min-height:var(--tap), padding:0 16px,
+ * a border and a background. That is right for "Birthday / School year /
+ * Cancel" and wrong for a thumbnail. It also outranks a bare `.photopicker-item`
+ * — a class plus an element beats a class — so the resets that were written
+ * here were quietly losing every one of them, and had been all along.
+ *
+ * That is the overlapping-photos bug. The old rule put `aspect-ratio: 1` on
+ * the button and `height: 100%` on the image inside it; with the flex and the
+ * min-height from above still in force, the grid row got sized from what the
+ * item CONTRIBUTED — 62px — while the button itself drew 190px tall. Every
+ * photo painted straight over the row beneath it.
+ *
+ * So: undo the option-row dressing at a specificity that actually wins, and
+ * give the IMAGE a definite height in normal flow. Not `aspect-ratio` on the
+ * button — an aspect ratio is resolved against the item's width, which the row
+ * sizer does not consult, so the row still came out short and the item still
+ * drew over it. Not `aspect-ratio` on the image either: with `height: auto`
+ * that made the cell height depend on when the image decoded, and it measured
+ * differently between two runs of the same page. A stated height in pixels is
+ * the one thing the grid, the browser and the next person reading this all
+ * agree about. */
+.sheet-panel .photopicker-item {
+  display: block;
+  min-height: 0;
   position: relative;
+  overflow: hidden;
   border: 2px solid transparent;
   border-radius: var(--radius);
   padding: 0;
-  background: none;
+  /* The letterbox behind a photo that is not square. */
+  background: var(--teal-tint);
   line-height: 0;
-  aspect-ratio: 1;
-  overflow: hidden;
 }
-.photopicker-item .thumb {
+.sheet-panel .photopicker-item .thumb {
+  display: block;
   width: 100%;
-  height: 100%;
-  border-radius: 8px;
+  height: 88px;
+  /* CONTAIN, NOT COVER — overriding .thumb's default. "I need to see the whole
+     photo": cover crops a portrait to a square and hides the thing you are
+     picking it for. */
+  object-fit: contain;
+  background: none;
+  border-radius: 6px;
 }
-.photopicker-item.is-selected { border-color: var(--teal); }
+.sheet-panel .photopicker-item.is-selected { border-color: var(--teal); }
 
 /* ============ Batch step-through (photo-batch.js) ============
  *
