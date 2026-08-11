@@ -15,12 +15,16 @@
  * cards (deliberately plain, its own header said so) is gone. In its place:
  *
  *   - A "Book title & cover" card — brief §4.6, the final step before
- *     export: title (the year, not editable — brief's own default), subtitle
- *     (tap-to-edit, SAME endpoint/gesture Phase 3 wired on review.php — see
- *     public/api/year-projects-update.php's header), and a manual cover-photo
- *     picker using the exact same openPhotoPicker() pattern review.js already
- *     uses for a snapshot's hero photo (brief: "same pattern ... not
- *     auto-selected").
+ *     export: title and subtitle (both tap-to-edit, SAME endpoint/gesture
+ *     Phase 3 wired on review.php — see public/api/year-projects-update.php's
+ *     header), and a manual cover-photo picker using the exact same
+ *     openPhotoPicker() pattern review.js already uses for a snapshot's hero
+ *     photo (brief: "same pattern ... not auto-selected").
+ *
+ *     The title was fixed to the year here until Kathryn asked to be able to
+ *     rename a book. It is now year_projects.title, NULL meaning "use the
+ *     year" — so brief §4.6's "Title: defaults to the year" is still exactly
+ *     what an untouched book shows, and "Reset" puts that default back.
  *   - A real spread-by-spread visual rendering of the selected version: pages
  *     paired two-up (a "spread"), a snapshot page rendered from its real
  *     template fields (not just its type/date the way Phase 5's preview
@@ -385,14 +389,26 @@ function render_page(array $page, ?array $choice): string
        regardless of which version is open below. -->
   <div class="card" data-role="title-card" data-year-project="<?= (int) $project['id'] ?>">
     <strong>Book title &amp; cover</strong>
-    <p class="hint">Title defaults to the year; an optional subtitle and a cover photo are picked here, same as everywhere else in this app.</p>
+    <p class="hint">Tap the title or the subtitle to change it. Both are optional — clear the title and the book goes back to being called <?= h((string) $project['year']) ?>.</p>
     <ul class="list" id="subtitle-list">
       <li class="list-row" data-id="<?= (int) $project['id'] ?>">
         <div class="row-slide">
           <div class="row-body">
             <span class="row-sub">Title</span>
-            <span class="row-text ks-static-text"><?= h((string) $project['year']) ?></span>
+            <?php /* Tap-to-edit, same gesture and same endpoint as the subtitle
+                     below it. Muted when she has not named the book: the year
+                     showing there is a default the app is filling in, not a
+                     value she chose, and the two should not look alike. */ ?>
+            <span class="row-text<?= $project['title'] ? '' : ' muted' ?>" data-role="title"><?= h(year_project_title($project)) ?></span>
           </div>
+          <?php /* Clearing a field needs its own control, because inline-edit.js
+                   deliberately treats an emptied input as a cancel — "an empty
+                   name is a delete in disguise, and delete has its own gesture".
+                   That rule is right and shared with the other apps, so this is
+                   the separate gesture rather than an exception to it. Hidden
+                   when there is nothing to undo. */ ?>
+          <button type="button" class="tap-text" data-act="clear-title"
+                  <?= $project['title'] ? '' : 'hidden' ?>>Reset</button>
         </div>
       </li>
       <li class="list-row" data-id="<?= (int) $project['id'] ?>">
@@ -401,6 +417,8 @@ function render_page(array $page, ?array $choice): string
             <span class="row-sub">Subtitle</span>
             <span class="row-text<?= $project['subtitle'] ? '' : ' muted' ?>" data-role="subtitle"><?= h($project['subtitle'] ?: 'Tap to add a subtitle…') ?></span>
           </div>
+          <button type="button" class="tap-text" data-act="clear-subtitle"
+                  <?= $project['subtitle'] ? '' : 'hidden' ?>>Remove</button>
         </div>
       </li>
     </ul>
@@ -430,6 +448,14 @@ function render_page(array $page, ?array $choice): string
       $subtitle  = trim((string) ($project['subtitle'] ?? ''));
       $band      = cover_band_metrics($subtitle !== '', $safeFrac);
       $bleedFrac = (float) $coverGeo['bleed_in'] / (float) $coverGeo['page_width_in'];
+
+      /* The type sizes come from cover_band_metrics() too, in fractions of the
+       * page, and become container units here — 1cqw is 1% of the preview's
+       * width, and the preview is the page. They used to be constants in
+       * styles.css, tuned by eye, and were nearly double what the exporter
+       * printed; a preview whose whole job is showing where the title falls
+       * cannot have its own opinion about how big the title is. */
+      $bandCss = static fn(float $frac): string => round($frac * 100, 3) . 'cqw';
     ?>
     <div class="ks-cover-row">
       <div class="ks-cover-preview<?= $coverPhoto === null ? ' is-empty' : '' ?>"
@@ -449,14 +475,19 @@ function render_page(array $page, ?array $choice): string
                    : '' ?>"></div>
         <?php endif; ?>
 
-        <div class="ks-cover-band" style="left:<?= round($band['inset'] * 100, 3) ?>%;
+        <?php /* The band is flex-centred, which puts one line dead centre and a
+                 pair centred together — the same result the PDF gets from the
+                 explicit top margin cover_band_metrics() hands it. */ ?>
+        <div class="ks-cover-band" data-role="cover-band"
+             style="left:<?= round($band['inset'] * 100, 3) ?>%;
              right:<?= round($band['inset'] * 100, 3) ?>%;
              top:<?= round($band['top'] * 100, 3) ?>%;
-             height:<?= round($band['height'] * 100, 3) ?>%;">
-          <span class="ks-cover-year"><?= h((string) $project['year']) ?></span>
-          <?php if ($subtitle !== ''): ?>
-            <span class="ks-cover-sub" data-role="cover-sub"><?= h($subtitle) ?></span>
-          <?php endif; ?>
+             height:<?= round($band['height'] * 100, 3) ?>%;
+             gap:<?= $bandCss($band['gap']) ?>;">
+          <span class="ks-cover-title" data-role="cover-title"
+                style="font-size:<?= $bandCss($band['title_size']) ?>;"><?= h(year_project_title($project)) ?></span>
+          <span class="ks-cover-sub" data-role="cover-sub"
+                style="font-size:<?= $bandCss($band['sub_size']) ?>;<?= $subtitle === '' ? 'display:none;' : '' ?>"><?= h($subtitle) ?></span>
         </div>
 
         <div class="ks-cover-trim" aria-hidden="true"
@@ -489,7 +520,7 @@ function render_page(array $page, ?array $choice): string
       <strong>Export PDF</strong>
       <div class="hint">
         <?php if ($project['active_book_layout_id'] !== null): ?>
-          Print-ready PDF of the active layout — cover, title page, and every generated page.
+          Print-ready PDF of the active layout — the cover, then every generated page.
         <?php else: ?>
           Generate a layout and mark one active ("Use this one") before exporting.
         <?php endif; ?>

@@ -39,9 +39,11 @@ for login throttling: one row per attempt (`ip`, `succeeded`, `attempted_at`),
 pruned opportunistically. See `lib/auth.php` for the throttle curve.
 
 ### `year_projects`
-The root. One row per calendar year: `year` (unique), `subtitle`,
-`cover_photo_id` and `active_book_layout_id` (both plain nullable pointers,
-deliberately not foreign keys — see schema.sql). No status column; status is
+The root. One row per calendar year: `year` (unique), `title`, `subtitle`,
+`cover_photo_id` and `active_book_layout_id` (the last two plain nullable
+pointers, deliberately not foreign keys — see schema.sql). `title` is NULL
+until the book is renamed, and NULL means "call it by its year" — read it
+through `year_project_title()`, never directly. No status column; status is
 derived from what exists underneath a year, not stored.
 
 ### `event_groups`
@@ -101,8 +103,9 @@ per year, computed in app code, unique per year). Regenerating never deletes
 an older version — it inserts a new row.
 
 ### `book_pages`
-One row per generated interior page (cover/title pages are NOT rows here —
-they're read straight off `year_projects` at export time). `book_layout_id`,
+One row per generated interior page (the cover is NOT a row here — it is read
+straight off `year_projects` at export time, and it is the only front matter
+the book has). `book_layout_id`,
 `page_number` (unique per layout), `page_type` (`photos` / `text` /
 `snapshot`), `snapshot_id` (set only when `page_type = 'snapshot'`, enforced
 by a `CHECK`). No `year_project_id` — derived through `book_layout_id`.

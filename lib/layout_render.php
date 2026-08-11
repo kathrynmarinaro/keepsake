@@ -93,8 +93,20 @@ function layout_crop_css(array $rect): array
     );
 }
 
+/* The cover's typography, as fractions of the page's height. Not point sizes:
+ * a point size only means something once you know how big the page is, and
+ * these numbers have to survive being turned into millimetres by the PDF and
+ * into container units by the browser. */
+const COVER_TITLE_SIZE = 0.086;   // the big year/name
+const COVER_TITLE_LEAD = 1.05;    // line-height, matched in styles.css
+const COVER_SUB_SIZE   = 0.040;
+const COVER_SUB_LEAD   = 1.15;
+const COVER_LINE_GAP   = 0.009;   // between the two lines, when there are two
+const COVER_BAND_PAD   = 0.010;   // white above and below the type
+
 /**
- * Where the cover's title band sits, as FRACTIONS of the page.
+ * Where the cover's title band sits, and how the type sits inside it, as
+ * FRACTIONS of the page.
  *
  * Lives here rather than in lib/pdfexport.php because two renderers need it:
  * the PDF converts these to millimetres, and public/layout.php's on-screen
@@ -103,20 +115,44 @@ function layout_crop_css(array $rect): array
  * exporting, which is only worth anything if the two agree — and they can only
  * be relied on to agree if neither is allowed its own copy of the numbers.
  *
- * The band is taller when there is a subtitle because there are two lines to
- * hold, and it is inset by the safety margin on three sides so a printer's trim
- * can never take a letter off.
+ * That is why the FONT SIZES come out of here too, and why the band's height is
+ * now derived from them rather than being a tuned constant beside them. The two
+ * renderers each had their own idea of how big a cover title is — the preview
+ * drew it at 8.6% of the page, the exporter at a flat 30pt, which on an 8.75in
+ * cover is 4.8% — so the preview was overstating the printed title by nearly
+ * double. Sizes that live apart from each other drift; sizes derived from one
+ * constant cannot.
+ *
+ * Because the height is the type plus equal padding, the type is centred in the
+ * band by construction rather than by arithmetic that could be got wrong — so a
+ * cover with no subtitle puts its title dead centre, horizontally and
+ * vertically, which is what Kathryn asked for. `title_top` is that padding,
+ * named for what the PDF does with it: mPDF has no vertical centring inside a
+ * fixed-position box, so it is given an explicit top margin. The browser gets
+ * the same result from `justify-content: center` and ignores the number.
+ *
+ * The band is inset by the safety margin on three sides so a printer's trim can
+ * never take a letter off.
  *
  * @param float $safeFrac page margin (bleed + safety) as a fraction of the page
- * @return array{inset:float,height:float,top:float}
+ * @return array{inset:float,height:float,top:float,title_size:float,
+ *               sub_size:float,title_top:float,gap:float}
  */
 function cover_band_metrics(bool $hasSubtitle, float $safeFrac): array
 {
-    $height = $hasSubtitle ? 0.153 : 0.117;
+    $titleLine = COVER_TITLE_SIZE * COVER_TITLE_LEAD;
+    $subLine   = COVER_SUB_SIZE * COVER_SUB_LEAD;
+
+    $type   = $titleLine + ($hasSubtitle ? COVER_LINE_GAP + $subLine : 0.0);
+    $height = $type + (2 * COVER_BAND_PAD);
 
     return array(
-        'inset'  => $safeFrac,
-        'height' => $height,
-        'top'    => 1.0 - $safeFrac - $height,
+        'inset'      => $safeFrac,
+        'height'     => $height,
+        'top'        => 1.0 - $safeFrac - $height,
+        'title_size' => COVER_TITLE_SIZE,
+        'sub_size'   => COVER_SUB_SIZE,
+        'gap'        => COVER_LINE_GAP,
+        'title_top'  => COVER_BAND_PAD,
     );
 }

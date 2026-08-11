@@ -1735,6 +1735,11 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   background-repeat: no-repeat;
 }
 
+/* justify-content:center is what puts a lone title in the middle of the white
+   box, which is what Kathryn asked for, and centres the pair when there is a
+   subtitle. The band's height is the type plus equal padding (PHP:
+   cover_band_metrics), so centring here and the PDF's explicit top margin are
+   the same number arrived at two ways. */
 .ks-cover-band {
   position: absolute;
   background: #fff;
@@ -1742,15 +1747,18 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
   text-align: center;
   overflow: hidden;
 }
-/* Sized against the preview's own width so the type keeps its proportion to
-   the page rather than to the screen — 8.6% of a square page is the 30pt the
-   PDF sets on an 8.75in cover. */
-.ks-cover-year { font-size: 8.6cqw; font-weight: 700; line-height: 1.05; color: #111; }
-.ks-cover-sub  { font-size: 4cqw; line-height: 1.15; color: #333; }
+/* NO font-size here, and no gap: both are set inline from cover_band_metrics()
+   in container units, so the preview's type is the exporter's type to the
+   percent. They used to be tuned constants in this file and were nearly twice
+   what the PDF printed — a preview that exists to show where the title falls
+   is not allowed its own opinion about how big the title is. Line heights DO
+   live here, because they are ratios rather than sizes; the PHP constants
+   COVER_TITLE_LEAD / COVER_SUB_LEAD must match them. */
+.ks-cover-title { font-weight: 700; line-height: 1.05; color: #111; }
+.ks-cover-sub   { line-height: 1.15; color: #333; }
 .ks-cover-preview { container-type: inline-size; }
 
 /* Where the printer cuts. Everything outside it is bleed and will be lost —
@@ -1762,8 +1770,3 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
   pointer-events: none;
 }
-
-/* The title row's value — plain text, not tap-to-edit like the subtitle row
-   right below it (brief §4.6: the title always defaults to the year and
-   isn't editable), so it just needs to read as a value rather than a control. */
-.ks-static-text { font-weight: 400; }

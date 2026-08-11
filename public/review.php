@@ -422,6 +422,15 @@ function render_photo_cell(array $p, array $eventGroups): string
               <span class="row-sub">Book subtitle</span>
               <span class="row-text<?= $project['subtitle'] ? '' : ' muted' ?>" data-role="subtitle"><?= h($project['subtitle'] ?: 'Tap to add a subtitle…') ?></span>
             </div>
+            <?php /* inline-edit.js treats an emptied input as a cancel, so
+                     removing a subtitle needs its own control — same button and
+                     same endpoint as the one on the layout screen's title card.
+                     The BOOK'S NAME is edited over there, on the card that shows
+                     the cover it prints on; this screen keeps the one field it
+                     has always had. */ ?>
+            <button type="button" class="tap-text" data-act="clear-subtitle"
+                    data-year-project="<?= $yearProjectId ?>"
+                    <?= $project['subtitle'] ? '' : 'hidden' ?>>Remove</button>
           </div>
         </li>
       </ul>

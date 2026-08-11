@@ -265,7 +265,8 @@ $coverPhoto = array(
 );
 
 $mpdf = new RecordingMpdf();
-pdf_draw_cover_page($mpdf, $geoC, array('year' => 2025, 'subtitle' => 'The best year ever!'), $coverPhoto);
+pdf_draw_cover_page($mpdf, $geoC,
+    array('year' => 2025, 'title' => null, 'subtitle' => 'The best year ever!'), $coverPhoto);
 
 $checks++;
 /* No file on disk here, so nothing is drawn — but the BAND must still be
@@ -280,6 +281,86 @@ check('the title band sits inside the safety margin',
 check('the band is at the foot, not the middle', $band['y'] > $pageMm / 2);
 check('the band carries the year and the subtitle',
     strpos($band['html'], '2025') !== false && strpos($band['html'], 'best year ever') !== false);
+
+/* --------------------------------------------------- the title she chose */
+
+/* A named book prints its name, and only its name. The year is the DEFAULT, so
+ * finding it still on the cover of a renamed book would mean the fallback had
+ * been applied on top of her answer rather than instead of it. */
+$mpdf = new RecordingMpdf();
+pdf_draw_cover_page($mpdf, $geoC,
+    array('year' => 2025, 'title' => 'Our Big Year', 'subtitle' => ''), $coverPhoto);
+$named = end($mpdf->placed);
+
+$checks++;
+check('a renamed book prints its own name on the cover',
+    strpos($named['html'], 'Our Big Year') !== false);
+check('...and not the year as well', strpos($named['html'], '2025') === false);
+
+/* WITH NO SUBTITLE THE TITLE IS CENTRED IN THE WHITE BOX, which is what Kathryn
+ * asked for. mPDF cannot centre vertically inside a fixed-position box, so the
+ * exporter spends the band's padding as an explicit top margin — and the check
+ * that this is really centring is that the margin plus one line of type plus the
+ * margin again is the whole band, with nothing left over. */
+$geoH   = (float) $geoC['page_height_mm'];
+$solo   = cover_band_metrics(false, $safeMm / $geoH);
+$titleH = $solo['title_size'] * COVER_TITLE_LEAD;
+
+$checks++;
+check('a title with no subtitle is vertically centred in its band',
+    abs(($solo['title_top'] * 2 + $titleH) - $solo['height']) < 1e-9);
+
+/* The margin the exporter actually wrote, not the one it should have. */
+if (preg_match('/margin-top:([\d.]+)mm/', $named['html'], $m)) {
+    check('...and the PDF is drawn with exactly that margin',
+        abs((float) $m[1] - $solo['title_top'] * $geoH) < 0.01);
+} else {
+    check('...and the PDF is drawn with exactly that margin', false);
+}
+
+/* The type size is the shared one, in points. This is the number the preview
+ * used to disagree with by nearly double. */
+if (preg_match('/font-size:([\d.]+)pt/', $named['html'], $m)) {
+    check('the cover title is typeset at the shared size',
+        abs((float) $m[1] - pdf_mm_to_pt($solo['title_size'] * $geoH)) < 0.01);
+} else {
+    check('the cover title is typeset at the shared size', false);
+}
+
+/* A subtitle-less cover must not leave a hole where the subtitle would be. */
+check('an empty subtitle draws no second line',
+    substr_count($named['html'], '<div') === 2);   // the white ground, and the title
+
+/* ------------------------------------- the preview cannot disagree in CSS */
+
+/* The browser gets its cover type sizes inline from cover_band_metrics(), and
+ * only its LINE HEIGHTS from the stylesheet — because those are ratios rather
+ * than sizes, and mm-per-line is what the band's height is built out of. So the
+ * two numbers in styles.css have to be the two constants in PHP, and there must
+ * be no font-size beside them: a tuned constant in the stylesheet is exactly how
+ * the preview came to be drawing the title at nearly twice what printed. */
+$css = (string) file_get_contents($root . '/public/assets/styles.css');
+$checks++;
+
+foreach (array(
+    '.ks-cover-title' => COVER_TITLE_LEAD,
+    '.ks-cover-sub'   => COVER_SUB_LEAD,
+) as $selector => $lead) {
+    $rule = null;
+    if (preg_match('/' . preg_quote($selector, '/') . '\s*\{([^}]*)\}/', $css, $m)) {
+        $rule = $m[1];
+    }
+
+    if ($rule === null) {
+        check("styles.css still has a $selector rule", false);
+        continue;
+    }
+    check("$selector's line-height matches the PHP constant",
+        preg_match('/line-height:\s*([\d.]+)/', $rule, $lh) === 1
+        && abs((float) $lh[1] - $lead) < 1e-9);
+    check("...and $selector sets no font-size of its own",
+        strpos($rule, 'font-size') === false);
+}
 
 /* With a real file, the photo must cover the WHOLE physical page — trim plus
  * bleed, all four edges. A cover that stops at the safety margin is what

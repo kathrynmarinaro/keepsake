@@ -150,3 +150,14 @@ public_html/keepsake/ :
 
       Same "duplicate column" note again. Until you adjust a cover crop,
       the cover is centred exactly as it is now.
+
+  [ ] Book title. Adds one nullable column so a book can be called
+      something other than its year — run once:
+
+          ALTER TABLE year_projects
+            ADD COLUMN title VARCHAR(190) NULL;
+
+      Same "duplicate column" note again. NULL is the default and means
+      "call this book by its year", so every existing book reads exactly
+      as it does today until you rename one. Clearing the title on the
+      layout screen ("Reset") puts it back to NULL.

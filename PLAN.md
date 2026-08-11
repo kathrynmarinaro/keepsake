@@ -1608,3 +1608,61 @@ and six `tools/verify-*` scripts. Still not looked at on a phone — the standin
 caveat from every round above — and the next real check is generating a book
 from the live database and reading the PDF, where file paths, missing photos
 and text cards are exercised together for the first time.
+
+## Round 7 — the book's own name
+
+**The printed margin was double-charged.** The solver works in percentages of
+the trim and already leaves the margin Kathryn chose in the layout lab
+(`COMPOSE_FILL`, 85%). The browser preview mapped those percentages onto the
+trim; `pdf_draw_photos_page()` mapped them onto the content box — trim minus the
+half-inch safety margin — so 85% on screen printed as 72.9%. Measuring from the
+trim edge in both places is the fix, and it costs nothing in safety: 7.5% of
+8.5in is 0.64in, wider than the 0.50in printers ask for. Verified by pulling the
+image placement matrices back out of a real PDF, not by re-reading the maths.
+
+The geometry test's safety-margin assertion used to hold *by construction* and
+therefore said nothing. It now measures against the physical page, so it fails
+if `COMPOSE_FILL` is ever loosened past the point where photos would print into
+the trim zone.
+
+**A book can be called something other than its year.** `year_projects.title`,
+NULL meaning "use the year" — so brief §4.6's "Title: defaults to the year" is
+still exactly what an untouched book shows, and a book she never renamed follows
+the `year` column if that is ever corrected. Every reader goes through
+`year_project_title()`; nothing reads the column. Storing a copy of the year at
+creation time was the alternative and it makes "2025" the name she typed
+indistinguishable from "2025" the app filled in.
+
+**Clearing a field is its own control.** `inline-edit.js` treats an emptied
+input as a cancel, on purpose — in the app it was written for, an emptied row is
+a delete in disguise. That rule is right and it is shared with the siblings, so
+"Reset" / "Remove" buttons are the separate gesture rather than an exception to
+it. Same call `.row-cat` makes in Grocery.
+
+**The preview was drawing the cover title at nearly twice what printed.** The
+two renderers each had their own type sizes — 8.6% of the page in `styles.css`,
+a flat 30pt in the exporter, which on an 8.75in cover is 4.8%. The sizes now
+come out of `cover_band_metrics()` with everything else, and the band's HEIGHT
+is derived from them rather than being a tuned constant sitting beside them.
+A preview whose whole job is showing where the title falls cannot have its own
+opinion about how big the title is; `tools/verify-pdf-geometry.php` now reads
+the two line-heights out of the stylesheet and fails if they drift from the PHP
+constants, or if a `font-size` reappears next to them.
+
+Because the band's height is the type plus equal padding, the type is centred in
+it by construction rather than by arithmetic — so a cover with no subtitle puts
+its title dead centre, which is what she asked for. mPDF has no vertical
+centring inside a fixed-position box, so the exporter spends that same padding
+as an explicit top margin.
+
+**The interior title page is gone.** "I actually don't want an internal title
+page, just a cover." The cover already carries both lines. `page_count` dropped
+from `2 + pages` to `1 + pages`, and an empty year now exports a single page.
+
+**Files:** `lib/pdfexport.php`, `lib/layout_render.php`, `lib/repo.php`,
+`public/layout.php`, `public/review.php`, `public/index.php`,
+`public/api/year-projects-update.php`, `public/assets/layout.js`,
+`public/assets/review.js`, `public/assets/styles.css`, `schema.sql`,
+`DEPLOY.txt`, `docs/SCHEMA.md`, and four `tools/verify-*` scripts. The cover
+band's millimetres were checked against three real exports (subtitle, no
+subtitle, renamed); the browser side is still traced by hand, not clicked.

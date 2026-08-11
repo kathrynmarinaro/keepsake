@@ -30,8 +30,8 @@
  * PHPMailer is deliberately "no Composer, no autoloader" — so there was
  * nothing to match; this is the suite's first Composer usage, period.
  *
- * GEOMETRY: every page in the exported PDF — cover, title, and every
- * book_pages row — is rendered at the SAME size: the configured trim size
+ * GEOMETRY: every page in the exported PDF — the cover and every book_pages
+ * row — is rendered at the SAME size: the configured trim size
  * plus bleed on all four edges (config.example.php's 'export' block). That
  * matches how Lulu and Mixam both actually want an interior file: not a
  * trim-sized page with separate PDF trim-box metadata, but one PDF page
@@ -64,12 +64,14 @@
  *
  * FAIL SOFT, PER PLAN.md:
  *   - No cover photo picked (year_projects.cover_photo_id IS NULL): the
- *     cover page still renders — a plain background carrying just the year
+ *     cover page still renders — a plain background carrying just the title
  *     and subtitle, no photo — rather than being skipped or crashing the
  *     export. A book with no cover art chosen yet is still a valid, useful
  *     PDF to look at; disappearing the cover page entirely would silently
  *     shift every later page's number by one relative to what Kathryn saw
- *     on public/layout.php.
+ *     on public/layout.php. Since Round 7 the cover is the ONLY front matter:
+ *     the interior title page that used to follow it was removed at her
+ *     request — "I actually don't want an internal title page, just a cover".
  *   - A photo row whose original_path/thumb_path no longer resolves to a
  *     real file on disk (moved, deleted out from under the database, a
  *     synthetic test row): that ONE slot renders as a labeled placeholder
@@ -78,10 +80,10 @@
  *     in a proof PDF is exactly the kind of thing Kathryn should notice
  *     before paying to print it, not something export should paper over.
  *   - A year whose active layout has zero book_pages (nothing eligible was
- *     ever generated): export still produces a valid, short PDF — cover +
- *     title only. This is what layout_generate() itself already does for an
- *     empty year (tools/verify-layout.php's $emptyRun case), so a downstream
- *     empty PDF is the honest continuation of that, not a new failure mode.
+ *     ever generated): export still produces a valid, short PDF — the cover
+ *     alone. This is what layout_generate() itself already does for an empty
+ *     year (tools/verify-layout.php's $emptyRun case), so a downstream empty
+ *     PDF is the honest continuation of that, not a new failure mode.
  *   - No year project for the given year, or a year project with no active
  *     layout at all (nothing has ever been generated): THESE throw a plain
  *     RuntimeException with a short code — 'no_year_project' /
@@ -104,27 +106,45 @@ declare(strict_types=1);
 require_once __DIR__ . '/imageproc.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/layout_render.php';
+/* Explicit since the cover started asking year_project_title() what the book is
+ * called. This file has always leaned on repo.php — photo_get(), the layout
+ * lookups — and got away with it because every entry point loaded repo.php
+ * first. tools/verify-pdf-geometry.php does not, which is exactly the sort of
+ * caller an unstated dependency catches out. */
+require_once __DIR__ . '/repo.php';
 
-/* THE COMPOSER AUTOLOADER, loaded here and nowhere else.
+/**
+ * THE COMPOSER AUTOLOADER, loaded here and nowhere else.
  *
  * This is the app's only Composer dependency and this is its only consumer, so
- * the autoloader belongs with it rather than in bootstrap.php, where every
- * page that never touches mPDF would pay to load it.
+ * the autoloader belongs with it rather than in bootstrap.php, where every page
+ * that never touches mPDF would pay to load it.
  *
- * It was missing entirely until now, and the consequence was that PDF export
+ * It was missing entirely until Round 7, and the consequence was that PDF export
  * could never have worked on the server: `new \Mpdf\Mpdf` threw "Class not
  * found" every time, and api/export.php turned that into its generic "Could not
- * build the PDF". The reason no test caught it is worth remembering — 
+ * build the PDF". The reason no test caught it is worth remembering —
  * tools/verify-export.php required the autoloader ITSELF before calling in, so
  * it was testing a world production never had. A test that arranges a
  * precondition the real caller does not is not testing the real caller.
  *
+ * A FUNCTION rather than a require at the top of this file, because requiring
+ * the file no longer means intending to build a PDF: api/year-projects-update.php
+ * pulls it in for pdf_export_geometry() alone, so it can hand the cover preview
+ * the band's measurements, and making a subtitle edit load all of mPDF would
+ * undo the point of keeping it out of bootstrap.php in the first place.
+ *
  * Guarded by class_exists so a caller that has already autoloaded (the test
- * harness, or a future front controller) is not made to load it twice. */
-if (!class_exists(\Mpdf\Mpdf::class, false)) {
-    $pdfAutoload = dirname(__DIR__) . '/vendor/autoload.php';
-    if (is_file($pdfAutoload)) {
-        require_once $pdfAutoload;
+ * harness, or a future front controller) is not made to load it twice.
+ */
+function pdf_require_library(): void
+{
+    if (class_exists(\Mpdf\Mpdf::class, false)) {
+        return;
+    }
+    $autoload = dirname(__DIR__) . '/vendor/autoload.php';
+    if (is_file($autoload)) {
+        require_once $autoload;
     }
 }
 
@@ -179,6 +199,20 @@ function pdf_export_geometry(): array
 function pdf_esc(?string $raw): string
 {
     return htmlspecialchars((string) $raw, ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * Millimetres to points, for CSS that mPDF will parse.
+ *
+ * The cover's type sizes are fractions of the page (lib/layout_render.php), so
+ * they arrive here in millimetres. They are handed to mPDF in POINTS rather
+ * than in mm because a font-size is the one place where the unit's support is
+ * worth not assuming — pt is the unit a typesetter reads by definition, and
+ * every CSS parser agrees about it.
+ */
+function pdf_mm_to_pt(float $mm): float
+{
+    return $mm * 72.0 / 25.4;
 }
 
 /** Safety-valve truncation — see this file's header. */
@@ -281,7 +315,7 @@ function pdf_draw_cover_page(\Mpdf\Mpdf $mpdf, array $geo, array $project, ?arra
     $pageMm   = (float) $geo['page_width_mm'];
     $tallMm   = (float) $geo['page_height_mm'];
     $safeMm   = (float) $geo['content_margin_mm'];
-    $year     = (string) $project['year'];
+    $title    = year_project_title($project);
     $subtitle = trim((string) ($project['subtitle'] ?? ''));
 
     $photoAbs = $coverPhoto !== null ? pdf_resolve_photo_file($coverPhoto) : null;
@@ -313,31 +347,32 @@ function pdf_draw_cover_page(\Mpdf\Mpdf $mpdf, array $geo, array $project, ?arra
     $bandHMm = $band['height'] * $tallMm;
     $bandYMm = $band['top'] * $tallMm;
 
+    /* mPDF cannot centre a block vertically inside a fixed-position box, so the
+     * band's own padding is spent as a top margin instead. That is the same
+     * number the preview centres with — see cover_band_metrics() — so the title
+     * lands in the same place on paper as it does on screen, and on a cover with
+     * no subtitle that place is the middle of the white box. */
     $html = '<div style="background:#ffffff;width:100%;height:100%;text-align:center;'
         . 'font-family:sans-serif;">'
-        . '<div style="font-size:30pt;font-weight:bold;margin-top:5mm;">' . pdf_esc($year) . '</div>'
+        . sprintf(
+            '<div style="font-size:%.2fpt;line-height:%.2f;font-weight:bold;margin-top:%.2fmm;">%s</div>',
+            pdf_mm_to_pt($band['title_size'] * $tallMm),
+            COVER_TITLE_LEAD,
+            $band['title_top'] * $tallMm,
+            pdf_esc(pdf_clip_text($title))
+        )
         . ($subtitle !== ''
-            ? '<div style="font-size:14pt;margin-top:2mm;">' . pdf_esc(pdf_clip_text($subtitle)) . '</div>'
+            ? sprintf(
+                '<div style="font-size:%.2fpt;line-height:%.2f;margin-top:%.2fmm;">%s</div>',
+                pdf_mm_to_pt($band['sub_size'] * $tallMm),
+                COVER_SUB_LEAD,
+                $band['gap'] * $tallMm,
+                pdf_esc(pdf_clip_text($subtitle))
+            )
             : '')
         . '</div>';
 
     $mpdf->WriteFixedPosHTML($html, $safeMm, $bandYMm, $pageMm - (2 * $safeMm), $bandHMm);
-}
-
-/**
- * Interior title page — the traditional second front-matter page, distinct
- * from the cover (brief §4.6: "Title: defaults to the year ... An optional
- * subtitle field"). Plain, inside the normal safety-margin flow, no photo.
- */
-function pdf_render_title_html(array $project): string
-{
-    $year     = (string) $project['year'];
-    $subtitle = $project['subtitle'] ?? null;
-
-    return '<div style="text-align:center;padding-top:45%;font-family:sans-serif;">'
-        . '<div style="font-size:30pt;font-weight:bold;">' . pdf_esc($year) . '</div>'
-        . ($subtitle ? '<div style="font-size:15pt;margin-top:4mm;color:#444;">' . pdf_esc((string) $subtitle) . '</div>' : '')
-        . '</div>';
 }
 
 /**
@@ -714,6 +749,7 @@ function pdf_export_build(int $yearProjectId): array
      * rather than a missing upload. vendor/ is not in git and has to be put on
      * the server by hand — see tools/build-deploy.php, which refuses to make a
      * bundle without it. */
+    pdf_require_library();
     if (!class_exists(\Mpdf\Mpdf::class)) {
         throw new RuntimeException('pdf_library_missing');
     }
@@ -735,21 +771,25 @@ function pdf_export_build(int $yearProjectId): array
         'margin_footer'  => 0,
         'tempDir'        => sys_get_temp_dir() . '/keepsake-mpdf',
     ));
-    $mpdf->SetTitle('Keepsake ' . $project['year'] . ($project['subtitle'] ? ' — ' . $project['subtitle'] : ''));
+    $mpdf->SetTitle(year_project_title($project) . ($project['subtitle'] ? ' — ' . $project['subtitle'] : ''));
 
-    // Cover, then title — both prepended, neither a book_pages row (see
-    // schema.sql's own comment on book_pages for why). Every page but the
-    // very last one carries page-break-after so mPDF starts a fresh
-    // physical page for what follows.
-    /* mPDF has no page until something asks for one, and Image() is not
+    /* The cover, and nothing else, in front of the book's own pages — it is not
+     * a book_pages row (see schema.sql's own comment on book_pages for why).
+     *
+     * There WAS an interior title page here as well, the traditional second
+     * piece of front matter, repeating the title and subtitle on plain white.
+     * Kathryn asked for it to go: "I actually don't want an internal title
+     * page, just a cover." The cover already carries both lines, and a photo
+     * book of one person's year is not a volume that needs announcing twice.
+     *
+     * mPDF has no page until something asks for one, and Image() is not
      * something that asks: called first, it draws into nowhere and the page is
      * silently short. WriteHTML used to open the document by accident, which is
      * why this was never needed before the cover became a drawn page. */
     $mpdf->AddPage();
 
     pdf_draw_cover_page($mpdf, $geo, $project, $coverPhoto);
-    $mpdf->AddPage();
-    $mpdf->WriteHTML(pdf_wrap_page(pdf_render_title_html($project), false));
+
     if ($pages !== array()) {
         $mpdf->AddPage();
     }
@@ -804,13 +844,26 @@ function pdf_export_build(int $yearProjectId): array
     pdf_cleanup_export_crops();
     imageproc_prune_export_cache();
 
-    $filename = 'Keepsake-' . $project['year'] . '.pdf';
+    /* The download's name follows the book's name, so a renamed book does not
+     * arrive in the Downloads folder still called by its year. The year is kept
+     * on the front regardless: it is what makes a shelf of these files sort and
+     * makes two books called "Our Big Year" tell themselves apart. Anything not
+     * safe in a filename becomes a hyphen rather than being dropped, so two
+     * different titles cannot collapse into one name. */
+    $slug = preg_replace('/[^A-Za-z0-9]+/', '-', year_project_title($project));
+    $slug = trim(substr(trim((string) $slug, '-'), 0, 60), '-');
+    $year = (string) $project['year'];
+
+    $filename = 'Keepsake-' . $year
+        . ($slug !== '' && $slug !== $year ? '-' . $slug : '')
+        . '.pdf';
 
     return array(
         'bytes'       => $bytes,
         'filename'    => $filename,
-        // cover + title + every book_pages row.
-        'page_count'  => 2 + count($pages),
+        // cover + every book_pages row. No interior title page — see the
+        // AddPage() sequence above.
+        'page_count'  => 1 + count($pages),
     );
 }
 

@@ -447,6 +447,10 @@ document.addEventListener('click', (event) => {
       event.preventDefault();
       deleteGroup(el);
       break;
+    case 'clear-subtitle':
+      event.preventDefault();
+      clearSubtitle(el);
+      break;
   }
 });
 
@@ -463,9 +467,35 @@ attachInlineEdit('#subtitle-list', {
     const result = await apiPost('api/year-projects-update.php', { id: Number(id), subtitle: text });
     const subtitleEl = document.querySelector('[data-role="subtitle"]');
     subtitleEl.classList.remove('muted');
+    document.querySelector('[data-act="clear-subtitle"]')?.toggleAttribute('hidden', !result.subtitle);
     return result.subtitle || text;
   },
 });
+
+/* Removing the subtitle, which the tap-to-edit gesture deliberately cannot do:
+   inline-edit.js treats an emptied input as a cancel, because in the app it was
+   written for an emptied row means a delete. So clearing gets its own control,
+   the same one and the same endpoint the layout screen uses. */
+async function clearSubtitle(button) {
+  button.disabled = true;
+  try {
+    await apiPost('api/year-projects-update.php', {
+      id: Number(button.dataset.yearProject),
+      subtitle: '',
+    });
+    const subtitleEl = document.querySelector('[data-role="subtitle"]');
+    if (subtitleEl) {
+      subtitleEl.textContent = 'Tap to add a subtitle…';
+      subtitleEl.classList.add('muted');
+    }
+    button.hidden = true;
+    showSnackbar('Subtitle removed.');
+  } catch (err) {
+    showSnackbar(err.message || "That didn't save — try again.", { isError: true });
+  } finally {
+    button.disabled = false;
+  }
+}
 
 /* Event-group rename (brief §4.1: "Kathryn can rename any group") — the
    SAME tap-to-edit gesture as the subtitle above, on the group's name line.

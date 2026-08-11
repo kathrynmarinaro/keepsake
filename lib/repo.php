@@ -84,6 +84,37 @@ function year_project_get_by_year(int $year): ?array
 }
 
 /**
+ * The book's name, as it prints on the cover and the title page.
+ *
+ * NULL or blank clears it back to the year — brief §4.6's default, and still
+ * what an untouched book shows. Kathryn asked for this after living with the
+ * year-as-title for a while, so "no title set" has to keep meaning "follow the
+ * year" rather than silently freezing whatever the year was on the day the row
+ * was created.
+ *
+ * Every reader goes through year_project_title() rather than reading the
+ * column, so the fallback exists in exactly one place.
+ */
+function year_project_update_title(int $id, ?string $title): void
+{
+    $title = ($title === null || trim($title) === '') ? null : trim($title);
+    q('UPDATE year_projects SET title = ? WHERE id = ?', array($title, $id));
+}
+
+/**
+ * What to print as this book's title: hers if she set one, else the year.
+ *
+ * Takes the row rather than an id because every caller already has the row in
+ * hand, and a title is wanted in loops (the dashboard lists every year) where
+ * a query per row would be a query too many.
+ */
+function year_project_title(array $project): string
+{
+    $title = trim((string) ($project['title'] ?? ''));
+    return $title !== '' ? $title : (string) $project['year'];
+}
+
+/**
  * Brief §4.6: "An optional subtitle field is available for editing during
  * the pre-layout content review step" — the book title page's subtitle.
  * Empty string is stored as NULL, matching every other optional text field

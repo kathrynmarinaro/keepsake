@@ -160,6 +160,11 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  if (action === 'clear-title' || action === 'clear-subtitle') {
+    await clearCoverField(button, action === 'clear-title' ? 'title' : 'subtitle');
+    return;
+  }
+
   if (action === 'crop-cover') {
     await cropCover(button);
     return;
@@ -351,18 +356,111 @@ async function adjustCrop(button) {
   showSnackbar(saved.cropped ? 'Crop adjusted.' : 'Crop reset to auto-fit.');
 }
 
-/* Subtitle tap-to-edit (brief §4.6) — the SAME endpoint and gesture Phase 3
-   wired on review.php, reused here rather than duplicated. */
+/* -------------------------------------------------- title and subtitle --- */
+
+/* Both lines of the cover, tap-to-edit — the SAME endpoint and gesture Phase 3
+   wired on review.php, reused here rather than duplicated. Two attachments on
+   one list rather than one: inline-edit.js opens only for rows matching its own
+   textSelector, so each field keeps its own onSave and neither has to work out
+   which row it was handed.
+
+   The title used to be fixed to the year and rendered as plain text. Kathryn
+   asked to be able to rename a book; clearing the field puts the year back,
+   which is why an empty save is a normal outcome here and not a rejection. */
+
+/* Repaint the cover preview from the server's answer. Adding or clearing a
+   subtitle changes the band's HEIGHT, not just what is written in it, so the
+   response carries the band geometry — recomputing it here would be a second
+   copy of cover_band_metrics(), which is the one thing that function exists to
+   prevent. Everything below just applies numbers it was given. */
+function paintCover(result) {
+  const band = document.querySelector('[data-role="cover-band"]');
+  if (!band || !result.cover_band) { return; }
+
+  const m = result.cover_band;
+  band.style.top    = (m.top * 100).toFixed(3) + '%';
+  band.style.height = (m.height * 100).toFixed(3) + '%';
+  band.style.gap    = (m.gap * 100).toFixed(3) + 'cqw';
+
+  const title = band.querySelector('[data-role="cover-title"]');
+  if (title) {
+    title.textContent = result.display_title;
+    title.style.fontSize = (m.title_size * 100).toFixed(3) + 'cqw';
+  }
+
+  const sub = band.querySelector('[data-role="cover-sub"]');
+  if (sub) {
+    const text = (result.subtitle || '').trim();
+    sub.textContent = text;
+    /* Hidden rather than removed: a flex item that is display:none contributes
+       neither its height nor a gap, which is exactly the no-subtitle band the
+       server just sized, and it is still there to fill back in. */
+    sub.style.display = text === '' ? 'none' : '';
+    sub.style.fontSize = (m.sub_size * 100).toFixed(3) + 'cqw';
+  }
+}
+
+/* The other half of editing: putting a field back to empty.
+   inline-edit.js will not do it — it treats a cleared input as a cancel on
+   purpose, because in the app it was written for an emptied row means a delete
+   — so clearing is its own control, the way re-categorizing a grocery row is.
+   Sends an empty string, which the endpoint stores as NULL. */
+async function clearCoverField(button, field) {
+  const card = button.closest('[data-role="title-card"]');
+  if (!card) { return; }
+
+  button.disabled = true;
+  try {
+    const result = await apiPost('api/year-projects-update.php', {
+      id: Number(card.dataset.yearProject),
+      [field]: '',
+    });
+    paintCover(result);
+
+    const row = card.querySelector(`[data-role="${field}"]`);
+    if (row) {
+      row.textContent = field === 'title' ? result.display_title : 'Tap to add a subtitle…';
+      row.classList.add('muted');
+    }
+    button.hidden = true;
+    showSnackbar(field === 'title'
+      ? `Title reset to ${result.display_title}.`
+      : 'Subtitle removed.');
+  } catch (err) {
+    showSnackbar(describe(err), { isError: true });
+  } finally {
+    button.disabled = false;
+  }
+}
+
 if (document.getElementById('subtitle-list')) {
+  attachInlineEdit('#subtitle-list', {
+    rowSelector: '.list-row',
+    textSelector: '[data-role="title"]',
+    maxLength: 190,
+    onSave: async (id, text) => {
+      const result = await apiPost('api/year-projects-update.php', { id: Number(id), title: text });
+      paintCover(result);
+      /* Muted when the year is standing in for a name she has not chosen —
+         the same signal the subtitle row's placeholder gives. */
+      document.querySelector('[data-role="title"]')
+        ?.classList.toggle('muted', !result.title);
+      document.querySelector('[data-act="clear-title"]')?.toggleAttribute('hidden', !result.title);
+      return result.display_title;
+    },
+  });
+
   attachInlineEdit('#subtitle-list', {
     rowSelector: '.list-row',
     textSelector: '[data-role="subtitle"]',
     maxLength: 190,
     onSave: async (id, text) => {
       const result = await apiPost('api/year-projects-update.php', { id: Number(id), subtitle: text });
+      paintCover(result);
       const subtitleEl = document.querySelector('[data-role="subtitle"]');
-      subtitleEl.classList.remove('muted');
-      return result.subtitle || text;
+      subtitleEl.classList.toggle('muted', !result.subtitle);
+      document.querySelector('[data-act="clear-subtitle"]')?.toggleAttribute('hidden', !result.subtitle);
+      return result.subtitle || 'Tap to add a subtitle…';
     },
   });
 }

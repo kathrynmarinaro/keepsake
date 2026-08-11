@@ -440,6 +440,41 @@ year_project_set_cover_photo($ypA, null);
 check('cover_photo_id can be cleared back to null', year_project_get($ypA)['cover_photo_id'] === null);
 check('subtitle survives clearing the cover photo', year_project_get($ypA)['subtitle'] === 'The Test Trip');
 
+/* The book's NAME, which used to be the year and nothing else.
+ *
+ * The property worth pinning is the round trip: naming a book and then clearing
+ * the name has to leave it reading by its year again, not by an empty string
+ * and not frozen at whatever the year was when the row was made. That is what
+ * the NULL default buys, and it is the reason "Reset" is a real control rather
+ * than something you get by emptying the field. */
+$yearOfA = (string) year_project_get($ypA)['year'];
+
+check('an untouched book is called by its year',
+    year_project_title(year_project_get($ypA)) === $yearOfA);
+
+year_project_update_title($ypA, 'Our Big Year');
+check('a named book is called by its name',
+    year_project_title(year_project_get($ypA)) === 'Our Big Year');
+check('naming the book did not touch the subtitle',
+    year_project_get($ypA)['subtitle'] === 'The Test Trip');
+
+year_project_update_title($ypA, '   ');
+check('a whitespace-only title is stored as no title, not as a blank name',
+    year_project_get($ypA)['title'] === null);
+check('...so the book is called by its year again',
+    year_project_title(year_project_get($ypA)) === $yearOfA);
+
+year_project_update_title($ypA, 'Trimmed  ');
+check('a title is stored trimmed', year_project_get($ypA)['title'] === 'Trimmed');
+
+year_project_update_title($ypA, null);
+check('clearing the title outright also returns the year',
+    year_project_title(year_project_get($ypA)) === $yearOfA);
+
+/* Isolation, the same rule every other write on this screen follows. */
+check('naming one year left the other alone',
+    year_project_get($ypB)['title'] === null);
+
 echo "\nbook_layout_delete(): removing a version she has decided against...\n";
 
 /* Kathryn generates a version every time she wants to see a change, so a year

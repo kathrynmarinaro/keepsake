@@ -210,11 +210,21 @@ check('an unresolvable photo renders a visible placeholder, not an <img>', !str_
  * the safety margin) are asked over there against the drawing calls.
  */
 
-$fakeProject = array('year' => 2024, 'subtitle' => 'A year of firsts');
+/* THE INTERIOR TITLE PAGE IS GONE. It used to sit behind the cover, repeating
+ * the title and subtitle on plain white, and this is where its two assertions
+ * were. Kathryn asked for it to go — "I actually don't want an internal title
+ * page, just a cover" — so what is worth pinning now is that it stays gone:
+ * a book is its cover plus its pages and nothing else, and page_count says so.
+ * That count is checked against a real export below. */
 
-$title = pdf_render_title_html($fakeProject);
-check('the title page carries the year', str_contains($title, '2024'));
-check('...and the subtitle', str_contains($title, 'A year of firsts'));
+$fakeProject = array('year' => 2024, 'title' => null, 'subtitle' => 'A year of firsts');
+
+check('a book with no title of its own is called by its year',
+    year_project_title($fakeProject) === '2024');
+check('...and one with a title is called by that',
+    year_project_title(array('year' => 2024, 'title' => 'Our Big Year')) === 'Our Big Year');
+check('...with a blank title treated as none, not as an empty name',
+    year_project_title(array('year' => 2024, 'title' => '   ')) === '2024');
 
 /* ============================================== pure: layout resolution == */
 
@@ -312,7 +322,9 @@ check('it became the year\'s active layout automatically', (int) year_project_ge
 year_project_update_subtitle($yp, 'The year we went to the beach');
 year_project_set_cover_photo($yp, $heroPhoto);
 
-$expectedPages = 2 + count(book_pages_for_layout($run['layout_id']));
+/* Cover + every book_pages row. NOT +2: the interior title page was removed at
+ * Kathryn's request, and this number is what would have caught its ghost. */
+$expectedPages = 1 + count(book_pages_for_layout($run['layout_id']));
 $photoPageCount = count(array_filter(
     book_pages_for_layout($run['layout_id']),
     static fn(array $p): bool => $p['page_type'] === 'photos' && $p['slots'] !== array()
@@ -421,7 +433,21 @@ $export = pdf_export_build($yp);
 
 check('the bytes are actually a PDF', str_starts_with($export['bytes'], '%PDF-'));
 check('the filename carries the year', $export['filename'] === 'Keepsake-2024.pdf');
-check('reported page_count is cover + title + every book_pages row', $export['page_count'] === $expectedPages);
+
+/* Renaming the book renames the download. The year stays on the front: it is
+ * what makes a shelf of these sort, and what tells two books called the same
+ * thing apart. */
+year_project_update_title($yp, 'Our Big Year!');
+$named = pdf_export_build($yp);
+check('a renamed book downloads under its name too',
+    $named['filename'] === 'Keepsake-2024-Our-Big-Year.pdf');
+/* That the COVER carries the name is checked in tools/verify-pdf-geometry.php,
+ * against the drawing call — the text in a finished PDF is compressed and
+ * subsetted, so looking for it in these bytes would prove nothing either way. */
+year_project_update_title($yp, null);
+check('clearing the name puts the plain filename back',
+    pdf_export_build($yp)['filename'] === 'Keepsake-2024.pdf');
+check('reported page_count is cover + every book_pages row', $export['page_count'] === $expectedPages);
 
 $pageObjCount = pdf_page_object_count($export['bytes']);
 check('the actual PDF has exactly that many page objects', $pageObjCount === $expectedPages);
@@ -461,7 +487,7 @@ check('no page fell back to the missing-file placeholder',
 
 /* ================================================ fail soft: zero pages == */
 
-echo "\nFail-soft: a year with zero book_pages still exports (cover + title only)...\n";
+echo "\nFail-soft: a year with zero book_pages still exports (the cover alone)...\n";
 
 $emptyYp = year_project_get_or_create('2019-01-01');
 $emptyRun = layout_generate($emptyYp);
@@ -470,8 +496,8 @@ check('...and became active automatically', (int) year_project_get($emptyYp)['ac
 
 $emptyExport = pdf_export_build($emptyYp);
 check('an empty year still produces a real PDF', str_starts_with($emptyExport['bytes'], '%PDF-'));
-check('...with exactly 2 pages: cover + title, nothing else', $emptyExport['page_count'] === 2);
-check('...and the actual byte count agrees', pdf_page_object_count($emptyExport['bytes']) === 2);
+check('...with exactly 1 page: the cover, nothing else', $emptyExport['page_count'] === 1);
+check('...and the actual byte count agrees', pdf_page_object_count($emptyExport['bytes']) === 1);
 
 $emptyBoxes = pdf_media_boxes($emptyExport['bytes']);
 $emptyAllMatch = true;
@@ -480,7 +506,7 @@ foreach ($emptyBoxes as $box) {
         $emptyAllMatch = false;
     }
 }
-check('...and both pages are the correct trim+bleed size', $emptyAllMatch);
+check('...and that page is the correct trim+bleed size', $emptyAllMatch);
 
 /* No cover photo chosen for the empty year — fail soft, not a crash. */
 check('the empty year has no cover photo set (default state)', year_project_get($emptyYp)['cover_photo_id'] === null);

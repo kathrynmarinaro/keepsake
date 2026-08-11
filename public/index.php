@@ -102,7 +102,13 @@ function dashboard_status(int $yearProjectId): string
       ?>
         <div class="card row-between">
           <div>
-            <strong><?= h((string) $project['year']) ?></strong>
+            <?php /* The book's own name if she gave it one, else the year —
+                     year_project_title(). A renamed book has to be findable by
+                     the name she renamed it to. */ ?>
+            <strong><?= h(year_project_title($project)) ?></strong>
+            <?php if ($project['title'] && (string) $project['title'] !== (string) $project['year']): ?>
+              <div class="hint"><?= h((string) $project['year']) ?></div>
+            <?php endif; ?>
             <?php if ($project['subtitle']): ?>
               <div class="hint"><?= h((string) $project['subtitle']) ?></div>
             <?php elseif ($isCurrent): ?>

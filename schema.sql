@@ -71,11 +71,25 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 CREATE TABLE IF NOT EXISTS year_projects (
   id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
 
-  -- The year itself IS the title ("2026") — no separate title column. Only a
-  -- subtitle is real user-entered text (brief §4.6: "Title: defaults to the
-  -- year... An optional subtitle field is available for editing during the
-  -- pre-layout content review step").
   year            SMALLINT UNSIGNED NOT NULL,
+
+  -- The book's name on the cover. NULL — the default — means "use the year",
+  -- which is brief §4.6's "Title: defaults to the year". Kathryn asked to be
+  -- able to change it after using the app for a while, so it is now a real
+  -- column instead of being derived from `year` at every render.
+  --
+  -- NULL rather than a copy of the year written at creation time: a row whose
+  -- title happens to read "2025" cannot then be told apart from one she typed
+  -- "2025" into on purpose, and a book she never renamed should follow the
+  -- year column if that is ever corrected. Empty string is normalized to NULL
+  -- on the way in (see year_project_update_title) so there is exactly one way
+  -- to say "no title of my own".
+  --
+  -- 190, like subtitle, is the utf8mb4 index-safe width the suite uses
+  -- everywhere; nothing indexes this, but a cover title long enough to need
+  -- more than 190 characters is not a cover title.
+  title           VARCHAR(190) NULL,
+
   subtitle        VARCHAR(190) NULL,
 
   -- Cover photo, manually selected (brief §4.6: "not auto-selected", same
