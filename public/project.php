@@ -88,7 +88,15 @@ page_head(array(
     /* review.js reads this on boot to scope every write to this project. It
        was on review.php's <body> and has to keep being on the body, not on the
        tab's own markup, because that is where the module looks. */
-    'body_attrs' => array('data-year-project-id' => $projectId),
+    'body_attrs' => array(
+        'data-year-project-id' => $projectId,
+        /* The STORED title and subtitle, for the rename dialog. Not read off
+           the header, whose second line shows the YEAR once a book has been
+           renamed — offering to save that as the subtitle is exactly the bug
+           this avoids. */
+        'data-project-title'    => (string) ($project['title'] ?? ''),
+        'data-project-subtitle' => (string) ($project['subtitle'] ?? ''),
+    ),
 ));
 
 page_screen_head(array(

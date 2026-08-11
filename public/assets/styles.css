@@ -1532,6 +1532,47 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   gap: 12px;
   margin-bottom: 24px;
 }
+/* A quote, anecdote or snapshot as a grid cell — the text equivalent of
+ * .photo-cell-details below, and sized to sit beside one in the same grid when
+ * the type filter is All.
+ *
+ * Grid used to mean a grid only for photos; every other type fell through to a
+ * stack of full-width rows, which is a timeline with the month headings taken
+ * off. min-height matches a photo cell's rough height so a mixed grid does not
+ * come out ragged. */
+.text-cell-details {
+  margin-top: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+.text-cell-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 104px;
+  padding: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.text-cell-head::-webkit-details-marker { display: none; }
+.text-cell-details[open] .text-cell-head { border-bottom: 1px solid var(--border); }
+.text-cell-text {
+  flex: 1;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: var(--heading);
+  /* Four lines, then an ellipsis. A cell is a glance; the whole text is one
+     tap away in the modal. */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.text-cell-date { font-size: 0.72rem; color: var(--slate); opacity: 0.75; }
+
 .photo-cell-details {
   position: relative;
   margin-top: 0;              /* .accordion's list-spacing default; the grid's own gap already spaces these */
@@ -1937,12 +1978,27 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
 /* Create and Export, side by side. Both are full-width buttons by default
    (.btn-primary is width:100%), which is what makes them share the row evenly
    without either needing a width of its own. */
+/* The gap above is doing work .accordion cannot do for itself: .accordion has
+   a top margin and no bottom one, so the Title & cover box sat directly on
+   this row and the two read as one control. A margin here rather than a
+   bottom margin on .accordion, because .accordion is the shared component and
+   the capture screen stacks four of them deliberately touching. */
 .book-actions {
   display: flex;
   gap: 10px;
   align-items: center;
+  margin-top: 18px;
 }
 .book-actions > * { flex: 1; }
+
+/* The book's two cover lines, read-only, with one Edit button. They used to be
+   two tap-to-edit rows; the same dialog the kebab opens now handles both, so
+   this is a display of what is set rather than a control. */
+.cover-name-row { align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.cover-name { display: grid; gap: 1px; min-width: 0; }
+.cover-name .row-sub { margin-top: 6px; }
+.cover-name .row-sub:first-child { margin-top: 0; }
+.cover-name-row .btn-secondary { width: auto; flex: none; }
 
 .version-bar { display: grid; gap: 10px; }
 .version-picker {
@@ -2136,6 +2192,18 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
 }
 .entry.is-modal > .accordion-head::before { display: none; }
 .entry.is-modal > .accordion-body { padding-left: 0; padding-right: 0; }
+
+/* A text cell opened in the overlay drops its cell shape: it is the panel now,
+   and its clamped four-line preview would otherwise sit above the very form
+   that holds the same text in full. */
+.entry.is-modal.text-cell-details { border: 0; background: transparent; }
+.entry.is-modal .text-cell-head {
+  min-height: 0;
+  padding: 0 0 10px;
+  cursor: default;
+  border-bottom: 0;
+}
+.entry.is-modal .text-cell-text { display: none; }
 
 /* The photo, big, above its three actions — the point of opening it. */
 .entry.is-modal .photo-cell-head {

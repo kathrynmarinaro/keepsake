@@ -162,45 +162,57 @@ export function confirmDanger(opts = {}) {
 }
 
 /**
- * Ask for one line of text — a new project's name, a rename.
+ * Ask for one or more lines of text — a new project's name, a book's title and
+ * subtitle together.
  *
- * Same sheet, same lifecycle, opposite disposition: the primary button is
- * .btn-primary rather than .sheet-danger, and it is what Enter triggers,
- * because nothing here destroys anything.
+ * Same sheet, same lifecycle as confirmDanger(), opposite disposition: the
+ * primary button is filled teal rather than red, and it is what Enter
+ * triggers, because nothing here destroys anything.
  *
- *   const name = await promptText({
- *     title: 'New project',
- *     placeholder: 'Iceland, 2026',
- *     confirmLabel: 'Create',
+ *   const values = await promptFields({
+ *     title: 'Rename project',
+ *     fields: [
+ *       { name: 'title',    label: 'Title',    value: 'Iceland' },
+ *       { name: 'subtitle', label: 'Subtitle', value: 'June 2026' },
+ *     ],
  *   });
- *   if (name === null) { return; }   // cancelled
+ *   if (values === null) { return; }        // cancelled
+ *   values.title; values.subtitle;          // trimmed strings
+ *
+ * WHY FIELDS RATHER THAN ONE VALUE. A book's title and subtitle are one
+ * decision — they print together on the cover, and renaming a book while
+ * leaving a subtitle that no longer fits it is the mistake two separate
+ * dialogs invite. promptText() below is this function with one field, kept
+ * because "what shall this be called" really is a single question.
  *
  * @param {object} opts
- * @param {string} opts.title REQUIRED.
- * @param {string} [opts.body] A line of explanation under the title.
- * @param {string} [opts.value] Pre-filled, and selected on open, so a rename
- *        can be typed straight over.
- * @param {string} [opts.placeholder]
+ * @param {string} opts.title REQUIRED. The dialog's heading.
+ * @param {string} [opts.body] A line of explanation under it.
+ * @param {Array} opts.fields REQUIRED, at least one. Each is
+ *        { name, label?, value?, placeholder?, required? }. `required` fields
+ *        keep the primary button disabled until they have something in them,
+ *        rather than letting an empty string through for the caller to
+ *        re-validate; every field defaults to NOT required, because clearing a
+ *        subtitle is a thing you are allowed to do.
  * @param {string} [opts.confirmLabel='Save']
  * @param {string} [opts.cancelLabel='Cancel']
- * @param {boolean} [opts.allowEmpty=false] When false — the default — the
- *        primary button stays disabled until something is typed, rather than
- *        letting an empty string through for the caller to re-validate.
- * @returns {Promise<string|null>} the trimmed text, or null if cancelled.
+ * @returns {Promise<object|null>} trimmed values by field name, or null if
+ *          cancelled.
  */
-export function promptText(opts = {}) {
+export function promptFields(opts = {}) {
   const {
     title,
     body = '',
-    value = '',
-    placeholder = '',
+    fields = [],
     confirmLabel = 'Save',
     cancelLabel = 'Cancel',
-    allowEmpty = false,
   } = opts;
 
   if (typeof title !== 'string' || title === '') {
-    throw new TypeError('promptText: title is required');
+    throw new TypeError('promptFields: title is required');
+  }
+  if (!Array.isArray(fields) || fields.length === 0) {
+    throw new TypeError('promptFields: at least one field is required');
   }
 
   if (openDialog !== null) {
@@ -231,19 +243,38 @@ export function promptText(opts = {}) {
       panel.appendChild(detail);
     }
 
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'input sheet-input';
-    input.value = value;
-    input.placeholder = placeholder;
-    /* Off, all four. This is a proper noun she is inventing — a trip name, a
-       book title — and iOS autocapitalising and autocorrecting it into a word
-       it already knows is worse than no help at all. */
-    input.autocapitalize = 'off';
-    input.autocomplete = 'off';
-    input.autocorrect = 'off';
-    input.spellcheck = false;
-    panel.appendChild(input);
+    const inputs = [];
+    fields.forEach((field) => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'input sheet-input';
+      input.value = field.value ?? '';
+      input.placeholder = field.placeholder ?? '';
+      /* Off, all four. These are proper nouns she is inventing — a trip name,
+         a book title — and iOS autocapitalising and autocorrecting one into a
+         word it already knows is worse than no help at all. */
+      input.autocapitalize = 'off';
+      input.autocomplete = 'off';
+      input.autocorrect = 'off';
+      input.spellcheck = false;
+
+      /* A label only when there is more than one field to tell apart. One
+         unlabelled box under a heading that already asks the question does not
+         need "Name:" written above it. */
+      if (field.label) {
+        const wrap = document.createElement('label');
+        wrap.className = 'field sheet-field';
+        const span = document.createElement('span');
+        span.textContent = field.label;
+        wrap.appendChild(span);
+        wrap.appendChild(input);
+        panel.appendChild(wrap);
+      } else {
+        panel.appendChild(input);
+      }
+
+      inputs.push({ field, input });
+    });
 
     let settled = false;
     const finish = (result) => {
@@ -266,10 +297,11 @@ export function promptText(opts = {}) {
     cancelBtn.addEventListener('click', () => finish(null));
     panel.appendChild(cancelBtn);
 
-    const sync = () => {
-      okBtn.disabled = !allowEmpty && input.value.trim() === '';
-    };
-    input.addEventListener('input', sync);
+    const complete = () => inputs.every(
+      ({ field, input }) => !field.required || input.value.trim() !== ''
+    );
+    const sync = () => { okBtn.disabled = !complete(); };
+    inputs.forEach(({ input }) => input.addEventListener('input', sync));
     sync();
 
     /* A <form> so the phone keyboard's blue key says "Go" and submits, which
@@ -278,9 +310,11 @@ export function promptText(opts = {}) {
        single-line field and does nothing else. */
     panel.addEventListener('submit', (event) => {
       event.preventDefault();
-      const text = input.value.trim();
-      if (!allowEmpty && text === '') { return; }
-      finish(text);
+      if (!complete()) { return; }
+
+      const values = {};
+      inputs.forEach(({ field, input }) => { values[field.name] = input.value.trim(); });
+      finish(values);
     });
 
     el.appendChild(panel);
@@ -300,7 +334,31 @@ export function promptText(opts = {}) {
     document.body.appendChild(el);
     openDialog = { el, onKeydown, restoreFocus };
 
-    input.focus();
-    input.select();
+    inputs[0].input.focus();
+    inputs[0].input.select();
   });
+}
+
+/**
+ * Ask for one line of text. promptFields() with a single unlabelled field.
+ *
+ *   const name = await promptText({
+ *     title: 'New project',
+ *     placeholder: 'Iceland',
+ *     confirmLabel: 'Create',
+ *   });
+ *   if (name === null) { return; }   // cancelled
+ *
+ * @param {object} opts As promptFields(), minus `fields`, plus `value`,
+ *        `placeholder`, and `allowEmpty` (default false — the one-field case
+ *        usually IS required, which is the opposite of promptFields' default).
+ * @returns {Promise<string|null>} the trimmed text, or null if cancelled.
+ */
+export function promptText(opts = {}) {
+  const { value = '', placeholder = '', allowEmpty = false, ...rest } = opts;
+
+  return promptFields({
+    ...rest,
+    fields: [{ name: 'value', value, placeholder, required: !allowEmpty }],
+  }).then((result) => (result === null ? null : result.value));
 }

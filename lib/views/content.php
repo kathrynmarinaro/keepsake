@@ -89,6 +89,253 @@ function fmt_date_human(string $ymd): string
     return $ts === false ? $ymd : date('M j, Y', $ts);
 }
 
+/* ---------------------------------------------------------- entry bodies
+ *
+ * The edit form for one entry, on its own, so the two collapsed shapes that
+ * can hold it — a full-width row and a grid cell — share exactly one copy.
+ *
+ * They did not, before. render_entry_photo() and render_photo_cell() each
+ * carried their own transcription of the same four fields, which is what
+ * PLAN.md's "there is exactly one markup for editing a photo" was supposed to
+ * mean and did not. Adding grid cells for the other three types would have
+ * made that four duplications instead of one, so the form came out first.
+ */
+
+function render_quote_body(array $q): string
+{
+    ob_start();
+    ?>
+    <div class="accordion-body">
+      <form class="stack" data-role="entry-form">
+        <label class="field">
+          <span>What was said</span>
+          <textarea name="quote_text" rows="2" maxlength="2000" required><?= h($q['quote_text']) ?></textarea>
+        </label>
+        <label class="field">
+          <span>Who said it</span>
+          <select name="who_said_it">
+            <option value="Kathryn"<?= $q['who_said_it'] === 'Kathryn' ? ' selected' : '' ?>>Kathryn</option>
+            <option value="Emma"<?= $q['who_said_it'] === 'Emma' ? ' selected' : '' ?>>Emma</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Date</span>
+          <input type="date" name="entry_date" value="<?= h($q['entry_date']) ?>" required>
+        </label>
+        <p class="field-err" data-role="error"></p>
+        <div class="row-between entry-actions">
+          <button type="button" class="btn-danger" data-act="delete">Delete</button>
+          <?php /* Cancel closes the modal without saving. Only meaningful
+                   once entry-modal.js has one open, so it is hidden until
+                   then — a Cancel button on an inline accordion would be a
+                   third word for "collapse this", next to the summary you
+                   can already tap. */ ?>
+          <div class="row entry-actions-right">
+            <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
+            <button type="submit" class="btn-primary">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+function render_anecdote_body(array $a): string
+{
+    ob_start();
+    ?>
+    <div class="accordion-body">
+      <form class="stack" data-role="entry-form">
+        <label class="field">
+          <span>What happened</span>
+          <textarea name="anecdote_text" rows="3" maxlength="4000" required><?= h($a['anecdote_text']) ?></textarea>
+        </label>
+        <label class="field">
+          <span>Date</span>
+          <input type="date" name="entry_date" value="<?= h($a['entry_date']) ?>" required>
+        </label>
+        <p class="field-err" data-role="error"></p>
+        <div class="row-between entry-actions">
+          <button type="button" class="btn-danger" data-act="delete">Delete</button>
+          <?php /* Cancel closes the modal without saving. Only meaningful
+                   once entry-modal.js has one open, so it is hidden until
+                   then — a Cancel button on an inline accordion would be a
+                   third word for "collapse this", next to the summary you
+                   can already tap. */ ?>
+          <div class="row entry-actions-right">
+            <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
+            <button type="submit" class="btn-primary">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+function render_snapshot_body(array $s): string
+{
+    ob_start();
+    /* Derived here rather than passed in: this function is called from a row
+       summary and from a grid cell, and a body that depends on its caller
+       having computed the right locals first is the bug that came out of
+       splitting it off. */
+    $isBirthday = $s['type'] === 'birthday';
+    $heroLabel  = $s['hero_photo_id'] ? ('Hero photo: #' . (int) $s['hero_photo_id']) : '';
+    ?>
+    <div class="accordion-body">
+      <form class="stack" data-role="entry-form">
+        <label class="field">
+          <span>Date</span>
+          <input type="date" name="entry_date" value="<?= h($s['entry_date']) ?>" required>
+        </label>
+
+        <?php if ($isBirthday): ?>
+          <label class="field"><span>Age</span>
+            <input type="number" name="age" min="0" max="130" value="<?= h((string) ($s['age'] ?? '')) ?>">
+          </label>
+          <label class="field"><span>Height</span>
+            <input type="text" name="height" value="<?= h((string) ($s['height'] ?? '')) ?>">
+          </label>
+        <?php else: ?>
+          <label class="field"><span>Grade</span><input type="text" name="grade" value="<?= h((string) ($s['grade'] ?? '')) ?>"></label>
+          <label class="field"><span>School</span><input type="text" name="school" value="<?= h((string) ($s['school'] ?? '')) ?>"></label>
+          <label class="field"><span>Teacher</span><input type="text" name="teacher" value="<?= h((string) ($s['teacher'] ?? '')) ?>"></label>
+          <label class="field"><span>Favorite color</span><input type="text" name="favorite_color" value="<?= h((string) ($s['favorite_color'] ?? '')) ?>"></label>
+          <label class="field"><span>Dream job</span><input type="text" name="dream_job" value="<?= h((string) ($s['dream_job'] ?? '')) ?>"></label>
+          <label class="field"><span>Favorite class</span><input type="text" name="favorite_class" value="<?= h((string) ($s['favorite_class'] ?? '')) ?>"></label>
+        <?php endif; ?>
+
+        <label class="field">
+          <span>Notes</span>
+          <textarea name="notes" rows="3"><?= h((string) ($s['notes'] ?? '')) ?></textarea>
+        </label>
+
+        <div class="field">
+          <span>Hero photo</span>
+          <input type="hidden" name="hero_photo_id" value="<?= h((string) ($s['hero_photo_id'] ?? '')) ?>">
+          <button type="button" class="btn-ghost" data-act="pick-hero"><?= $s['hero_photo_id'] ? 'Change hero photo' : 'Choose hero photo (optional)' ?></button>
+          <p class="hint" data-role="hero-chosen"<?= $heroLabel === '' ? ' hidden' : '' ?>><?= h($heroLabel) ?></p>
+        </div>
+
+        <p class="field-err" data-role="error"></p>
+        <div class="row-between entry-actions">
+          <button type="button" class="btn-danger" data-act="delete">Delete</button>
+          <?php /* Cancel closes the modal without saving. Only meaningful
+                   once entry-modal.js has one open, so it is hidden until
+                   then — a Cancel button on an inline accordion would be a
+                   third word for "collapse this", next to the summary you
+                   can already tap. */ ?>
+          <div class="row entry-actions-right">
+            <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
+            <button type="submit" class="btn-primary">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+function render_photo_body(array $p, array $eventGroups): string
+{
+    ob_start();
+    /* Same reasoning as render_snapshot_body(): self-contained, because two
+       different collapsed shapes call it. */
+    $entryDate = substr((string) $p['captured_at'], 0, 10);
+    ?>
+    <div class="accordion-body">
+      <form class="stack" data-role="entry-form">
+        <label class="field">
+          <span>Caption</span>
+          <textarea name="caption" rows="2"><?= h((string) ($p['caption'] ?? '')) ?></textarea>
+        </label>
+        <label class="field">
+          <span>Location</span>
+          <input type="text" name="location_text" value="<?= h((string) ($p['location_text'] ?? '')) ?>">
+        </label>
+        <label class="field">
+          <span>Date</span>
+          <input type="date" name="entry_date" value="<?= h($entryDate) ?>" required>
+        </label>
+        <label class="field">
+          <span>Event group</span>
+          <select name="event_group_id">
+            <option value="">— none —</option>
+            <?php foreach ($eventGroups as $g): ?>
+              <option value="<?= (int) $g['id'] ?>"<?= (int) ($p['event_group_id'] ?? 0) === (int) $g['id'] ? ' selected' : '' ?>>
+                <?= h($g['name']) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+
+        <p class="field-err" data-role="error"></p>
+        <div class="row-between entry-actions">
+          <button type="button" class="btn-danger" data-act="delete">Delete</button>
+          <?php /* Cancel closes the modal without saving. Only meaningful
+                   once entry-modal.js has one open, so it is hidden until
+                   then — a Cancel button on an inline accordion would be a
+                   third word for "collapse this", next to the summary you
+                   can already tap. */ ?>
+          <div class="row entry-actions-right">
+            <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
+            <button type="submit" class="btn-primary">Save</button>
+          </div>
+        </div>
+      </form>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+/**
+ * One NON-PHOTO entry as a grid cell.
+ *
+ * WHY THIS EXISTS. "Grid" used to mean a grid only for photos; every other
+ * type fell through to a stack of full-width rows, which is a timeline with
+ * the month headings taken off. That was survivable while the default type was
+ * Photos and you had to choose your way into the other case. Once the filters
+ * became permanent and the default became All, it was the first thing on the
+ * screen — and Kathryn reported it as exactly what it looked like: "the Grid
+ * view is showing a timeline view".
+ *
+ * Grid now means grid for every type. This is the text equivalent of
+ * render_photo_cell(): the same <details>, the same data attributes, the same
+ * shared body — only the collapsed shape differs, which is the same split
+ * render_photo_cell()'s header already describes for photos.
+ *
+ * @param string $kind 'quote' | 'anecdote' | 'snapshot'
+ * @param string $label The pill.
+ * @param string $text  The line of content to preview.
+ */
+function render_entry_cell(array $row, string $kind, string $label, string $text, string $date): string
+{
+    ob_start();
+    $id = (int) $row['id'];
+
+    $body = '';
+    if ($kind === 'quote') {
+        $body = render_quote_body($row);
+    } elseif ($kind === 'anecdote') {
+        $body = render_anecdote_body($row);
+    } else {
+        $body = render_snapshot_body($row);
+    }
+    ?>
+    <details class="accordion entry text-cell-details" data-type="<?= h($kind) ?>" data-id="<?= $id ?>" id="entry-<?= h($kind) ?>-<?= $id ?>">
+      <summary class="text-cell-head">
+        <span class="pill<?= $kind === 'snapshot' ? '' : ' is-plain' ?>"><?= h($label) ?></span>
+        <span class="text-cell-text"><?= h($text !== '' ? $text : '(empty)') ?></span>
+        <span class="text-cell-date"><?= h(fmt_date_human($date)) ?></span>
+      </summary>
+      <?= $body ?>
+    </details>
+    <?php
+    return ob_get_clean();
+}
+
 function render_entry_quote(array $q): string
 {
     ob_start();
@@ -100,38 +347,7 @@ function render_entry_quote(array $q): string
         <span class="entry-summary-text"><?= h(snippet($q['quote_text'])) ?></span>
         <span class="accordion-count"><?= h(fmt_date_human($q['entry_date'])) ?></span>
       </summary>
-      <div class="accordion-body">
-        <form class="stack" data-role="entry-form">
-          <label class="field">
-            <span>What was said</span>
-            <textarea name="quote_text" rows="2" maxlength="2000" required><?= h($q['quote_text']) ?></textarea>
-          </label>
-          <label class="field">
-            <span>Who said it</span>
-            <select name="who_said_it">
-              <option value="Kathryn"<?= $q['who_said_it'] === 'Kathryn' ? ' selected' : '' ?>>Kathryn</option>
-              <option value="Emma"<?= $q['who_said_it'] === 'Emma' ? ' selected' : '' ?>>Emma</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Date</span>
-            <input type="date" name="entry_date" value="<?= h($q['entry_date']) ?>" required>
-          </label>
-          <p class="field-err" data-role="error"></p>
-          <div class="row-between entry-actions">
-            <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <?php /* Cancel closes the modal without saving. Only meaningful
-                     once entry-modal.js has one open, so it is hidden until
-                     then — a Cancel button on an inline accordion would be a
-                     third word for "collapse this", next to the summary you
-                     can already tap. */ ?>
-            <div class="row entry-actions-right">
-              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
-              <button type="submit" class="btn-primary">Save</button>
-            </div>
-          </div>
-        </form>
-      </div>
+      <?= render_quote_body($q) ?>
     </details>
     <?php
     return ob_get_clean();
@@ -148,31 +364,7 @@ function render_entry_anecdote(array $a): string
         <span class="entry-summary-text"><?= h(snippet($a['anecdote_text'])) ?></span>
         <span class="accordion-count"><?= h(fmt_date_human($a['entry_date'])) ?></span>
       </summary>
-      <div class="accordion-body">
-        <form class="stack" data-role="entry-form">
-          <label class="field">
-            <span>What happened</span>
-            <textarea name="anecdote_text" rows="3" maxlength="4000" required><?= h($a['anecdote_text']) ?></textarea>
-          </label>
-          <label class="field">
-            <span>Date</span>
-            <input type="date" name="entry_date" value="<?= h($a['entry_date']) ?>" required>
-          </label>
-          <p class="field-err" data-role="error"></p>
-          <div class="row-between entry-actions">
-            <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <?php /* Cancel closes the modal without saving. Only meaningful
-                     once entry-modal.js has one open, so it is hidden until
-                     then — a Cancel button on an inline accordion would be a
-                     third word for "collapse this", next to the summary you
-                     can already tap. */ ?>
-            <div class="row entry-actions-right">
-              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
-              <button type="submit" class="btn-primary">Save</button>
-            </div>
-          </div>
-        </form>
-      </div>
+      <?= render_anecdote_body($a) ?>
     </details>
     <?php
     return ob_get_clean();
@@ -201,56 +393,7 @@ function render_entry_snapshot(array $s): string
         <span class="entry-summary-text"><?= h($summaryText) ?></span>
         <span class="accordion-count"><?= h(fmt_date_human($s['entry_date'])) ?></span>
       </summary>
-      <div class="accordion-body">
-        <form class="stack" data-role="entry-form">
-          <label class="field">
-            <span>Date</span>
-            <input type="date" name="entry_date" value="<?= h($s['entry_date']) ?>" required>
-          </label>
-
-          <?php if ($isBirthday): ?>
-            <label class="field"><span>Age</span>
-              <input type="number" name="age" min="0" max="130" value="<?= h((string) ($s['age'] ?? '')) ?>">
-            </label>
-            <label class="field"><span>Height</span>
-              <input type="text" name="height" value="<?= h((string) ($s['height'] ?? '')) ?>">
-            </label>
-          <?php else: ?>
-            <label class="field"><span>Grade</span><input type="text" name="grade" value="<?= h((string) ($s['grade'] ?? '')) ?>"></label>
-            <label class="field"><span>School</span><input type="text" name="school" value="<?= h((string) ($s['school'] ?? '')) ?>"></label>
-            <label class="field"><span>Teacher</span><input type="text" name="teacher" value="<?= h((string) ($s['teacher'] ?? '')) ?>"></label>
-            <label class="field"><span>Favorite color</span><input type="text" name="favorite_color" value="<?= h((string) ($s['favorite_color'] ?? '')) ?>"></label>
-            <label class="field"><span>Dream job</span><input type="text" name="dream_job" value="<?= h((string) ($s['dream_job'] ?? '')) ?>"></label>
-            <label class="field"><span>Favorite class</span><input type="text" name="favorite_class" value="<?= h((string) ($s['favorite_class'] ?? '')) ?>"></label>
-          <?php endif; ?>
-
-          <label class="field">
-            <span>Notes</span>
-            <textarea name="notes" rows="3"><?= h((string) ($s['notes'] ?? '')) ?></textarea>
-          </label>
-
-          <div class="field">
-            <span>Hero photo</span>
-            <input type="hidden" name="hero_photo_id" value="<?= h((string) ($s['hero_photo_id'] ?? '')) ?>">
-            <button type="button" class="btn-ghost" data-act="pick-hero"><?= $s['hero_photo_id'] ? 'Change hero photo' : 'Choose hero photo (optional)' ?></button>
-            <p class="hint" data-role="hero-chosen"<?= $heroLabel === '' ? ' hidden' : '' ?>><?= h($heroLabel) ?></p>
-          </div>
-
-          <p class="field-err" data-role="error"></p>
-          <div class="row-between entry-actions">
-            <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <?php /* Cancel closes the modal without saving. Only meaningful
-                     once entry-modal.js has one open, so it is hidden until
-                     then — a Cancel button on an inline accordion would be a
-                     third word for "collapse this", next to the summary you
-                     can already tap. */ ?>
-            <div class="row entry-actions-right">
-              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
-              <button type="submit" class="btn-primary">Save</button>
-            </div>
-          </div>
-        </form>
-      </div>
+      <?= render_snapshot_body($s) ?>
     </details>
     <?php
     return ob_get_clean();
@@ -289,47 +432,7 @@ function render_entry_photo(array $p, array $eventGroups): string
         <button type="button" class="pill pill-toggle" data-act="recrop" data-src="<?= $original ?>">Recrop</button>
         <span class="accordion-count"><?= h(fmt_date_human($entryDate)) ?></span>
       </summary>
-      <div class="accordion-body">
-        <form class="stack" data-role="entry-form">
-          <label class="field">
-            <span>Caption</span>
-            <textarea name="caption" rows="2"><?= h((string) ($p['caption'] ?? '')) ?></textarea>
-          </label>
-          <label class="field">
-            <span>Location</span>
-            <input type="text" name="location_text" value="<?= h((string) ($p['location_text'] ?? '')) ?>">
-          </label>
-          <label class="field">
-            <span>Date</span>
-            <input type="date" name="entry_date" value="<?= h($entryDate) ?>" required>
-          </label>
-          <label class="field">
-            <span>Event group</span>
-            <select name="event_group_id">
-              <option value="">— none —</option>
-              <?php foreach ($eventGroups as $g): ?>
-                <option value="<?= (int) $g['id'] ?>"<?= (int) ($p['event_group_id'] ?? 0) === (int) $g['id'] ? ' selected' : '' ?>>
-                  <?= h($g['name']) ?>
-                </option>
-              <?php endforeach; ?>
-            </select>
-          </label>
-
-          <p class="field-err" data-role="error"></p>
-          <div class="row-between entry-actions">
-            <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <?php /* Cancel closes the modal without saving. Only meaningful
-                     once entry-modal.js has one open, so it is hidden until
-                     then — a Cancel button on an inline accordion would be a
-                     third word for "collapse this", next to the summary you
-                     can already tap. */ ?>
-            <div class="row entry-actions-right">
-              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
-              <button type="submit" class="btn-primary">Save</button>
-            </div>
-          </div>
-        </form>
-      </div>
+      <?= render_photo_body($p, $eventGroups) ?>
     </details>
     <?php
     return ob_get_clean();
@@ -380,47 +483,7 @@ function render_photo_cell(array $p, array $eventGroups): string
           <button type="button" class="pill pill-toggle" data-act="recrop" data-src="<?= $original ?>">Recrop</button>
         </span>
       </summary>
-      <div class="accordion-body">
-        <form class="stack" data-role="entry-form">
-          <label class="field">
-            <span>Caption</span>
-            <textarea name="caption" rows="2"><?= h((string) ($p['caption'] ?? '')) ?></textarea>
-          </label>
-          <label class="field">
-            <span>Location</span>
-            <input type="text" name="location_text" value="<?= h((string) ($p['location_text'] ?? '')) ?>">
-          </label>
-          <label class="field">
-            <span>Date</span>
-            <input type="date" name="entry_date" value="<?= h($entryDate) ?>" required>
-          </label>
-          <label class="field">
-            <span>Event group</span>
-            <select name="event_group_id">
-              <option value="">— none —</option>
-              <?php foreach ($eventGroups as $g): ?>
-                <option value="<?= (int) $g['id'] ?>"<?= (int) ($p['event_group_id'] ?? 0) === (int) $g['id'] ? ' selected' : '' ?>>
-                  <?= h($g['name']) ?>
-                </option>
-              <?php endforeach; ?>
-            </select>
-          </label>
-
-          <p class="field-err" data-role="error"></p>
-          <div class="row-between entry-actions">
-            <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <?php /* Cancel closes the modal without saving. Only meaningful
-                     once entry-modal.js has one open, so it is hidden until
-                     then — a Cancel button on an inline accordion would be a
-                     third word for "collapse this", next to the summary you
-                     can already tap. */ ?>
-            <div class="row entry-actions-right">
-              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
-              <button type="submit" class="btn-primary">Save</button>
-            </div>
-          </div>
-        </form>
-      </div>
+      <?= render_photo_body($p, $eventGroups) ?>
     </details>
     <?php
     return ob_get_clean();
@@ -745,37 +808,83 @@ function render_photo_cell(array $p, array $eventGroups): string
       <?php endif; ?>
 
     <?php else: /* grid */ ?>
-      <?php if ($type === 'photo'): ?>
-        <?php if ($photos === array()): ?>
-          <div class="empty"><p>No photos captured for <?= h($projectName) ?> yet.</p></div>
-        <?php else: ?>
-          <div class="photo-grid" id="photo-grid">
-            <?php foreach ($photos as $p) { echo render_photo_cell($p, $groups); } ?>
-          </div>
-        <?php endif; ?>
+      <?php
+      /* GRID MEANS GRID FOR EVERY TYPE. It used to mean a grid only for
+         photos, and every other type fell through to a stack of full-width
+         rows — a timeline with the month headings taken off. See
+         render_entry_cell(). Photos keep their image-forward cell; the other
+         three get the text cell; All mixes them in one grid, in date order,
+         which is the only order they have in common. */
+      $cells = array();
+      if ($type === 'all' || $type === 'photo') {
+          foreach ($photos as $p) {
+              $cells[] = array(
+                  'date'  => substr((string) $p['captured_at'], 0, 10),
+                  'order' => 0,
+                  'html'  => render_photo_cell($p, $groups),
+              );
+          }
+      }
+      if ($type === 'all' || $type === 'snapshot') {
+          foreach ($snapshots as $sn) {
+              $isBirthday = $sn['type'] === 'birthday';
+              $bits = array();
+              if ($isBirthday) {
+                  if ($sn['age'] !== null) { $bits[] = 'Age ' . $sn['age']; }
+                  if ($sn['height']) { $bits[] = (string) $sn['height']; }
+              } else {
+                  if ($sn['grade']) { $bits[] = (string) $sn['grade']; }
+                  if ($sn['school']) { $bits[] = (string) $sn['school']; }
+              }
+              $cells[] = array(
+                  'date'  => (string) $sn['entry_date'],
+                  'order' => 1,
+                  'html'  => render_entry_cell(
+                      $sn,
+                      'snapshot',
+                      $isBirthday ? 'Birthday' : 'School year',
+                      $bits !== array() ? implode(' · ', $bits) : '',
+                      (string) $sn['entry_date']
+                  ),
+              );
+          }
+      }
+      if ($type === 'all' || $type === 'quote') {
+          foreach ($quotes as $q) {
+              $cells[] = array(
+                  'date'  => (string) $q['entry_date'],
+                  'order' => 2,
+                  'html'  => render_entry_cell(
+                      $q, 'quote', 'Quote', snippet((string) $q['quote_text'], 90), (string) $q['entry_date']
+                  ),
+              );
+          }
+      }
+      if ($type === 'all' || $type === 'anecdote') {
+          foreach ($anecdotes as $a) {
+              $cells[] = array(
+                  'date'  => (string) $a['entry_date'],
+                  'order' => 3,
+                  'html'  => render_entry_cell(
+                      $a, 'anecdote', 'Anecdote', snippet((string) $a['anecdote_text'], 90), (string) $a['entry_date']
+                  ),
+              );
+          }
+      }
 
+      usort($cells, static function (array $x, array $y): int {
+          return $x['date'] <=> $y['date'] ?: $x['order'] <=> $y['order'];
+      });
+      ?>
+
+      <?php if ($cells === array()): ?>
+        <div class="empty">
+          <p>Nothing <?= $type === 'all' ? 'captured' : 'of that type' ?> for <?= h($projectName) ?> yet.</p>
+        </div>
       <?php else: ?>
-        <?php
-        $flat = array();
-        if ($type === 'all' || $type === 'quote') {
-            foreach ($quotes as $q) { $flat[] = array('date' => $q['entry_date'], 'html' => render_entry_quote($q)); }
-        }
-        if ($type === 'all' || $type === 'anecdote') {
-            foreach ($anecdotes as $a) { $flat[] = array('date' => $a['entry_date'], 'html' => render_entry_anecdote($a)); }
-        }
-        if ($type === 'all' || $type === 'snapshot') {
-            foreach ($snapshots as $s) { $flat[] = array('date' => $s['entry_date'], 'html' => render_entry_snapshot($s)); }
-        }
-        if ($type === 'all') {
-            foreach ($photos as $p) { $flat[] = array('date' => substr((string) $p['captured_at'], 0, 10), 'html' => render_entry_photo($p, $groups)); }
-        }
-        usort($flat, static fn(array $a, array $b): int => $a['date'] <=> $b['date']);
-        ?>
-        <?php if ($flat === array()): ?>
-          <div class="empty"><p>Nothing here yet for <?= h($projectName) ?>.</p></div>
-        <?php else: ?>
-          <div id="entry-list"><?php foreach ($flat as $e) { echo $e['html']; } ?></div>
-        <?php endif; ?>
+        <div class="photo-grid" id="photo-grid">
+          <?php foreach ($cells as $c) { echo $c['html']; } ?>
+        </div>
       <?php endif; ?>
 
     <?php endif; ?>

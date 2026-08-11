@@ -32,6 +32,14 @@ function describe(err) {
   return 'That did not work.';
 }
 
+/** Every project on the page, newest first, as {id, title}. */
+function projectCards() {
+  return Array.from(document.querySelectorAll('.project-card')).map((card) => ({
+    id: Number(card.dataset.project),
+    title: card.dataset.title || 'Untitled project',
+  }));
+}
+
 /* ------------------------------------------------------------------- wiring */
 
 /** The app menu. Two entries today; both are also real URLs. */
@@ -57,7 +65,12 @@ document.querySelectorAll('.project-card').forEach((card) => {
 
   attachMenu(button, {
     label: title,
-    items: projectMenuItems(id, title),
+    items: projectMenuItems(id, title, {
+      /* The STORED title and subtitle, which the card carries separately from
+         the name it displays — see projectMenuItems(). */
+      title: card.dataset.storedTitle || '',
+      subtitle: card.dataset.subtitle || '',
+    }),
   });
 });
 

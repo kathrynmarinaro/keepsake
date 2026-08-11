@@ -331,6 +331,66 @@ $out = render_in_child('book', 'trip', array('tab' => 'book'));
 check('with no layout it renders', $out['fatal'] === null, (string) $out['fatal']);
 check('with no layout it is clean', $out['problems'] === array(), implode("\n", $out['problems']));
 
+/* ------------------------------------------------------- grid really is a grid */
+
+echo "\nGrid vs Timeline...\n";
+
+/* THE REGRESSION THIS PINS DOWN. "Grid" used to mean a grid only for photos;
+ * every other type fell through to a stack of full-width rows, which is a
+ * timeline with the month headings taken off. It was survivable while the
+ * default type was Photos, and became the first thing on the screen the moment
+ * the default became All — reported, accurately, as "the Grid view is showing
+ * a timeline view".
+ *
+ * Checking the containers rather than the styling: a grid is .photo-grid, a
+ * timeline is #entry-list with month headings, and the two must not swap. */
+foreach (array('all', 'photo', 'snapshot', 'quote', 'anecdote') as $t) {
+    $out = render_in_child('content', 'year', array('view' => 'grid', 'type' => $t));
+
+    check(
+        'grid type=' . $t . ' renders a grid',
+        str_contains($out['html'], 'class="photo-grid"'),
+        (string) $out['fatal']
+    );
+    check(
+        'grid type=' . $t . ' is not a stacked list',
+        !str_contains($out['html'], 'id="entry-list"')
+    );
+}
+
+/* Every type produces a real cell, not an empty grid. The fixture has one of
+   each, so a type that silently rendered nothing would pass the container
+   check above and fail here. */
+$out = render_in_child('content', 'year', array('view' => 'grid', 'type' => 'all'));
+check('the grid holds a photo cell', str_contains($out['html'], 'photo-cell-details'));
+check('the grid holds text cells', str_contains($out['html'], 'text-cell-details'));
+
+/* And the timeline is still the timeline — the fix must not have turned every
+   view into a grid. */
+$out = render_in_child('content', 'year', array('view' => 'timeline', 'type' => 'all'));
+check('timeline stacks its entries', str_contains($out['html'], 'id="entry-list"'));
+check('timeline groups by month', str_contains($out['html'], 'cat-head'));
+check('timeline is not a grid', !str_contains($out['html'], 'class="photo-grid"'));
+
+/* ------------------------------------------------- one form, not five copies */
+
+echo "\nOne edit form per type...\n";
+
+/* render_entry_photo() and render_photo_cell() used to carry their own
+   transcription of the same four fields. Adding grid cells for the other three
+   types would have made that four duplications, so the form was factored out
+   first — and this is what stops it drifting back apart: the row shape and the
+   cell shape of one entry must contain the same form. */
+$grid     = render_in_child('content', 'year', array('view' => 'grid', 'type' => 'quote'));
+$timeline = render_in_child('content', 'year', array('view' => 'timeline', 'type' => 'quote'));
+
+foreach (array('name="quote_text"', 'name="who_said_it"', 'name="entry_date"', 'data-act="delete"') as $field) {
+    check(
+        'both shapes of a quote carry ' . $field,
+        str_contains($grid['html'], $field) && str_contains($timeline['html'], $field)
+    );
+}
+
 /* ------------------------------------------------------------ project_url */
 
 echo "\nproject_url()...\n";

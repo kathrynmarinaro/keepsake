@@ -345,39 +345,27 @@ function render_page(array $page, ?array $choice): string
     <div class="accordion-body">
   <div class="card is-flush" data-role="title-card" data-year-project="<?= (int) $project['id'] ?>">
 
-    <p class="hint">Tap the title or the subtitle to change it. Both are optional — clear the title and the book goes back to being called <?= h($projectName) ?>.</p>
-    <ul class="list" id="subtitle-list">
-      <li class="list-row" data-id="<?= (int) $project['id'] ?>">
-        <div class="row-slide">
-          <div class="row-body">
-            <span class="row-sub">Title</span>
-            <?php /* Tap-to-edit, same gesture and same endpoint as the subtitle
-                     below it. Muted when she has not named the book: the year
-                     showing there is a default the app is filling in, not a
-                     value she chose, and the two should not look alike. */ ?>
-            <span class="row-text<?= $project['title'] ? '' : ' muted' ?>" data-role="title"><?= h(year_project_title($project)) ?></span>
-          </div>
-          <?php /* Clearing a field needs its own control, because inline-edit.js
-                   deliberately treats an emptied input as a cancel — "an empty
-                   name is a delete in disguise, and delete has its own gesture".
-                   That rule is right and shared with the other apps, so this is
-                   the separate gesture rather than an exception to it. Hidden
-                   when there is nothing to undo. */ ?>
-          <button type="button" class="tap-text" data-act="clear-title"
-                  <?= $project['title'] ? '' : 'hidden' ?>>Reset</button>
-        </div>
-      </li>
-      <li class="list-row" data-id="<?= (int) $project['id'] ?>">
-        <div class="row-slide">
-          <div class="row-body">
-            <span class="row-sub">Subtitle</span>
-            <span class="row-text<?= $project['subtitle'] ? '' : ' muted' ?>" data-role="subtitle"><?= h($project['subtitle'] ?: 'Tap to add a subtitle…') ?></span>
-          </div>
-          <button type="button" class="tap-text" data-act="clear-subtitle"
-                  <?= $project['subtitle'] ? '' : 'hidden' ?>>Remove</button>
-        </div>
-      </li>
-    </ul>
+    <?php /* ONE BUTTON, opening the same dialog the kebab's "Rename" opens.
+             It used to be two tap-to-edit rows with two "Reset"/"Remove"
+             buttons beside them — a different gesture, in a different place,
+             for the same two fields the project menu already edits. Kathryn
+             asked for the interactions to match, and the way to make two
+             things match is for there to be one of them: this calls
+             renameProject() in project-menu.js, exactly as the kebab does.
+
+             Both lines are shown, not just the title, because they print
+             together and the dialog edits them together. The title is muted
+             when she has not named the book — the year showing there is a
+             default the app is filling in, not a value she chose. */ ?>
+    <div class="row-between cover-name-row">
+      <div class="cover-name">
+        <span class="row-sub">Title</span>
+        <span class="row-text<?= $project['title'] ? '' : ' muted' ?>" data-role="title"><?= h(year_project_title($project)) ?></span>
+        <span class="row-sub">Subtitle</span>
+        <span class="row-text<?= $project['subtitle'] ? '' : ' muted' ?>" data-role="subtitle"><?= h($project['subtitle'] ?: 'None') ?></span>
+      </div>
+      <button type="button" class="btn-secondary" data-act="rename-project">Edit</button>
+    </div>
 
     <?php
       /* THE COVER AS IT WILL PRINT, not a thumbnail of the photo.

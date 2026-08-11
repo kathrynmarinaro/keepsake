@@ -98,7 +98,15 @@ page_screen_head(array(
               $sub = 'Current year';
           }
       ?>
-        <div class="card project-card" data-project="<?= $id ?>" data-title="<?= h($title) ?>">
+        <?php /* data-title is the DISPLAY name (the year, for an unnamed book);
+                 data-stored-title is the column, which may be empty. The rename
+                 dialog needs the second — pre-filling it with "2025" because
+                 that is what the card says would turn every unnamed book into
+                 one literally titled "2025". */ ?>
+        <div class="card project-card" data-project="<?= $id ?>"
+             data-title="<?= h($title) ?>"
+             data-stored-title="<?= h((string) ($project['title'] ?? '')) ?>"
+             data-subtitle="<?= h((string) ($project['subtitle'] ?? '')) ?>">
           <?php /* The whole card is the link, not a separate "Open" button.
                    There was nothing else on the card to tap, and a 48px target
                    in the corner of a 90px card wastes the other 80% of it. The

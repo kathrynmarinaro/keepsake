@@ -22,6 +22,11 @@ if (button && id > 0) {
   attachMenu(button, {
     label: title,
     items: projectMenuItems(id, title, {
+      /* From the body's data-*, not from the header text: the header's second
+         line shows the YEAR when a book has been renamed, so reading it would
+         offer to save "2025" as the subtitle. */
+      title: document.body.dataset.projectTitle || '',
+      subtitle: document.body.dataset.projectSubtitle || '',
       /* Deleting the project you are looking at cannot reload this screen —
          there is nothing here any more, and project.php would render its
          "that project doesn't exist" state, which is correct but a dead end.

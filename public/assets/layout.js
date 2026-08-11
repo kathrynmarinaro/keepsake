@@ -84,7 +84,7 @@
 
 import { apiPost, ApiError } from './api.js';
 import { showSnackbar } from './swipe.js';
-import { attachInlineEdit } from './inline-edit.js';
+import { renameProject } from './project-menu.js';
 import { openPhotoPicker } from './photo-picker.js';
 import { openCropper } from './crop.js';
 
@@ -160,8 +160,19 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  if (action === 'clear-title' || action === 'clear-subtitle') {
-    await clearCoverField(button, action === 'clear-title' ? 'title' : 'subtitle');
+  if (action === 'rename-project') {
+    /* The SAME dialog the kebab's "Rename" opens — one function, called from
+       both places, because Kathryn asked for the two interactions to match and
+       the way two things match is for there to be one of them. It reloads on
+       success: the header, the <title>, the cover preview and this panel all
+       carry the old text. */
+    const card = button.closest('[data-role="title-card"]');
+    if (card) {
+      await renameProject(Number(card.dataset.yearProject), {
+        title: document.body.dataset.projectTitle || '',
+        subtitle: document.body.dataset.projectSubtitle || '',
+      });
+    }
     return;
   }
 
@@ -363,112 +374,24 @@ async function adjustCrop(button) {
 
 /* -------------------------------------------------- title and subtitle --- */
 
-/* Both lines of the cover, tap-to-edit — the SAME endpoint and gesture Phase 3
-   wired on review.php, reused here rather than duplicated. Two attachments on
-   one list rather than one: inline-edit.js opens only for rows matching its own
-   textSelector, so each field keeps its own onSave and neither has to work out
-   which row it was handed.
-
-   The title used to be fixed to the year and rendered as plain text. Kathryn
-   asked to be able to rename a book; clearing the field puts the year back,
-   which is why an empty save is a normal outcome here and not a rejection. */
-
-/* Repaint the cover preview from the server's answer. Adding or clearing a
-   subtitle changes the band's HEIGHT, not just what is written in it, so the
-   response carries the band geometry — recomputing it here would be a second
-   copy of cover_band_metrics(), which is the one thing that function exists to
-   prevent. Everything below just applies numbers it was given. */
-function paintCover(result) {
-  const band = document.querySelector('[data-role="cover-band"]');
-  if (!band || !result.cover_band) { return; }
-
-  const m = result.cover_band;
-  band.style.top    = (m.top * 100).toFixed(3) + '%';
-  band.style.height = (m.height * 100).toFixed(3) + '%';
-  band.style.gap    = (m.gap * 100).toFixed(3) + 'cqw';
-
-  const title = band.querySelector('[data-role="cover-title"]');
-  if (title) {
-    title.textContent = result.display_title;
-    title.style.fontSize = (m.title_size * 100).toFixed(3) + 'cqw';
-  }
-
-  const sub = band.querySelector('[data-role="cover-sub"]');
-  if (sub) {
-    const text = (result.subtitle || '').trim();
-    sub.textContent = text;
-    /* Hidden rather than removed: a flex item that is display:none contributes
-       neither its height nor a gap, which is exactly the no-subtitle band the
-       server just sized, and it is still there to fill back in. */
-    sub.style.display = text === '' ? 'none' : '';
-    sub.style.fontSize = (m.sub_size * 100).toFixed(3) + 'cqw';
-  }
-}
-
-/* The other half of editing: putting a field back to empty.
-   inline-edit.js will not do it — it treats a cleared input as a cancel on
-   purpose, because in the app it was written for an emptied row means a delete
-   — so clearing is its own control, the way re-categorizing a grocery row is.
-   Sends an empty string, which the endpoint stores as NULL. */
-async function clearCoverField(button, field) {
-  const card = button.closest('[data-role="title-card"]');
-  if (!card) { return; }
-
-  button.disabled = true;
-  try {
-    const result = await apiPost('api/year-projects-update.php', {
-      id: Number(card.dataset.yearProject),
-      [field]: '',
-    });
-    paintCover(result);
-
-    const row = card.querySelector(`[data-role="${field}"]`);
-    if (row) {
-      row.textContent = field === 'title' ? result.display_title : 'Tap to add a subtitle…';
-      row.classList.add('muted');
-    }
-    button.hidden = true;
-    showSnackbar(field === 'title'
-      ? `Title reset to ${result.display_title}.`
-      : 'Subtitle removed.');
-  } catch (err) {
-    showSnackbar(describe(err), { isError: true });
-  } finally {
-    button.disabled = false;
-  }
-}
-
-if (document.getElementById('subtitle-list')) {
-  attachInlineEdit('#subtitle-list', {
-    rowSelector: '.list-row',
-    textSelector: '[data-role="title"]',
-    maxLength: 190,
-    onSave: async (id, text) => {
-      const result = await apiPost('api/year-projects-update.php', { id: Number(id), title: text });
-      paintCover(result);
-      /* Muted when the year is standing in for a name she has not chosen —
-         the same signal the subtitle row's placeholder gives. */
-      document.querySelector('[data-role="title"]')
-        ?.classList.toggle('muted', !result.title);
-      document.querySelector('[data-act="clear-title"]')?.toggleAttribute('hidden', !result.title);
-      return result.display_title;
-    },
-  });
-
-  attachInlineEdit('#subtitle-list', {
-    rowSelector: '.list-row',
-    textSelector: '[data-role="subtitle"]',
-    maxLength: 190,
-    onSave: async (id, text) => {
-      const result = await apiPost('api/year-projects-update.php', { id: Number(id), subtitle: text });
-      paintCover(result);
-      const subtitleEl = document.querySelector('[data-role="subtitle"]');
-      subtitleEl.classList.toggle('muted', !result.subtitle);
-      document.querySelector('[data-act="clear-subtitle"]')?.toggleAttribute('hidden', !result.subtitle);
-      return result.subtitle || 'Tap to add a subtitle…';
-    },
-  });
-}
+/* NO TAP-TO-EDIT, NO "RESET"/"REMOVE", AND NO COVER REPAINT HERE ANY MORE.
+ *
+ * The title and subtitle used to be two inline-edit rows with a clear button
+ * beside each — a different gesture, in a different place, for the same two
+ * fields the project menu already edits. Kathryn asked for the two to match,
+ * and the way two things match is for there to be one of them: the "Edit"
+ * button opens renameProject() from project-menu.js, exactly as the kebab's
+ * "Rename" does. Clearing a field is now just submitting an empty box, which
+ * the endpoint stores as NULL, so the separate clear controls went too.
+ *
+ * paintCover() went with them. It repainted the cover preview in place from
+ * the band geometry the endpoint returns, which mattered when the fields were
+ * edited inline and the page never reloaded. renameProject() reloads on
+ * success — the header, the <title> and this panel all carry the old text —
+ * so the preview is redrawn by the server from cover_band_metrics(), which is
+ * where that arithmetic is supposed to live anyway. The endpoint still returns
+ * cover_band; nothing reads it today.
+ */
 
 /* --------------------------------------------------------- drag and drop - */
 /* Native HTML5 drag events, delegated off `document` — see this file's

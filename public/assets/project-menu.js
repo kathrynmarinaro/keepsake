@@ -15,7 +15,7 @@
 
 import { apiPost, apiGet, ApiError } from './api.js';
 import { showSnackbar } from './swipe.js';
-import { confirmDanger, promptText } from './confirm.js';
+import { confirmDanger, promptFields } from './confirm.js';
 
 /** A sentence for the user out of whatever went wrong. */
 function describe(err) {
@@ -32,6 +32,12 @@ function describe(err) {
  * The three per-project actions. Shared verbatim with the project screen's own
  * kebab (project.js builds the same list) — same glyph, same scope, same three
  * entries, which is the whole convention lib/page.php's header describes.
+ *
+ * `title` here is the DISPLAY title — what the book is called, which for an
+ * unnamed book is its year. `opts.title` is the stored one, which may be empty,
+ * and is what the rename dialog must pre-fill: seeding the box with "2025"
+ * because that is what the card says would turn every unnamed book into one
+ * literally titled "2025" the first time its subtitle was edited.
  */
 export function projectMenuItems(id, title, opts = {}) {
   /* Two callbacks, not one. A rename wants the screen re-rendered — the
@@ -46,23 +52,11 @@ export function projectMenuItems(id, title, opts = {}) {
   return [
     {
       label: 'Rename',
-      onSelect: async () => {
-        const name = await promptText({
-          title: 'Rename project',
-          body: 'This is the name on the cover. Clearing it puts the book back to being called by its year.',
-          value: title,
-          confirmLabel: 'Rename',
-          allowEmpty: true,
-        });
-        if (name === null) { return; }
-
-        try {
-          await apiPost('api/year-projects-update.php', { id, title: name });
-          onRenamed();
-        } catch (err) {
-          showSnackbar(describe(err), { isError: true });
-        }
-      },
+      onSelect: () => renameProject(id, {
+        title: opts.title ?? title,
+        subtitle: opts.subtitle ?? '',
+        onDone: onRenamed,
+      }),
     },
     {
       /* A real link, not a fetch: the response is a file download, and letting
@@ -104,6 +98,53 @@ export function projectMenuItems(id, title, opts = {}) {
       },
     },
   ];
+}
+
+/**
+ * Rename a book: its title AND its subtitle, in one dialog.
+ *
+ * BOTH, because they are one decision. They print together on the cover, and a
+ * dialog that changes the title while leaving a subtitle that no longer fits it
+ * is the mistake two separate controls invite. It is also why the Book tab's
+ * "Title & cover" panel calls THIS rather than carrying its own tap-to-edit
+ * fields — same question, same dialog, wherever you ask it from.
+ *
+ * Either may be cleared. An empty title puts the book back to being called by
+ * its year (year_project_title()); an empty subtitle prints no second line.
+ * That is why neither field is `required`.
+ *
+ * @param {number} id
+ * @param {object} [opts]
+ * @param {string} [opts.title] Current title. Read from the DOM by the caller,
+ *        since both callers already have it on screen.
+ * @param {string} [opts.subtitle] Current subtitle.
+ * @param {() => void} [opts.onDone] Defaults to reloading, because the header,
+ *        the <title> and the cover preview all carry the old text.
+ */
+export async function renameProject(id, opts = {}) {
+  const done = typeof opts.onDone === 'function' ? opts.onDone : () => window.location.reload();
+
+  const values = await promptFields({
+    title: 'Book title & subtitle',
+    body: 'Both print on the cover. Clear the title and the book goes back to being called by its year; clear the subtitle and the cover carries the title alone.',
+    fields: [
+      { name: 'title', label: 'Title', value: opts.title ?? '', placeholder: 'e.g. Iceland' },
+      { name: 'subtitle', label: 'Subtitle', value: opts.subtitle ?? '', placeholder: 'optional' },
+    ],
+    confirmLabel: 'Save',
+  });
+  if (values === null) { return; }
+
+  try {
+    await apiPost('api/year-projects-update.php', {
+      id,
+      title: values.title,
+      subtitle: values.subtitle,
+    });
+    done();
+  } catch (err) {
+    showSnackbar(describe(err), { isError: true });
+  }
 }
 
 /**
