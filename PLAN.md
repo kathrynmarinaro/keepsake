@@ -1986,3 +1986,48 @@ than flexbox, for the same reason the PDF needs a cell: `align-items: center`
 centres the two columns independently, so a long text sits above the photo's
 top edge instead of on it. A row with `vertical-align: top` on the hero and
 `vertical-align: middle` on the text is the one construction that does both.
+
+### Round 9, later still: the picker, and centring that costs something
+
+Two things from real use.
+
+**The photo picker's cells were drawing on top of each other.** Two independent
+causes, both there since the picker was written:
+
+`.sheet-panel button` dresses every button in a sheet as a full-width tappable
+option row — `display:flex`, `min-height`, padding, border — and *a class plus
+an element outranks a bare class*, so the `.photopicker-item` rules written to
+undo all that had never applied. Not once. Scoping them to
+`.sheet-panel .photopicker-item` is the whole fix for that half.
+
+The other half is that the cell had no height the grid could see. `aspect-ratio`
+on the button is resolved against its width, which the row sizer does not
+consult, so rows came out short and items drew over them. `aspect-ratio` on the
+image with `height:auto` made the row depend on when the image decoded — it
+measured differently between two runs of the same page. A stated pixel height on
+the image is the one thing the grid, the browser and the next reader all agree
+about. The grid also gets `align-content: start`, because once enough photos
+push it against its `max-height` the default alignment sizes auto rows to FILL
+that height: five rows of 101px holding items 142px tall.
+
+Four columns and `object-fit: contain` rather than three and `cover` — "I'm okay
+with a smaller image (4 across) but I need to see the whole photo."
+
+**Quotes and anecdotes are now centred in their boxes both ways**, which
+**retires the hanging quotation mark** built two rounds ago. That is a real
+cost and it was not a free choice: the mark hung outside the words so that every
+line and the attribution shared one straight left edge, and centred lines have
+no straight left edge for it to hang off. The options were centred text without
+the hanging mark, or the mark with the text left-aligned inside a centred block
+— which for a full-width anecdote is no visible change at all, and so would not
+have been the thing that was asked for. Centring won; the mark is inline again;
+the two-cell table and the CSS grid that held it out are deleted rather than
+left doing something arbitrary. Both places say what to put back if it is ever
+reverted.
+
+The test block that asserted the hanging behaviour is replaced, not loosened.
+Centring is hard to assert from a PDF because a text operator gives where a line
+STARTS and not how wide it is, so it is measured differentially: set the same
+page twice, once with a long quote and once with a short one, and the short one
+must start further right. Left-aligned, the two are identical to the hundredth
+of a point.

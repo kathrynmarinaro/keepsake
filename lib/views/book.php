@@ -207,13 +207,13 @@ function render_text_slot(array $slot, bool $standalone, string $flexStyle = '')
              say what it was. */ ?>
     <div class="ks-slot ks-slot-text<?= $standalone ? ' is-standalone' : '' ?><?= $isQuote ? ' is-quote' : '' ?>" style="<?= h($flexStyle) ?>">
       <?php if ($isQuote): ?>
-        <?php /* The opening mark is its own grid cell so it hangs and the words
-                 keep one straight left edge — the CSS mirror of the two-cell
-                 table pdf_render_text_block_html() prints. The closing mark
-                 stays with the last word, where it would be inline. */ ?>
+        <?php /* Both marks inline, and the whole thing centred — the mirror of
+                 pdf_render_text_block_html(). The opening mark used to hang in
+                 its own grid cell so the lines kept one straight left edge;
+                 centred lines have no straight edge for it to hang off, so it
+                 came back inline when the centring was asked for. */ ?>
         <div class="ks-quote-body">
-          <span class="ks-quote-mark">&ldquo;</span>
-          <p class="ks-quote-lines"><?= h(page_snippet((string) $slot['quote_text'], $standalone ? 400 : 90)) ?>&rdquo;</p>
+          <p class="ks-quote-lines">&ldquo;<?= h(page_snippet((string) $slot['quote_text'], $standalone ? 400 : 90)) ?>&rdquo;</p>
           <span class="hint ks-quote-meta"><?= h((string) $slot['who_said_it']) ?> · <?= h(page_fmt_date((string) $slot['quote_date'])) ?></span>
         </div>
       <?php else: ?>

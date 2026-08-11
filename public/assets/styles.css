@@ -1911,34 +1911,23 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   justify-content: center;
   overflow: auto;
 }
-/* A QUOTE'S HANGING QUOTATION MARK, and the block it hangs off.
+/* A QUOTE OR ANECDOTE, CENTRED IN ITS SLOT BOTH WAYS — "I'd like the anecdote
+ * and quote centered in their boxes, vertically and horizontally." Vertically
+ * is justify-content on .ks-slot-text's flex column above; horizontally is
+ * text-align here. The mirror of pdf_render_text_block_html().
  *
- * The mark sits outside the text's left edge so every line — including the
- * first, and including the attribution under them — shares one straight edge.
- *
- * A GRID, NOT A NEGATIVE text-indent. The indent version was the first attempt
- * and it is a guess at how wide the mark is: the first word landed somewhere
- * other than where the second line started. A grid column sized to the mark's
- * own content is exactly its width, whatever the font decides. The PDF does the
- * same thing with a two-cell table, which is the closest mPDF equivalent —
- * pdf_render_text_block_html().
- *
- * The whole block is CENTRED in its slot, with the words still left-aligned
- * inside it: "quotes and anecdotes should be centered in their slot (that
- * being within a layout or a whole page)". Centring the text itself would undo
- * the hanging mark, which only means anything against a straight edge. */
+ * THE HANGING QUOTATION MARK USED TO LIVE HERE and is deliberately gone. It sat
+ * in its own grid column, outside the words, so that every line and the
+ * attribution shared one straight left edge — a grid column rather than a
+ * negative text-indent, because an indent is a guess at the glyph's width and
+ * the first word landed somewhere other than the second line. Centred lines
+ * have no straight left edge to hang off, so the mark is inline now and the
+ * grid that held it out is removed rather than left doing something arbitrary.
+ * If the centring is ever reverted, this is what to put back. */
 .ks-slot-text {
   align-items: center;
-  text-align: left;
+  text-align: center;
 }
-.ks-slot-text.is-quote .ks-quote-body {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 0;
-}
-.ks-slot-text.is-quote .ks-quote-mark { grid-row: 1; }
-.ks-slot-text.is-quote .ks-quote-lines { grid-column: 2; }
-.ks-slot-text.is-quote .ks-quote-meta { grid-column: 2; }
 .ks-slot-text .ks-quote-meta { margin-top: 6px; }
 
 .ks-slot-photo { cursor: grab; display: block; }

@@ -680,16 +680,49 @@ if (count($lines) === 6) {
         $headingToBody < 6.0, sprintf('%.2fmm', $headingToBody));
 }
 
-/* ============================================== hanging quotation marks === */
+/* ================================= quotes and anecdotes, centred both ways = */
 
-echo "\nQuote pages — the mark hangs, the words line up...\n";
+echo "\nQuote pages — centred across and down...\n";
 
-/* WHY THIS IS MEASURED AND NOT EYEBALLED. The first version hung the mark with
- * a negative text-indent, which is a GUESS at how wide a quote mark is: the
- * first word landed somewhere other than where the second line started, and
- * Kathryn spotted it in the page lab. A table cell IS the mark's width, and the
- * only way to know it worked is to read the text positions back out of a real
- * PDF — which is what this does. */
+/* WHAT REPLACED WHAT. This block used to assert the opposite: that the opening
+ * quotation mark hung out to the left and that every line and the attribution
+ * shared one straight left edge. "I'd like the anecdote and quote centered in
+ * their boxes, vertically and horizontally" retires that — centred lines have
+ * no straight left edge, so the mark went back inline. The old assertions are
+ * gone rather than loosened; a test that still passes after the thing it
+ * described was removed is worse than no test.
+ *
+ * HOW CENTRING IS MEASURED WITHOUT LINE WIDTHS. A PDF text operator gives the
+ * position a line STARTS at, not how wide it is, so "is this line centred"
+ * cannot be asked directly. It can be asked differentially: set the same page
+ * twice, once with a long quote and once with a short one. Centred, the short
+ * one starts further right, because the leftover space is split around it.
+ * Left-aligned, both start at exactly the same x. That difference is the whole
+ * test, and it needs no font metrics. */
+
+function quote_runs(array $slot, array $geo): array
+{
+    @mkdir('/tmp/keepsake-geometry-mpdf', 0777, true);
+    $qm = new \Mpdf\Mpdf(array(
+        'format'       => array($geo['page_width_mm'], $geo['page_height_mm']),
+        'margin_left'  => $geo['content_margin_mm'], 'margin_right'  => $geo['content_margin_mm'],
+        'margin_top'   => $geo['content_margin_mm'], 'margin_bottom' => $geo['content_margin_mm'],
+        'tempDir'      => '/tmp/keepsake-geometry-mpdf',
+    ));
+    $qm->AddPage();
+    $qm->WriteHTML(pdf_wrap_page(pdf_render_page_html(array(
+        'page_type' => 'text',
+        'slots'     => array($slot),
+    )), false));
+
+    $runs = array();
+    foreach (explode("\n", (string) gzuncompress_all($qm->Output('', 'S'))) as $line) {
+        if (preg_match('/BT\s+([\d.]+)\s+([\d.]+)\s+Td\s+\((.*)\)\s*Tj/', $line, $m) === 1) {
+            $runs[] = array('x' => (float) $m[1], 'y' => (float) $m[2], 'raw' => $m[3]);
+        }
+    }
+    return $runs;
+}
 
 $quoteSlot = array(
     'quote_id' => 1, 'anecdote_id' => null,
@@ -699,64 +732,50 @@ $quoteSlot = array(
     'who_said_it' => 'Emma',
 );
 
-@mkdir('/tmp/keepsake-geometry-mpdf', 0777, true);
-$qm = new \Mpdf\Mpdf(array(
-    'format'       => array($geo['page_width_mm'], $geo['page_height_mm']),
-    'margin_left'  => $geo['content_margin_mm'], 'margin_right'  => $geo['content_margin_mm'],
-    'margin_top'   => $geo['content_margin_mm'], 'margin_bottom' => $geo['content_margin_mm'],
-    'tempDir'      => '/tmp/keepsake-geometry-mpdf',
-));
-$qm->AddPage();
-$qm->WriteHTML(pdf_wrap_page(pdf_render_page_html(array(
-    'page_type' => 'text',
-    'slots'     => array($quoteSlot),
-)), false));
-$quotePdf = $qm->Output('', 'S');
+$shortSlot = $quoteSlot;
+$shortSlot['quote_text'] = 'Poop poop is for dinner!';
 
-/* Every text-showing operation, as (x, y, text). */
-$runs = array();
-foreach (explode("\n", (string) gzuncompress_all($quotePdf)) as $line) {
-    if (preg_match('/BT\s+([\d.]+)\s+([\d.]+)\s+Td\s+\((.*)\)\s*Tj/', $line, $m) === 1) {
-        $runs[] = array('x' => (float) $m[1], 'y' => (float) $m[2], 'raw' => $m[3]);
-    }
-}
+$runs      = quote_runs($quoteSlot, $geo);
+$shortRuns = quote_runs($shortSlot, $geo);
 
 $checks++;
 check('the quote page produced text', count($runs) >= 3, count($runs) . ' runs');
+check('...and so did the short one', count($shortRuns) >= 2, count($shortRuns) . ' runs');
 
-if (count($runs) >= 3) {
-    /* The mark is its own run, at the smallest x. Everything else — every
-       wrapped line AND the attribution — must share one larger x. */
+if (count($runs) >= 3 && count($shortRuns) >= 2) {
+    $leftOf = static function (array $rs): float {
+        return min(array_map(static fn(array $r): float => $r['x'], $rs));
+    };
+
+    /* THE CENTRING ITSELF. A short quote must start further right than a long
+       one; left-aligned, the two would be identical to the hundredth of a
+       point. */
+    check('a short quote starts further right than a long one — it is centred',
+        $leftOf($shortRuns) > $leftOf($runs) + 5.0,
+        sprintf('short starts at %.2f, long at %.2f', $leftOf($shortRuns), $leftOf($runs)));
+
+    /* The wrapped lines of one paragraph no longer share a left edge, which is
+       the visible consequence of centring and the exact inverse of what this
+       file asserted before. */
     $xs = array_map(static fn(array $r): float => $r['x'], $runs);
-    sort($xs);
+    check('...and its own lines no longer share one left edge',
+        (max($xs) - min($xs)) > 1.0,
+        sprintf('spread %.2fpt', max($xs) - min($xs)));
 
-    $markX = $xs[0];
-    $rest  = array_slice($xs, 1);
-
-    check('the mark hangs left of everything else', $markX < $rest[0] - 0.5,
-        sprintf('mark at %.2f, next at %.2f', $markX, $rest[0]));
-
-    check(
-        'every other line shares one left edge',
-        abs(max($rest) - min($rest)) < 0.5,
-        sprintf('spread %.3fpt between %.2f and %.2f', max($rest) - min($rest), min($rest), max($rest))
-    );
-
-    /* The attribution is the LAST run down the page, and it has to be on that
-       same edge — "the person and date should be left aligned with the words,
-       not the quotation mark". */
+    /* The attribution is centred too, not parked on the left edge under the
+       words. It is the last run down the page. */
     usort($runs, static fn(array $a, array $b): int => $b['y'] <=> $a['y']);
     $meta = end($runs);
-    check('the attribution sits on the words\' edge, not the mark\'s',
-        abs($meta['x'] - min($rest)) < 0.5,
-        sprintf('meta at %.2f, words at %.2f', $meta['x'], min($rest)));
+    check('the attribution is centred under the words, not left-aligned',
+        $meta['x'] > min($xs) + 5.0,
+        sprintf('meta at %.2f, leftmost line at %.2f', $meta['x'], min($xs)));
 
-    /* Centred in the page rather than pushed down it by a percentage: the
-       block's midpoint should be near the middle of the content box. */
+    /* Vertical centring, unchanged: the block's midpoint sits near the middle
+       of the content box rather than being pushed down it by a percentage. */
     $ys       = array_map(static fn(array $r): float => $r['y'], $runs);
     $midPt    = (max($ys) + min($ys)) / 2.0;
     $pageHPt  = $geo['page_height_mm'] * 72.0 / 25.4;
-    check('the block is centred down the page, not top-anchored',
+    check('and the block is still centred down the page',
         abs($midPt - $pageHPt / 2.0) < $pageHPt * 0.12,
         sprintf('mid %.1fpt of %.1fpt', $midPt, $pageHPt));
 }

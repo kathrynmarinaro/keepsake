@@ -621,41 +621,44 @@ function pdf_render_text_block_html(array $slot, float $textPt, float $metaPt): 
 
     $meta = $who !== '' ? pdf_esc($who) . ' &middot; ' . pdf_esc($date) : pdf_esc($date);
 
-    /* The OPENING mark lives in its own table cell below so it can hang; the
-       closing one belongs with the last word, which is where it would be if
-       both were inline. */
-    $body = '<div style="font-size:' . $textPt . 'pt;font-style:italic;line-height:1.4;">'
-        . nl2br(pdf_esc($text)) . ($isQuote ? '&rdquo;' : '')
-        . '</div>'
-        . '<div style="font-size:' . $metaPt . 'pt;color:#666;margin-top:3mm;">' . $meta . '</div>';
+    /* CENTRED, EVERY LINE — "I'd like the anecdote and quote centered in their
+     * boxes, vertically and horizontally."
+     *
+     * THIS REPLACES THE HANGING QUOTATION MARK, and that was not a decision
+     * taken lightly. The mark used to sit in its own table cell, outside the
+     * words, so that every line and the attribution shared one straight left
+     * edge — which is the whole point of hanging it. Centred lines have no
+     * straight left edge to hang off: whatever the mark did there would be
+     * measured against a different starting point on every line. So the mark
+     * goes back inline, where it belongs in a centred setting, and the
+     * construction that held it out is gone rather than left doing something
+     * arbitrary.
+     *
+     * The two spacing rules that made the old version work are kept for the
+     * same reason they existed: mPDF drops margins inside a fixed-position
+     * block, so the gap above the attribution is cell padding, not a margin. */
+    $body = '<table style="width:100%;border-spacing:0;border-collapse:collapse;">'
+        . '<tr><td style="padding:0 0 3mm 0;text-align:center;'
+        . 'font-size:' . $textPt . 'pt;font-style:italic;line-height:1.4;">'
+        . ($isQuote ? '&ldquo;' : '') . nl2br(pdf_esc($text)) . ($isQuote ? '&rdquo;' : '')
+        . '</td></tr>'
+        . '<tr><td style="padding:0;text-align:center;'
+        . 'font-size:' . $metaPt . 'pt;color:#666;">' . $meta . '</td></tr>'
+        . '</table>';
 
-    if (!$isQuote) {
-        return $body;
-    }
-
-    /* The opening mark in its own cell, so it hangs and the text column stays
-     * straight. white-space:nowrap and no padding keep the cell exactly as wide
-     * as the glyph. */
-    return '<table style="width:auto;"><tr>'
-        . '<td style="vertical-align:top;padding:0;white-space:nowrap;'
-        . 'font-size:' . $textPt . 'pt;font-style:italic;line-height:1.4;">&ldquo;</td>'
-        . '<td style="vertical-align:top;padding:0;">' . $body . '</td>'
-        . '</tr></table>';
+    return $body;
 }
 
 /**
  * A quote or anecdote, CENTRED IN WHATEVER IT SITS IN — a slot on a photo page
- * or a page of its own. "Quotes and anecdotes should be centered in their slot
- * (that being within a layout or a whole page)."
+ * or a page of its own, both ways. "I'd like the anecdote and quote centered in
+ * their boxes, vertically and horizontally."
  *
- * Centred as a BLOCK, with the words still left-aligned inside it: the hanging
- * mark only means anything against a straight left edge, so centring the text
- * itself would undo the two changes above.
- *
- * The full-height table with a vertical-align:middle cell is how vertical
- * centring is done in mPDF — it has no flexbox and honours vertical-align only
- * inside a table cell whose height is stated. Checked against a real PDF's
- * positioning operators rather than assumed.
+ * Horizontally is pdf_render_text_block_html()'s text-align above. Vertically
+ * is the full-height table with a vertical-align:middle cell, which is how it
+ * is done in mPDF — it has no flexbox and honours vertical-align only inside a
+ * table cell whose height is stated. Checked against a real PDF's positioning
+ * operators rather than assumed.
  */
 function pdf_render_text_card_html(array $slot, bool $standalone = false, ?float $heightMm = null): string
 {

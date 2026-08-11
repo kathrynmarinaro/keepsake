@@ -230,7 +230,7 @@ function lab_text_page(bool $isQuote, string $text, string $who, string $date): 
 
 
 $quoteCases = array(
-    'Short — the case hanging marks are most visible on' => lab_text_page(
+    'Short — the case centring is most visible on' => lab_text_page(
         true, 'Poop poop is for dinner!', 'Emma', '2025-11-11'
     ),
     'Two lines' => lab_text_page(
@@ -249,7 +249,7 @@ $quoteCases = array(
 );
 
 $anecdoteCases = array(
-    'Unchanged, for comparison' => lab_text_page(
+    'Short' => lab_text_page(
         false,
         'We ate dinner and Emma was laughing so hard that milk sprayed out of her nose.',
         '', '2025-07-11'
@@ -351,7 +351,7 @@ foreach ($quoteCases as $label => $page) {
 }
 $sections[] = array(
     'Quote pages',
-    'Hanging quotation marks: the opening mark sits outside the text block so the words line up. Look at the left edge of the first line against the ones under it.',
+    'Centred in the box, across and down. A short quote sits in the middle of the page rather than against the left of its column; a long one still fills the measure. The opening quotation mark used to hang outside the text block so the lines kept one straight left edge — centred lines have no straight left edge, so it is inline now.',
     $html
 );
 
@@ -361,7 +361,7 @@ foreach ($anecdoteCases as $label => $page) {
 }
 $sections[] = array(
     'Anecdote pages',
-    'Deliberately unchanged this round — centred, 20pt, no quotation marks. Here so the quote treatment can be compared against something.',
+    'The same treatment as a quote now — centred in the box across and down, 20pt — minus the quotation marks, which an anecdote never had. It was left alone for a round on purpose ("I don\'t know how much I\'ll use anecdotes anyway"); the centring applies to both because both were asked for by name.',
     $html
 );
 
