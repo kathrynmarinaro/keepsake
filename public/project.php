@@ -72,16 +72,9 @@ if ($project === null) {
 $projectId   = (int) $project['id'];
 $projectName = year_project_title($project);
 
-/* The header's second line. A book that was renamed shows the year it covers,
-   since its name no longer says it; otherwise the subtitle, which is the thing
-   that will print under the title on the cover. */
-$named = trim((string) ($project['title'] ?? '')) !== '';
-$sub   = '';
-if ($named && $project['year'] !== null) {
-    $sub = (string) $project['year'];
-} elseif ($project['subtitle']) {
-    $sub = (string) $project['subtitle'];
-}
+/* The header's second line — project_sub_line() in lib/page.php, shared with
+   the card on the projects list so the two cannot disagree. */
+$sub = project_sub_line($project);
 
 page_head(array(
     'title'      => $projectName,

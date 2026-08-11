@@ -245,6 +245,33 @@ function year_project_get_by_year(int $year): ?array
 function year_project_update_title(int $id, ?string $title): void
 {
     $title = ($title === null || trim($title) === '') ? null : trim($title);
+
+    /* A TITLE THAT IS JUST THE YEAR IS STORED AS NULL.
+     *
+     * schema.sql's own comment on this column says why NULL rather than a copy
+     * of the year: "a row whose title happens to read 2025 cannot then be told
+     * apart from one she typed 2025 into on purpose". Writing "2025" into the
+     * title of the 2025 book creates exactly that ambiguity — and it is not
+     * hypothetical. A rename dialog that pre-filled itself from the DISPLAYED
+     * name (the year, for an unnamed book) saved it back the first time the
+     * subtitle beside it was edited, and the book then had a real title that
+     * happened to equal its year. The visible symptom was a header reading
+     * "2025" over "2025".
+     *
+     * The pre-fill is fixed, but normalizing here is what makes it unreachable
+     * — including from any path added later that has not read this comment —
+     * and it quietly repairs a row already in that state the next time it is
+     * saved. There is no information lost: NULL and "2025" render identically
+     * through year_project_title(), and NULL additionally follows the year if
+     * it is ever corrected, which is the behaviour the column was designed for.
+     */
+    if ($title !== null) {
+        $project = year_project_get($id);
+        if ($project !== null && $project['year'] !== null && $title === (string) $project['year']) {
+            $title = null;
+        }
+    }
+
     q('UPDATE year_projects SET title = ? WHERE id = ?', array($title, $id));
 }
 

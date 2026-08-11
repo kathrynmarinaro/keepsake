@@ -371,5 +371,59 @@ check(
 check('an empty list is refused', book_pages_reorder($reorderLayout, array()) === false);
 check('none of the refusals moved anything', page_order($reorderLayout) === $before);
 
+/* ------------------------------------------- 8. the header's second line */
+
+echo "\nproject_sub_line() / a title that is just the year...\n";
+
+require_once __DIR__ . '/../lib/page.php';
+
+/* THE BUG THIS PINS DOWN. The header showed "2025" over "2025" and the real
+ * subtitle was nowhere. Two causes, both fixed here:
+ *
+ *   1. The rule put the YEAR on the second line whenever a book had a name,
+ *      which is nonsense when the name IS the year.
+ *   2. The book had a stored title of "2025" at all — saved by a rename dialog
+ *      that pre-filled itself from the DISPLAYED name.
+ */
+$dupe = year_project_create(2019);
+q(
+    'UPDATE year_projects SET title = ?, subtitle = ? WHERE id = ?',
+    array('2019', 'Emma & Kathryn', $dupe)
+);
+$row = year_project_get($dupe);
+
+check('the heading is still the year', year_project_title($row) === '2019');
+check(
+    'the second line is the subtitle, not the year again',
+    project_sub_line($row) === 'Emma & Kathryn'
+);
+check('the second line never repeats the heading', project_sub_line($row) !== year_project_title($row));
+
+/* And saving through the normal path repairs the stored value, so a row
+   already in this state heals itself rather than needing a hand-written
+   UPDATE. */
+year_project_update_title($dupe, '2019');
+check(
+    'a title equal to the year is stored as NULL',
+    year_project_get($dupe)['title'] === null
+);
+check(
+    'and the book still shows the same name afterwards',
+    year_project_title(year_project_get($dupe)) === '2019'
+);
+
+/* A real name is untouched by that normalization. */
+$named = year_project_create(2018, 'The Long Summer');
+check('a real title is stored as typed', year_project_get($named)['title'] === 'The Long Summer');
+check(
+    'a named book with no subtitle falls back to its year',
+    project_sub_line(year_project_get($named)) === '2018'
+);
+
+/* A yearless book with neither has nothing to put there, and must not invent
+   something — an empty string is a line that does not render. */
+$bare = year_project_create(null, 'Just a name');
+check('a yearless book with no subtitle has no second line', project_sub_line(year_project_get($bare)) === '');
+
 echo "\n" . ($failures === 0 ? "All checks passed.\n" : $failures . " CHECK(S) FAILED.\n");
 exit($failures === 0 ? 0 : 1);

@@ -469,7 +469,9 @@ function render_page(array $page, ?array $choice): string
            handling is more robust than reimplementing it, and GET needs no
            CSRF header (require_same_origin() is a no-op for GET). No cover
            photo picked does not block it — the export fails soft on that. */ ?>
-  <div class="card book-actions" data-role="generate-bar" data-year-project="<?= (int) $project['id'] ?>">
+  <div class="card" data-role="generate-bar" data-year-project="<?= (int) $project['id'] ?>">
+    <span class="box-label">Actions</span>
+    <div class="book-actions">
     <button class="btn-primary" type="button" data-act="generate">
       <?= $layouts === array() ? 'Create layout' : 'Create new layout' ?>
     </button>
@@ -479,6 +481,7 @@ function render_page(array $page, ?array $choice): string
       <button class="btn-secondary" type="button" disabled
               title="Generate a layout first">Export PDF</button>
     <?php endif; ?>
+    </div>
   </div>
 
   <?php if ($layouts === array()): ?>
@@ -507,7 +510,7 @@ function render_page(array $page, ?array $choice): string
         <input type="hidden" name="id" value="<?= $projectId ?>">
         <input type="hidden" name="tab" value="book">
         <label class="field version-select">
-          <span>Version</span>
+          <span>Layout Versions</span>
           <select name="layout" data-role="version-select">
             <?php foreach ($layouts as $layout):
                 $id       = (int) $layout['id'];

@@ -84,17 +84,12 @@ page_screen_head(array(
           $title   = year_project_title($project);
           $status  = dashboard_status($id);
 
-          /* The quiet second line. A book that was renamed shows the year it
-             covers, since the name no longer says it; a book that still goes
-             by its year shows the subtitle instead, if there is one. Never
-             both — the card is a glance, not a record. */
-          $named = trim((string) ($project['title'] ?? '')) !== '';
-          $sub   = '';
-          if ($named && $year !== null) {
-              $sub = (string) $year;
-          } elseif ($project['subtitle']) {
-              $sub = (string) $project['subtitle'];
-          } elseif ($year !== null && $year === (int) date('Y')) {
+          /* The quiet second line — project_sub_line() in lib/page.php, shared
+             with the project screen's own header. Falls back to "Current year"
+             only when there is genuinely nothing else to say, which on this
+             screen is worth more than a blank line. */
+          $sub = project_sub_line($project);
+          if ($sub === '' && $year !== null && $year === (int) date('Y')) {
               $sub = 'Current year';
           }
       ?>

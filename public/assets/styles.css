@@ -1971,16 +1971,33 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
 /* Create and Export, side by side. Both are full-width buttons by default
    (.btn-primary is width:100%), which is what makes them share the row evenly
    without either needing a width of its own. */
-/* The gap above is doing work .accordion cannot do for itself: .accordion has
-   a top margin and no bottom one, so the Title & cover box sat directly on
-   this row and the two read as one control. A margin here rather than a
-   bottom margin on .accordion, because .accordion is the shared component and
-   the capture screen stacks four of them deliberately touching. */
+/* A box's own heading — "Actions", "Layout Versions". Set like a .field's
+   label rather than like an h2, because that is what it sits beside: these are
+   boxes of controls, and the version picker's label was already reading as the
+   heading of its box. One class so the two agree.
+
+   Not an <h2>: .cat-head is the section heading for a run of content, and
+   dropping one inside a card would put a second, competing level of hierarchy
+   inside something that is already one item in a list of boxes. */
+.box-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+  font-weight: 400;
+  color: var(--heading);
+}
+
+/* The margin is doing work .accordion cannot do for itself: .accordion has a
+   top margin and no bottom one, so the Title & cover box sat directly on this
+   one and the two read as one control. It lives on the CARD rather than on
+   .accordion, because .accordion is the shared component and the capture
+   screen stacks four of them deliberately touching. */
+[data-role="generate-bar"] { margin-top: 18px; }
+
 .book-actions {
   display: flex;
   gap: 10px;
   align-items: center;
-  margin-top: 18px;
 }
 .book-actions > * { flex: 1; }
 

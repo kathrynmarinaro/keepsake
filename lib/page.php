@@ -65,6 +65,41 @@ function project_url(int $id, string $tab = 'content', array $params = array(), 
 }
 
 /**
+ * The quieter second line under a book's name — on its own screen's header and
+ * on its card in the list, which is why this lives here rather than in either.
+ *
+ * THE SUBTITLE WINS. It used to be the other way round: a book with a name of
+ * its own showed the YEAR underneath, on the reasoning that the name no longer
+ * said which year it covered. That reasoning breaks the moment the name IS the
+ * year — the header then reads "2025" over "2025", the real subtitle is
+ * nowhere, and it looks like a rendering bug because it is one.
+ *
+ * The subtitle is also the line that actually prints under the title on the
+ * cover, so showing it is showing the book. The year is a fallback for the
+ * case where it genuinely adds something: a book called "Iceland" that covers
+ * 2026 and has no subtitle yet.
+ *
+ * Never returns something equal to the heading it sits under. That is the
+ * invariant the old rule broke, and it is cheaper to state once here than to
+ * re-derive at both call sites.
+ */
+function project_sub_line(array $project): string
+{
+    $heading  = year_project_title($project);
+    $subtitle = trim((string) ($project['subtitle'] ?? ''));
+
+    if ($subtitle !== '' && $subtitle !== $heading) {
+        return $subtitle;
+    }
+
+    if ($project['year'] !== null && (string) $project['year'] !== $heading) {
+        return (string) $project['year'];
+    }
+
+    return '';
+}
+
+/**
  * Open the document: doctype, head, <body>, <main class="wrap">.
  *
  * Everything after this call is page content until page_foot().
