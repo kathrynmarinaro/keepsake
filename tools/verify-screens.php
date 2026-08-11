@@ -169,8 +169,13 @@ $tripId  = year_project_create(null, 'Iceland');
 $emptyId = year_project_create(null, 'Nothing in here');
 
 foreach (array($yearId, $tripId) as $pid) {
+    /* LONG ENOUGH TO HAVE BEEN TRUNCATED. The Book tab used to cut a slot's
+       quote at 90 characters while the PDF printed all of it, so the preview
+       showed a page that would never be printed. 120 characters, and still
+       under config's layout.text_page_chars, so it stays in a shared slot
+       rather than being promoted to a page of its own. */
     quote_create(array(
-        'quote_text'      => 'Look at the size of that puffin.',
+        'quote_text'      => 'Look at the size of that puffin, it is the biggest puffin anyone has ever seen and I would like to take it home now.',
         'who_said_it'     => 'Emma',
         'entry_date'      => '2025-06-01',
         'year_project_id' => $pid,
@@ -237,6 +242,19 @@ $snapForPage = q(
 )->fetchColumn();
 if ($snapForPage) {
     book_page_create($layoutId, 2, 'snapshot', (int) $snapForPage);
+}
+
+/* A TEXT PAGE CARRYING THE QUOTE, so the Book tab renders a text slot at all.
+   Without one, everything below about how a quote is drawn was checking HTML
+   that the fixture never produced — which is how a preview that cut its quotes
+   at 90 characters stayed green. */
+$quoteForPage = q(
+    'SELECT id FROM quotes WHERE year_project_id = ? ORDER BY id LIMIT 1',
+    array($yearId)
+)->fetchColumn();
+if ($quoteForPage) {
+    $textPageId = book_page_create($layoutId, 3, 'text');
+    book_page_slot_create($textPageId, 1, array('quote_id' => (int) $quoteForPage));
 }
 
 year_project_set_active_layout($yearId, $layoutId);
@@ -469,6 +487,15 @@ echo "\nPrinted pages...\n";
 $book = render_in_child('book', 'year', array('tab' => 'book'));
 
 check('the book tab renders', $book['fatal'] === null, (string) $book['fatal']);
+/* THE PREVIEW SHOWS THE WHOLE QUOTE. It used to cut a slot's quote at 90
+   characters and add an ellipsis, while the PDF printed all of it — so the one
+   screen whose job is judging what will print was showing a page that never
+   would. Reported as "the quote is getting cut off". */
+check('a slot quote is not truncated in the preview',
+    str_contains($book['html'], 'I would like to take it home now'));
+check('...and carries no ellipsis of its own',
+    !str_contains($book['html'], 'home now&hellip;') && !str_contains($book['html'], 'puffin, it is the biggest puffin anyone has ever seen and I would like…'));
+
 check('a snapshot page draws its title', str_contains($book['html'], "Emma&#039;s 8th Birthday"));
 check('and its section headings', str_contains($book['html'], 'ks-section-heading'));
 check('and its section bodies', str_contains($book['html'], 'Cake was chocolate.'));

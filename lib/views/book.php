@@ -57,11 +57,28 @@ $coverPhoto = ($project['cover_photo_id'] !== null)
     ? photo_get((int) $project['cover_photo_id'])
     : null;
 
-/** First ~90 characters of a run of text, for a slot's card. */
-function page_snippet(string $text, int $len = 90): string
+/**
+ * A run of text with its whitespace collapsed, optionally cut short.
+ *
+ * $len = null MEANS DO NOT CUT, and that is what every text slot passes.
+ * This used to cut a quote at 90 characters — "There was a cucumber that grew
+ * really big and had a face and then it grew into a jack-in-…" — while the PDF
+ * printed the whole thing, because the exporter's own cap is 4000 characters
+ * and exists only to stop a pathological paste. So the preview was not a
+ * preview: it showed a page that will never be printed, and the one thing this
+ * screen is for is judging what will be.
+ *
+ * The slot cannot overflow from this. Anything longer than
+ * config's layout.text_page_chars is given a page of its own by the layout
+ * engine long before it reaches a shared slot, and .ks-slot-text scrolls.
+ */
+function page_snippet(string $text, ?int $len = 90): string
 {
     $text = trim(preg_replace('/\s+/', ' ', $text) ?? $text);
-    return mb_strlen($text) > $len ? mb_substr($text, 0, $len - 1) . '…' : $text;
+    if ($len === null || mb_strlen($text) <= $len) {
+        return $text;
+    }
+    return mb_substr($text, 0, $len - 1) . '…';
 }
 
 function page_fmt_date(string $ymd): string
@@ -213,11 +230,11 @@ function render_text_slot(array $slot, bool $standalone, string $flexStyle = '')
                  centred lines have no straight edge for it to hang off, so it
                  came back inline when the centring was asked for. */ ?>
         <div class="ks-quote-body">
-          <p class="ks-quote-lines">&ldquo;<?= h(page_snippet((string) $slot['quote_text'], $standalone ? 400 : 90)) ?>&rdquo;</p>
+          <p class="ks-quote-lines">&ldquo;<?= h(page_snippet((string) $slot['quote_text'], null)) ?>&rdquo;</p>
           <span class="hint ks-quote-meta"><?= h((string) $slot['who_said_it']) ?> · <?= h(page_fmt_date((string) $slot['quote_date'])) ?></span>
         </div>
       <?php else: ?>
-        <p><?= h(page_snippet((string) $slot['anecdote_text'], $standalone ? 400 : 90)) ?></p>
+        <p><?= h(page_snippet((string) $slot['anecdote_text'], null)) ?></p>
         <span class="hint ks-quote-meta"><?= h(page_fmt_date((string) $slot['anecdote_date'])) ?></span>
       <?php endif; ?>
     </div>

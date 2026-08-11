@@ -680,6 +680,38 @@ if (count($lines) === 6) {
         $headingToBody < 6.0, sprintf('%.2fmm', $headingToBody));
 }
 
+$quoteSlotForTint = array(
+    'quote_id' => 1, 'anecdote_id' => null,
+    'quote_text' => 'Short enough to sit in a slot.',
+    'anecdote_text' => null,
+    'quote_date' => '2025-09-14', 'anecdote_date' => null,
+    'who_said_it' => 'Emma',
+);
+
+/* THE TINT IS THE SAME COLOUR IN BOTH PLACES. mPDF cannot read a CSS custom
+   property, so --teal-tint is written out as a literal in lib/pdfexport.php.
+   Two copies of one colour drift silently, and the failure mode is a printed
+   book subtly the wrong shade against the preview it was approved in — not
+   something anyone catches until it arrives. So the stylesheet is the source
+   and this reads it. */
+$cssPath = dirname(__DIR__) . '/public/assets/styles.css';
+$css     = (string) @file_get_contents($cssPath);
+if (preg_match('/--teal-tint:\s*(#[0-9a-fA-F]{3,8})\s*;/', $css, $tintMatch) === 1) {
+    check('the printed tint matches --teal-tint in the stylesheet',
+        strtolower($tintMatch[1]) === strtolower(PDF_TEXT_CARD_TINT),
+        sprintf('css %s, pdf %s', $tintMatch[1], PDF_TEXT_CARD_TINT));
+} else {
+    check('--teal-tint is still findable in the stylesheet', false, 'not matched in ' . $cssPath);
+}
+
+/* And it is actually painted behind a slot card, not just defined. */
+$tintedCard = pdf_render_text_card_html($quoteSlotForTint, false, 60.0);
+check('a slot card prints the tint behind it',
+    str_contains(strtolower($tintedCard), 'background-color:' . strtolower(PDF_TEXT_CARD_TINT)));
+check('...and a standalone page does not — it would be a field of colour',
+    !str_contains(strtolower(pdf_render_text_card_html($quoteSlotForTint, true, 60.0)),
+        'background-color:' . strtolower(PDF_TEXT_CARD_TINT)));
+
 /* ================================= quotes and anecdotes, centred both ways = */
 
 echo "\nQuote pages — centred across and down...\n";

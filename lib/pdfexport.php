@@ -153,6 +153,18 @@ function pdf_require_library(): void
 /** See this file's header. Generous on purpose — never hit by real content. */
 const PDF_EXPORT_MAX_TEXT_CHARS = 4000;
 
+/**
+ * The tint behind a quote or anecdote sharing a page with photographs.
+ *
+ * This is `--teal-tint` from public/assets/styles.css, written out as a
+ * literal because mPDF cannot read a CSS custom property. That makes it the
+ * one colour in the app stored in two places, so tools/verify-pdf-geometry.php
+ * reads the stylesheet and fails if the two drift — the failure mode otherwise
+ * is a printed book that is subtly a different colour from the preview it was
+ * approved in, which nobody would catch until it arrived.
+ */
+const PDF_TEXT_CARD_TINT = '#e8f6f4';
+
 /* ------------------------------------------------------------- geometry */
 
 /**
@@ -673,7 +685,22 @@ function pdf_render_text_card_html(array $slot, bool $standalone = false, ?float
         ? '<table style="width:78%;margin:0 auto;"><tr><td style="padding:0;">' . $block . '</td></tr></table>'
         : $block;
 
-    $pad = $standalone ? '' : 'padding:3mm;border:0.3mm solid #ddd;';
+    /* THE TINT PRINTS. "I like the light turquoise box. Can we add that as
+     * actual styling behind the quote?"
+     *
+     * #e8f6f4 is --teal-tint from public/assets/styles.css, restated here as a
+     * literal because mPDF cannot read a CSS custom property — the two are
+     * therefore kept in step by hand, and verify-pdf-geometry.php checks they
+     * still match rather than trusting anyone to remember.
+     *
+     * A SLOT CARD ONLY, not a page of its own. On screen the tint is what marks
+     * a quote out from the photographs beside it; a whole page of it is a field
+     * of colour nobody asked for, and a standalone quote has nothing to be
+     * distinguished from. The grey hairline goes — a border and a fill both
+     * saying "this is a box" is one too many. */
+    $pad = $standalone
+        ? ''
+        : 'padding:4mm;background-color:' . PDF_TEXT_CARD_TINT . ';border-radius:2mm;';
 
     if ($heightMm === null) {
         /* No height to centre within — flow from the top, which is what a
@@ -682,8 +709,7 @@ function pdf_render_text_card_html(array $slot, bool $standalone = false, ?float
     }
 
     return '<table style="width:100%;height:' . round($heightMm, 2) . 'mm;font-family:sans-serif;">'
-        . '<tr><td style="vertical-align:middle;height:' . round($heightMm, 2) . 'mm;'
-        . ($standalone ? '' : 'padding:3mm;border:0.3mm solid #ddd;') . '">'
+        . '<tr><td style="vertical-align:middle;height:' . round($heightMm, 2) . 'mm;' . $pad . '">'
         . $inner
         . '</td></tr></table>';
 }
