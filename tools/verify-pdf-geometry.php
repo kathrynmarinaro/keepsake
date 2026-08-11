@@ -102,9 +102,18 @@ final class RecordingMpdf extends \Mpdf\Mpdf
     public function WriteHTML($html, $mode = 0, $init = true, $close = true) {}
 }
 
-$geo      = pdf_export_geometry();
-$originMm = (float) $geo['content_margin_mm'];
-$boxMm    = (float) $geo['content_width_mm'];
+$geo = pdf_export_geometry();
+
+/* The solver's percentages are of the TRIM — the page as it will be after the
+ * guillotine — not of the safety box inside it. The margin is already in the
+ * solve (COMPOSE_FILL); measuring from the safety box charged it twice and made
+ * the print emptier than the preview. So the expected millimetres here are
+ * derived the same way the exporter derives them, and the safety margin is
+ * checked separately below as a CONSEQUENCE rather than as the origin. */
+$originMm = (float) $geo['bleed_in'] * 25.4;
+$boxMm    = (float) $geo['trim_width_in'] * 25.4;
+$tallMm   = (float) $geo['trim_height_in'] * 25.4;
+$safeMm   = (float) $geo['content_margin_mm'];
 
 /* Slots that resolve to no file on disk, so nothing is decoded or cropped —
  * the placement maths is what is under test, not imageproc. */
@@ -153,13 +162,13 @@ foreach (compose_templates() as $name => $tpl) {
     }
 
     /* Placement is in absolute page millimetres; the solver works in percent of
-     * the content box. This conversion is the thing that used to be wrong. */
+     * the trim. This conversion is the thing that used to be wrong — twice. */
     $wrong = array();
     foreach ($expected as $k => $rect) {
         $wantX = $originMm + $rect['x'] / 100.0 * $boxMm;
-        $wantY = $originMm + $rect['y'] / 100.0 * $boxMm;
+        $wantY = $originMm + $rect['y'] / 100.0 * $tallMm;
         $wantW = $rect['w'] / 100.0 * $boxMm;
-        $wantH = $rect['h'] / 100.0 * $boxMm;
+        $wantH = $rect['h'] / 100.0 * $tallMm;
         $got   = $drawn[$k];
 
         foreach (array('x' => $wantX, 'y' => $wantY, 'w' => $wantW, 'h' => $wantH) as $axis => $want) {
@@ -172,13 +181,20 @@ foreach (compose_templates() as $name => $tpl) {
     foreach (array_slice($wrong, 0, 4) as $w) { fwrite(STDERR, "       $w\n"); }
 
     /* Nothing may sit outside the safety margin — that is content the printer
-     * may trim off. */
+     * may trim off. Now that placement measures from the trim, this is no
+     * longer true by construction: it holds because the solver's own margin
+     * (7.5% of the trim, about 0.64in) is wider than the 0.5in safety inset.
+     * Which makes it worth checking against the PAGE, in absolute millimetres —
+     * if COMPOSE_FILL is ever loosened past the point where photos would print
+     * into the trim zone, this is the test that says so. */
     $checks++;
+    $pageW   = (float) $geo['page_width_mm'];
+    $pageH   = (float) $geo['page_height_mm'];
     $escaped = 0;
     foreach ($drawn as $d) {
-        if ($d['x'] < $originMm - 0.01 || $d['y'] < $originMm - 0.01
-            || $d['x'] + $d['w'] > $originMm + $boxMm + 0.01
-            || $d['y'] + $d['h'] > $originMm + $boxMm + 0.01) {
+        if ($d['x'] < $safeMm - 0.01 || $d['y'] < $safeMm - 0.01
+            || $d['x'] + $d['w'] > $pageW - $safeMm + 0.01
+            || $d['y'] + $d['h'] > $pageH - $safeMm + 0.01) {
             $escaped++;
         }
     }
@@ -214,7 +230,18 @@ if ($captions !== array()) {
         $lowest = max($lowest, $img['y'] + $img['h']);
     }
     check('the caption sits below every photo', $cap['y'] >= $lowest - 0.01);
-    check('...and stays on the page', $cap['y'] + $cap['h'] <= $originMm + $boxMm + 0.01);
+
+    /* Inside the TRIM, not inside the safety box. The caption is deliberately
+     * the closest thing on the page to the edge — it is centred in the white
+     * space the photos leave, which is where Kathryn put it — and that white
+     * space runs to the trim. It lands about 12mm clear of the cut, so it
+     * cannot be guillotined; it is simply nearer the edge than the 0.5in a
+     * printer would ask for body text, which is the price of matching the
+     * preview exactly. */
+    check('...and stays inside the trim', $cap['y'] + $cap['h'] <= $originMm + $tallMm + 0.01);
+
+    $clearMm = ($originMm + $tallMm) - ($cap['y'] + $cap['h']);
+    check(sprintf('...clear of the cut line by %.1fmm', $clearMm), $clearMm > 3.0);
 }
 
 /* A page with nothing on it must not throw, and must not draw. */
@@ -227,9 +254,8 @@ check('an empty page draws no photos', $mpdf->drawn === array());
 
 echo "\nThe cover: full bleed, upright, and a title you can read...\n";
 
-$geoC     = $geo;
-$pageMm   = (float) $geoC['page_width_mm'];
-$safeMm   = (float) $geoC['content_margin_mm'];
+$geoC   = $geo;
+$pageMm = (float) $geoC['page_width_mm'];   // $safeMm is set above, alongside the trim
 
 /* A portrait cover photo — the case that printed on its side, because the old
  * cover handed mPDF a raw <img> and never went near imageproc. */

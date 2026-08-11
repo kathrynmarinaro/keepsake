@@ -386,11 +386,26 @@ function pdf_draw_photos_page(\Mpdf\Mpdf $mpdf, array $page, array $geo, ?array 
     $occ   = compose_bind(compose_occupants($slots), $tpl, $choice['order']);
     $rects = compose_solve($tpl, $occ);
 
-    /* Percentages are of the CONTENT box; the drawing API wants absolute
-     * millimetres from the physical page edge, so the margin goes back on. */
-    $boxMm    = (float) $geo['content_width_mm'];
-    $tallMm   = (float) $geo['content_height_mm'];
-    $originMm = (float) $geo['content_margin_mm'];
+    /* THE SOLVER'S PERCENTAGES ARE OF THE TRIM, not of the safety box.
+     *
+     * This is what made the printed pages emptier than the preview. The margin
+     * around a page is already Kathryn's — she picked it in the layout lab by
+     * comparing three widths, and it is baked into the solve as COMPOSE_FILL.
+     * Mapping those percentages onto the safety box then charged the safety
+     * margin a second time, and 85% of the page became 73% of it on paper while
+     * the screen still showed 85%.
+     *
+     * Measuring from the trim edge instead makes the two agree, and costs
+     * nothing in safety: the solver never places anything outside its own
+     * margin, so the tightest possible page still leaves 7.5% of 8.5in — about
+     * 0.64in — between the photos and the trim, comfortably outside the 0.5in
+     * the printers ask for. */
+    $trimMm   = (float) $geo['trim_width_in'] * 25.4;
+    $trimHMm  = (float) $geo['trim_height_in'] * 25.4;
+    $originMm = (float) $geo['bleed_in'] * 25.4;
+
+    $boxMm  = $trimMm;
+    $tallMm = $trimHMm;
 
     $bottomPct = 0.0;
 
