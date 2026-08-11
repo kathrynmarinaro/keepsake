@@ -271,21 +271,19 @@ function render_in_child(string $tab, string $which, array $get = array()): arra
 
 echo "\nContent tab...\n";
 
-foreach (array(
-    array('timeline', 'all'),
-    array('grid', 'photo'),
-    array('grid', 'quote'),
-    array('grid', 'anecdote'),
-    array('grid', 'snapshot'),
-    array('groups', 'all'),
-) as [$view, $type]) {
+/* Every combination of the two filter axes, because they became independent:
+   view and type used to be tangled (groups was a third VIEW and the type
+   filter only existed inside the grid), and the whole point of separating them
+   is that all twelve pairs are now reachable URLs. */
+foreach (array('grid', 'timeline') as $view) {
+foreach (array('all', 'photo', 'snapshot', 'quote', 'anecdote', 'groups') as $type) {
     $out   = render_in_child('content', 'year', array('view' => $view, 'type' => $type));
     $label = 'view=' . $view . ' type=' . $type;
 
     check($label . ' renders', $out['fatal'] === null, (string) $out['fatal']);
     check($label . ' is clean', $out['problems'] === array(), implode("\n", $out['problems']));
     check($label . ' closes its divs', $out['balanced'] === true);
-}
+}}
 
 /* The case the merge created: a project with no year at all. Anything still
    printing $project['year'] as an identity shows up here as an empty string in

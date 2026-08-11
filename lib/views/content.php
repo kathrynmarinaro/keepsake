@@ -34,9 +34,22 @@ $projectName = year_project_title($project);
 
 /* ---------------------------------------------------------------- inputs */
 
-$view = in_array($_GET['view'] ?? '', array('timeline', 'grid', 'groups'), true) ? $_GET['view'] : 'timeline';
-$type = in_array($_GET['type'] ?? '', array('all', 'quote', 'anecdote', 'snapshot', 'photo'), true)
-    ? $_GET['type'] : 'photo';
+/* VIEW is how the content is arranged; TYPE is what is in it. They used to be
+ * tangled: "groups" was a third VIEW, so it could not be combined with either
+ * of the other two, and the type filter only existed inside the grid — switch
+ * to Timeline and it silently went away along with whatever it was set to.
+ *
+ * Now they are two independent axes, both always on screen. Groups is a TYPE,
+ * because that is what it is: a way of looking at the photos, not a different
+ * arrangement of the page.
+ *
+ * Grid is the default view — it is what she opens this tab to do. Type
+ * defaults to 'all' rather than to 'photo': with the filter permanently
+ * visible, a default that hides three of the four content types without
+ * saying so is a filter you have to notice before you trust the screen. */
+$view = ($_GET['view'] ?? '') === 'timeline' ? 'timeline' : 'grid';
+$type = in_array($_GET['type'] ?? '', array('all', 'photo', 'snapshot', 'quote', 'anecdote', 'groups'), true)
+    ? $_GET['type'] : 'all';
 
 /* ------------------------------------------------------------- rendering */
 
@@ -98,7 +111,15 @@ function render_entry_quote(array $q): string
           <p class="field-err" data-role="error"></p>
           <div class="row-between entry-actions">
             <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <button type="submit" class="btn-primary">Save</button>
+            <?php /* Cancel closes the modal without saving. Only meaningful
+                     once entry-modal.js has one open, so it is hidden until
+                     then — a Cancel button on an inline accordion would be a
+                     third word for "collapse this", next to the summary you
+                     can already tap. */ ?>
+            <div class="row entry-actions-right">
+              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
+              <button type="submit" class="btn-primary">Save</button>
+            </div>
           </div>
         </form>
       </div>
@@ -131,7 +152,15 @@ function render_entry_anecdote(array $a): string
           <p class="field-err" data-role="error"></p>
           <div class="row-between entry-actions">
             <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <button type="submit" class="btn-primary">Save</button>
+            <?php /* Cancel closes the modal without saving. Only meaningful
+                     once entry-modal.js has one open, so it is hidden until
+                     then — a Cancel button on an inline accordion would be a
+                     third word for "collapse this", next to the summary you
+                     can already tap. */ ?>
+            <div class="row entry-actions-right">
+              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
+              <button type="submit" class="btn-primary">Save</button>
+            </div>
           </div>
         </form>
       </div>
@@ -201,7 +230,15 @@ function render_entry_snapshot(array $s): string
           <p class="field-err" data-role="error"></p>
           <div class="row-between entry-actions">
             <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <button type="submit" class="btn-primary">Save</button>
+            <?php /* Cancel closes the modal without saving. Only meaningful
+                     once entry-modal.js has one open, so it is hidden until
+                     then — a Cancel button on an inline accordion would be a
+                     third word for "collapse this", next to the summary you
+                     can already tap. */ ?>
+            <div class="row entry-actions-right">
+              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
+              <button type="submit" class="btn-primary">Save</button>
+            </div>
           </div>
         </form>
       </div>
@@ -236,6 +273,11 @@ function render_entry_photo(array $p, array $eventGroups): string
         <button type="button" class="pill pill-toggle<?= $full ? '' : ' is-plain' ?>" data-act="toggle-full" data-id="<?= $id ?>" data-value="<?= $full ? '1' : '0' ?>">
           <?= $full ? 'Full page' : 'Full page: off' ?>
         </button>
+        <?php /* The same three actions as the grid cell's, in the same order.
+                 This is the other collapsed shape for the same photo — see
+                 render_photo_cell()'s header — so they have to agree about
+                 what you can do to it. */ ?>
+        <button type="button" class="pill pill-toggle" data-act="recrop" data-src="<?= $original ?>">Recrop</button>
         <span class="accordion-count"><?= h(fmt_date_human($entryDate)) ?></span>
       </summary>
       <div class="accordion-body">
@@ -264,15 +306,18 @@ function render_entry_photo(array $p, array $eventGroups): string
             </select>
           </label>
 
-          <div class="field">
-            <span>Crop</span>
-            <button type="button" class="btn-ghost" data-act="recrop" data-src="<?= $original ?>">Recrop</button>
-          </div>
-
           <p class="field-err" data-role="error"></p>
           <div class="row-between entry-actions">
             <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <button type="submit" class="btn-primary">Save</button>
+            <?php /* Cancel closes the modal without saving. Only meaningful
+                     once entry-modal.js has one open, so it is hidden until
+                     then — a Cancel button on an inline accordion would be a
+                     third word for "collapse this", next to the summary you
+                     can already tap. */ ?>
+            <div class="row entry-actions-right">
+              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
+              <button type="submit" class="btn-primary">Save</button>
+            </div>
           </div>
         </form>
       </div>
@@ -318,6 +363,12 @@ function render_photo_cell(array $p, array $eventGroups): string
           <button type="button" class="pill pill-toggle<?= $full ? '' : ' is-plain' ?>" data-act="toggle-full" data-id="<?= $id ?>" data-value="<?= $full ? '1' : '0' ?>">
             <?= $full ? 'Full page' : 'Full page: off' ?>
           </button>
+          <?php /* Recrop sits with the two toggles rather than inside the form
+                   below them: all three are things you do TO the photo you are
+                   looking at, and it was the only one buried under a field
+                   label. It is not a form field — it opens the cropper and
+                   saves on its own — so it never belonged in the form. */ ?>
+          <button type="button" class="pill pill-toggle" data-act="recrop" data-src="<?= $original ?>">Recrop</button>
         </span>
       </summary>
       <div class="accordion-body">
@@ -346,15 +397,18 @@ function render_photo_cell(array $p, array $eventGroups): string
             </select>
           </label>
 
-          <div class="field">
-            <span>Crop</span>
-            <button type="button" class="btn-ghost" data-act="recrop" data-src="<?= $original ?>">Recrop</button>
-          </div>
-
           <p class="field-err" data-role="error"></p>
           <div class="row-between entry-actions">
             <button type="button" class="btn-danger" data-act="delete">Delete</button>
-            <button type="submit" class="btn-primary">Save</button>
+            <?php /* Cancel closes the modal without saving. Only meaningful
+                     once entry-modal.js has one open, so it is hidden until
+                     then — a Cancel button on an inline accordion would be a
+                     third word for "collapse this", next to the summary you
+                     can already tap. */ ?>
+            <div class="row entry-actions-right">
+              <button type="button" class="btn-ghost entry-cancel" data-act="cancel" hidden>Cancel</button>
+              <button type="submit" class="btn-primary">Save</button>
+            </div>
           </div>
         </form>
       </div>
@@ -403,104 +457,45 @@ function render_photo_cell(array $p, array $eventGroups): string
       <a class="link-btn create-book-btn" href="<?= h(project_url($projectId, 'book')) ?>">Create Book</a>
     </div>
 
-    <div class="row view-tabs" aria-label="View" role="tablist">
-      <span class="filter-label">View:</span>
-      <a class="pill<?= $view === 'grid' ? '' : ' is-plain' ?>" href="<?= h(project_url($projectId, 'content', array('view' => 'grid', 'type' => $type))) ?>">Grid</a>
-      <a class="pill<?= $view === 'timeline' ? '' : ' is-plain' ?>" href="<?= h(project_url($projectId, 'content', array('view' => 'timeline'))) ?>">Timeline</a>
-      <a class="pill<?= $view === 'groups' ? '' : ' is-plain' ?>" href="<?= h(project_url($projectId, 'content', array('view' => 'groups'))) ?>">Groups</a>
-    </div>
-
-    <?php if ($view === 'timeline'): ?>
-
-      <?php
-      $entries = array();
-      foreach ($quotes as $q) { $entries[] = array('date' => $q['entry_date'], 'order' => 0, 'html' => render_entry_quote($q)); }
-      foreach ($anecdotes as $a) { $entries[] = array('date' => $a['entry_date'], 'order' => 1, 'html' => render_entry_anecdote($a)); }
-      foreach ($snapshots as $s) { $entries[] = array('date' => $s['entry_date'], 'order' => 2, 'html' => render_entry_snapshot($s)); }
-      foreach ($photos as $p) { $entries[] = array('date' => substr((string) $p['captured_at'], 0, 10), 'order' => 3, 'html' => render_entry_photo($p, $groups)); }
-
-      usort($entries, static function (array $a, array $b): int {
-          return $a['date'] <=> $b['date'] ?: $a['order'] <=> $b['order'];
-      });
-
-      $byMonth = array();
-      foreach ($entries as $e) {
-          $byMonth[substr($e['date'], 0, 7)][] = $e;
-      }
-      ?>
-
-      <?php if ($entries === array()): ?>
-        <div class="empty">
-          <p>Nothing captured for <?= h($projectName) ?> yet.</p>
-        </div>
-      <?php else: ?>
-        <div id="entry-list">
-        <?php foreach ($byMonth as $monthKey => $monthEntries): ?>
-          <div class="cat-group">
-            <div class="cat-head">
-              <span><?= h(month_label($monthKey)) ?></span>
-              <span class="cat-count"><?= count($monthEntries) ?></span>
-            </div>
-            <?php foreach ($monthEntries as $e) { echo $e['html']; } ?>
-          </div>
-        <?php endforeach; ?>
-        </div>
-      <?php endif; ?>
-
-    <?php elseif ($view === 'grid'): ?>
-
-      <div class="row type-filter-row" aria-label="Filter by type">
-        <span class="filter-label">Type:</span>
-        <?php
-        // Photo's count is shown right on its own pill — the count Kathryn
-        // asked for, placed where she's already looking when she wants it
-        // rather than as a separate line elsewhere on the page.
-        $typeLabels = array(
-            'all'      => 'All',
-            'photo'    => 'Photo (' . count($photos) . ')',
-            'snapshot' => 'Snapshot',
-            'quote'    => 'Quote',
-            'anecdote' => 'Anecdote',
-        );
-        foreach ($typeLabels as $t => $label): ?>
-          <a class="pill<?= $type === $t ? '' : ' is-plain' ?>" href="<?= h(project_url($projectId, 'content', array('view' => 'grid', 'type' => $t))) ?>"><?= h($label) ?></a>
+    <?php /* Both filters, always. Neither is inside the other any more, and
+             neither disappears when the other changes — the pair is the one
+             control that says what you are looking at, and half of it going
+             missing is what made "why can't I find my quotes" a reasonable
+             question. Every combination is a real URL. */ ?>
+    <div class="filters">
+      <div class="row filter-row" aria-label="View">
+        <span class="filter-label">View:</span>
+        <?php foreach (array('grid' => 'Grid', 'timeline' => 'Timeline') as $v => $label): ?>
+          <a class="pill<?= $view === $v ? '' : ' is-plain' ?>"
+             href="<?= h(project_url($projectId, 'content', array('view' => $v, 'type' => $type))) ?>"><?= h($label) ?></a>
         <?php endforeach; ?>
       </div>
 
-      <?php if ($type === 'photo'): ?>
-        <?php if ($photos === array()): ?>
-          <div class="empty"><p>No photos captured for <?= h($projectName) ?> yet.</p></div>
-        <?php else: ?>
-          <div class="photo-grid" id="photo-grid">
-            <?php foreach ($photos as $p) { echo render_photo_cell($p, $groups); } ?>
-          </div>
-        <?php endif; ?>
-
-      <?php else: ?>
+      <div class="row filter-row" aria-label="Filter by type">
+        <span class="filter-label">Type:</span>
         <?php
-        $flat = array();
-        if ($type === 'all' || $type === 'quote') {
-            foreach ($quotes as $q) { $flat[] = array('date' => $q['entry_date'], 'html' => render_entry_quote($q)); }
-        }
-        if ($type === 'all' || $type === 'anecdote') {
-            foreach ($anecdotes as $a) { $flat[] = array('date' => $a['entry_date'], 'html' => render_entry_anecdote($a)); }
-        }
-        if ($type === 'all' || $type === 'snapshot') {
-            foreach ($snapshots as $s) { $flat[] = array('date' => $s['entry_date'], 'html' => render_entry_snapshot($s)); }
-        }
-        if ($type === 'all') {
-            foreach ($photos as $p) { $flat[] = array('date' => substr((string) $p['captured_at'], 0, 10), 'html' => render_entry_photo($p, $groups)); }
-        }
-        usort($flat, static fn(array $a, array $b): int => $a['date'] <=> $b['date']);
-        ?>
-        <?php if ($flat === array()): ?>
-          <div class="empty"><p>Nothing here yet for <?= h($projectName) ?>.</p></div>
-        <?php else: ?>
-          <div id="entry-list"><?php foreach ($flat as $e) { echo $e['html']; } ?></div>
-        <?php endif; ?>
-      <?php endif; ?>
+        /* Photo carries its own count, which is the count Kathryn asked for,
+           put where she is already looking when she wants it rather than on a
+           separate line elsewhere on the page. */
+        $typeLabels = array(
+            'all'      => 'All',
+            'photo'    => 'Photos (' . count($photos) . ')',
+            'snapshot' => 'Snapshots',
+            'quote'    => 'Quotes',
+            'anecdote' => 'Anecdotes',
+            'groups'   => 'Groups (' . count($groups) . ')',
+        );
+        foreach ($typeLabels as $t => $label): ?>
+          <a class="pill<?= $type === $t ? '' : ' is-plain' ?>"
+             href="<?= h(project_url($projectId, 'content', array('view' => $view, 'type' => $t))) ?>"><?= h($label) ?></a>
+        <?php endforeach; ?>
+      </div>
+    </div>
 
-    <?php else: /* groups */ ?>
+    <?php /* THREE BRANCHES, and the type is checked first. Groups is a type
+             rather than a view (see the inputs above), so it renders the same
+             either way and short-circuits the view question entirely. */ ?>
+    <?php if ($type === 'groups'): ?>
 
       <div class="card">
         <p><strong>Automatic grouping</strong></p>
@@ -690,6 +685,88 @@ function render_photo_cell(array $p, array $eventGroups): string
           </label>
           <button type="button" class="btn-secondary" id="merge-btn">Merge checked groups into this one</button>
         </div>
+      <?php endif; ?>
+
+    <?php elseif ($view === 'timeline'): ?>
+
+      <?php
+      /* Filtered by TYPE, which the timeline used to ignore entirely — it
+         always showed all four, so switching to it from a filtered grid
+         silently widened what you were looking at. */
+      $entries = array();
+      if ($type === 'all' || $type === 'quote') {
+          foreach ($quotes as $q) { $entries[] = array('date' => $q['entry_date'], 'order' => 0, 'html' => render_entry_quote($q)); }
+      }
+      if ($type === 'all' || $type === 'anecdote') {
+          foreach ($anecdotes as $a) { $entries[] = array('date' => $a['entry_date'], 'order' => 1, 'html' => render_entry_anecdote($a)); }
+      }
+      if ($type === 'all' || $type === 'snapshot') {
+          foreach ($snapshots as $s) { $entries[] = array('date' => $s['entry_date'], 'order' => 2, 'html' => render_entry_snapshot($s)); }
+      }
+      if ($type === 'all' || $type === 'photo') {
+          foreach ($photos as $p) { $entries[] = array('date' => substr((string) $p['captured_at'], 0, 10), 'order' => 3, 'html' => render_entry_photo($p, $groups)); }
+      }
+
+      usort($entries, static function (array $a, array $b): int {
+          return $a['date'] <=> $b['date'] ?: $a['order'] <=> $b['order'];
+      });
+
+      $byMonth = array();
+      foreach ($entries as $e) {
+          $byMonth[substr($e['date'], 0, 7)][] = $e;
+      }
+      ?>
+
+      <?php if ($entries === array()): ?>
+        <div class="empty">
+          <p>Nothing <?= $type === 'all' ? 'captured' : 'of that type' ?> for <?= h($projectName) ?> yet.</p>
+        </div>
+      <?php else: ?>
+        <div id="entry-list">
+        <?php foreach ($byMonth as $monthKey => $monthEntries): ?>
+          <div class="cat-group">
+            <div class="cat-head">
+              <span><?= h(month_label($monthKey)) ?></span>
+              <span class="cat-count"><?= count($monthEntries) ?></span>
+            </div>
+            <?php foreach ($monthEntries as $e) { echo $e['html']; } ?>
+          </div>
+        <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+
+    <?php else: /* grid */ ?>
+      <?php if ($type === 'photo'): ?>
+        <?php if ($photos === array()): ?>
+          <div class="empty"><p>No photos captured for <?= h($projectName) ?> yet.</p></div>
+        <?php else: ?>
+          <div class="photo-grid" id="photo-grid">
+            <?php foreach ($photos as $p) { echo render_photo_cell($p, $groups); } ?>
+          </div>
+        <?php endif; ?>
+
+      <?php else: ?>
+        <?php
+        $flat = array();
+        if ($type === 'all' || $type === 'quote') {
+            foreach ($quotes as $q) { $flat[] = array('date' => $q['entry_date'], 'html' => render_entry_quote($q)); }
+        }
+        if ($type === 'all' || $type === 'anecdote') {
+            foreach ($anecdotes as $a) { $flat[] = array('date' => $a['entry_date'], 'html' => render_entry_anecdote($a)); }
+        }
+        if ($type === 'all' || $type === 'snapshot') {
+            foreach ($snapshots as $s) { $flat[] = array('date' => $s['entry_date'], 'html' => render_entry_snapshot($s)); }
+        }
+        if ($type === 'all') {
+            foreach ($photos as $p) { $flat[] = array('date' => substr((string) $p['captured_at'], 0, 10), 'html' => render_entry_photo($p, $groups)); }
+        }
+        usort($flat, static fn(array $a, array $b): int => $a['date'] <=> $b['date']);
+        ?>
+        <?php if ($flat === array()): ?>
+          <div class="empty"><p>Nothing here yet for <?= h($projectName) ?>.</p></div>
+        <?php else: ?>
+          <div id="entry-list"><?php foreach ($flat as $e) { echo $e['html']; } ?></div>
+        <?php endif; ?>
       <?php endif; ?>
 
     <?php endif; ?>

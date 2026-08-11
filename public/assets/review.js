@@ -26,6 +26,11 @@ import { showSnackbar } from './swipe.js';
 import { attachInlineEdit } from './inline-edit.js';
 import { openCropper } from './crop.js';
 import { openPhotoPicker } from './photo-picker.js';
+/* Imported for its side effect only — it wires the entry overlay on load and
+   this module talks to it through events, never through a handle. Imported
+   HERE rather than added as a second <script> on the page so that a screen
+   loading review.js cannot end up without it. */
+import './entry-modal.js';
 
 const UPDATE_ENDPOINT = {
   quote: 'api/quotes-update.php',
@@ -106,13 +111,23 @@ async function saveEntry(details) {
     // removal covers it. It used to also be a separate, always-present
     // entry in a duplicate "Edit photos" list, which needed its own
     // removal; that list is gone (see render_photo_cell()'s header).
+    /* Announced before the removal so entry-modal.js, if this entry is open
+       full screen, can tear the overlay down instead of putting a detached
+       element back into a list it no longer belongs to. */
+    document.dispatchEvent(new CustomEvent('keepsake:entry-removed', { detail: { details } }));
     details.remove();
-    showSnackbar('Date changed — moved to a different year, off this page.');
+    showSnackbar('Date changed — moved to a different project, off this page.');
     return;
   }
 
   updateSummary(details, type, result, values);
   showSnackbar('Saved.');
+
+  /* Saving closes the entry when it is open full screen — entry-modal.js
+     listens. Dispatched rather than called so this module keeps working with
+     the modal module absent, which is also how it behaved before the modal
+     existed: the accordion simply stays open. */
+  document.dispatchEvent(new CustomEvent('keepsake:entry-saved', { detail: { details, type } }));
 }
 
 /** Refresh an entry's collapsed <summary> line after a successful save. */

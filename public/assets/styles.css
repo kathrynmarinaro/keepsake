@@ -1582,23 +1582,14 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
 }
 .photo-cell-bar .pill-toggle { font-size: 0.7rem; padding: 2px 8px; }
 
-/* ============ View tabs / type filter row ============
- *
- * Both are the same idiom: plain links styled as .pill/.pill.is-plain
- * (filled = active), just with a little breathing room above/below that a
- * bare .row doesn't carry.
- */
-.view-tabs { margin: 18px 0; }
-.type-filter-row { margin-bottom: 18px; }
-/* "View:"/"Type:" — a plain label ahead of the pills, not a pill itself.
-   Bolder than .hint (which reads as muted secondary text, too quiet to
-   introduce a whole control row) but not as heavy as a pill's own weight. */
-.filter-label {
-  font-weight: 600;
-  font-size: 0.85rem;
-  color: var(--slate);
-  flex-shrink: 0;
-}
+/* Recrop is hidden on a COLLAPSED grid cell. In book / Skipped and Full page
+   earn their place there — they are the two states you scan a grid of a
+   hundred photos for — but recropping is something you do to one photo you are
+   already looking at, and a third pill does not fit a cell this size without
+   the row wrapping under the thumbnail. It appears in the modal, where there
+   is room and where it belongs beside the other two. Still rendered rather
+   than omitted, so the two collapsed shapes stay one piece of markup. */
+.photo-cell-details:not(.is-modal) .photo-cell-bar [data-act="recrop"] { display: none; }
 
 /* ============ Review screen header (back link, subtitle + Create Book) ===
  *
@@ -2073,4 +2064,144 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   border: 1px dashed rgba(255, 255, 255, 0.85);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
   pointer-events: none;
+}
+
+/* ============ Entry modal ============
+ *
+ * An entry opened full screen instead of expanding in place. entry-modal.js
+ * MOVES the <details> in here rather than rebuilding it, so everything below
+ * styles the same elements the list already renders — .entry, .accordion-head,
+ * .accordion-body — in a different container.
+ *
+ * Above .sheet's z-index 50 would be wrong: the app menu is raised from the
+ * header and should sit over this, not under it. 40 puts it above the page and
+ * the floating + (both 20) and below every sheet.
+ */
+.entry-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+@media (min-width: 620px) {
+  .entry-modal { align-items: center; padding: 24px; }
+}
+
+.entry-modal-panel {
+  position: relative;
+  width: 100%;
+  max-width: var(--maxw);
+  max-height: 92vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  border-radius: 16px 16px 0 0;
+  padding: 14px 16px calc(20px + var(--safe-bottom));
+}
+@media (min-width: 620px) {
+  .entry-modal-panel { border-radius: 16px; max-height: 86vh; }
+}
+
+/* Sticky rather than absolute: the panel scrolls, and a close button that
+   scrolls away with a long snapshot form is a close button you have to scroll
+   back up to find. Pushed to the right edge of the flow above the content, so
+   nothing has to reserve space for it. */
+.entry-modal-close {
+  position: sticky;
+  top: 0;
+  float: right;
+  z-index: 1;
+  margin: -4px -4px 0 8px;
+  background: var(--bg);
+}
+
+/* The moved-in entry drops the card chrome it wears in the list. It IS the
+   panel now, and a bordered box inside a bordered panel reads as a box in a
+   box — the same call .card.is-flush makes on the Book tab. */
+.entry.is-modal {
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  overflow: visible;
+}
+/* No disclosure triangle and no pointer: inside the overlay the summary is a
+   header, not a control — the way out is the X. */
+.entry.is-modal > .accordion-head {
+  cursor: default;
+  padding-left: 0;
+  padding-right: 0;
+}
+.entry.is-modal > .accordion-head::before { display: none; }
+.entry.is-modal > .accordion-body { padding-left: 0; padding-right: 0; }
+
+/* The photo, big, above its three actions — the point of opening it. */
+.entry.is-modal .photo-cell-head {
+  display: block;
+  min-height: 0;
+}
+.entry.is-modal .photo-cell-head .thumb {
+  width: 100%;
+  height: auto;
+  max-height: 46vh;
+  object-fit: contain;
+  border-radius: var(--radius);
+  background: var(--border);
+}
+.entry.is-modal .photo-cell-date { display: block; margin: 10px 0 8px; }
+
+/* In book / Full page / Recrop, as one row under the image. */
+.entry.is-modal .photo-cell-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.entry.is-modal .photo-cell-bar .pill-toggle { font-size: 0.8rem; padding: 6px 12px; }
+
+/* Cancel beside Save, with Delete kept away from the pair — an accidental tap
+   on the wrong one of three adjacent buttons should not be the destructive
+   one. .row-between on the parent already pushes this group right. */
+.entry-actions-right { gap: 10px; }
+.entry-actions-right .btn-ghost,
+.entry-actions-right .btn-primary { width: auto; }
+
+/* The page behind must not scroll while the overlay is up: on iOS a scroll
+   started on the backdrop scrolls the list underneath, and closing then leaves
+   you somewhere else entirely. */
+body.has-entry-modal { overflow: hidden; }
+
+/* ============ Content tab filter bars ============
+ *
+ * Two rows, view and type, both always present. They were one row plus a
+ * second that only existed inside the grid, which is how the type filter came
+ * to vanish when you switched to Timeline.
+ *
+ * Wrapping rather than scrolling: six type pills fit two lines on a narrow
+ * phone, and a horizontally scrolling filter hides the options at its right
+ * edge with nothing to say they are there.
+ */
+.filters { display: grid; gap: 8px; margin-bottom: 18px; }
+.filter-row { flex-wrap: wrap; gap: 6px; }
+.filter-row .pill {
+  padding: 7px 12px;
+  font-size: 0.8rem;
+}
+/* A real tap target on a phone. .pill is written for a label you read, and
+   these are links you hit with a thumb. */
+.filter-row a.pill { display: inline-flex; align-items: center; min-height: 34px; }
+/* "View:" / "Type:" — a plain label ahead of the pills, not a pill itself.
+   Set like .cat-head rather than like body text: it introduces a control row,
+   and at the same weight as the pills beside it, it reads as a dead one. */
+.filter-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--slate);
+  opacity: 0.7;
+  flex-shrink: 0;
+  min-width: 44px;
 }
