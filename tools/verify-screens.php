@@ -372,6 +372,34 @@ check('timeline stacks its entries', str_contains($out['html'], 'id="entry-list"
 check('timeline groups by month', str_contains($out['html'], 'cat-head'));
 check('timeline is not a grid', !str_contains($out['html'], 'class="photo-grid"'));
 
+/* --------------------------------------------- the Content tab stays content */
+
+echo "\nContent tab carries no book controls...\n";
+
+/* The subtitle field and the "Create Book" link were duplicates once the two
+ * screens became two tabs: the subtitle is edited on the Book tab, on the card
+ * showing the cover it prints on, and "Create Book" pointed at a screen that is
+ * one tap away in the tab strip. Removing them took #subtitle-list with them —
+ * which two unrelated features were reading the project id out of, so that is
+ * what the last two checks are really about. */
+$out = render_in_child('content', 'year', array('view' => 'grid', 'type' => 'all'));
+check('no subtitle field', !str_contains($out['html'], 'id="subtitle-list"'));
+check('no Create Book link', !str_contains($out['html'], 'create-book-btn'));
+check('no clear-subtitle button', !str_contains($out['html'], 'clear-subtitle'));
+
+$groups = render_in_child('content', 'year', array('view' => 'grid', 'type' => 'groups'));
+check('the Groups type still offers "Group photos"', str_contains($groups['html'], 'id="run-grouping-btn"'));
+check('the Groups type still offers "New group"', str_contains($groups['html'], 'id="new-group-form"'));
+
+/* Both of those post a year_project_id that review.js now reads off the body.
+   public/project.php is what puts it there, so if that attribute ever stops
+   being rendered, creating a group silently posts project 0. */
+$projectPhp = file_get_contents(APP_ROOT . '/public/project.php');
+check(
+    'project.php still puts the project id on the body',
+    str_contains($projectPhp, "'data-year-project-id' => $projectId")
+);
+
 /* ------------------------------------------------- one form, not five copies */
 
 echo "\nOne edit form per type...\n";

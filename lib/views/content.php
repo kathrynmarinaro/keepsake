@@ -499,35 +499,12 @@ function render_photo_cell(array $p, array $eventGroups): string
       $groups    = event_groups_for_year($yearProjectId);
   ?>
 
-    <div class="row-between subtitle-row">
-      <!-- Pre-layout subtitle (brief §4.6). Tap-to-edit via inline-edit.js,
-           same gesture as every other tap-to-edit field in the suite. -->
-      <ul class="list" id="subtitle-list">
-        <li class="list-row" data-id="<?= $yearProjectId ?>">
-          <div class="row-slide">
-            <div class="row-body">
-              <span class="row-sub">Book subtitle</span>
-              <span class="row-text<?= $project['subtitle'] ? '' : ' muted' ?>" data-role="subtitle"><?= h($project['subtitle'] ?: 'Tap to add a subtitle…') ?></span>
-            </div>
-            <?php /* inline-edit.js treats an emptied input as a cancel, so
-                     removing a subtitle needs its own control — same button and
-                     same endpoint as the one on the layout screen's title card.
-                     The BOOK'S NAME is edited over there, on the card that shows
-                     the cover it prints on; this screen keeps the one field it
-                     has always had. */ ?>
-            <button type="button" class="tap-text" data-act="clear-subtitle"
-                    data-year-project="<?= $yearProjectId ?>"
-                    <?= $project['subtitle'] ? '' : 'hidden' ?>>Remove</button>
-          </div>
-        </li>
-      </ul>
-      <!-- Phase 5's generated layouts for this year. Review comes first —
-           skip-for-book, full-page flags and event groups all change what
-           the arrangement engine does — so this is a link out, not a tab.
-           Sits next to the subtitle deliberately: both are the two things
-           worth doing right before generating a layout (brief §4.6). -->
-      <a class="link-btn create-book-btn" href="<?= h(project_url($projectId, 'book')) ?>">Create Book</a>
-    </div>
+    <?php /* NO SUBTITLE FIELD AND NO "CREATE BOOK" LINK HERE.
+             Both were duplicates of the Book tab: the subtitle is edited
+             there, on the card showing the cover it prints on, and "Create
+             Book" was a link to a screen that is now one tap away in the tab
+             strip directly above. This tab is for the content; the book is the
+             other tab. */ ?>
 
     <?php /* Both filters, always. Neither is inside the other any more, and
              neither disappears when the other changes — the pair is the one

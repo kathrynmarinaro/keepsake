@@ -32,6 +32,14 @@ import { openPhotoPicker } from './photo-picker.js';
    loading review.js cannot end up without it. */
 import './entry-modal.js';
 
+/* Which project this screen is showing. public/project.php puts it on the
+   <body>, which is the canonical place for it — it used to be read out of the
+   subtitle row's data-id, and that row was removed when the subtitle moved to
+   the Book tab, taking two unrelated features (create a group, run grouping)
+   with it. A screen-level fact belongs on the screen, not on whichever element
+   happened to be carrying it. */
+const PAGE_YEAR_PROJECT_ID = Number(document.body.dataset.yearProjectId || 0);
+
 const UPDATE_ENDPOINT = {
   quote: 'api/quotes-update.php',
   anecdote: 'api/anecdotes-update.php',
@@ -105,8 +113,7 @@ async function saveEntry(details) {
   // it's still sitting in. Removing it here (rather than leaving it until a
   // reload) is the same "don't show what the database no longer agrees
   // with" rule swipe.js's own undo-restore path follows.
-  const pageYearProjectId = Number(document.body.dataset.yearProjectId || 0);
-  if (result.year_project_id && pageYearProjectId && result.year_project_id !== pageYearProjectId) {
+  if (result.year_project_id && PAGE_YEAR_PROJECT_ID && result.year_project_id !== PAGE_YEAR_PROJECT_ID) {
     // A photo's grid tile IS this same <details> in Grid view — one
     // removal covers it. It used to also be a separate, always-present
     // entry in a duplicate "Edit photos" list, which needed its own
@@ -291,7 +298,7 @@ async function createGroup(form) {
   errorEl.textContent = '';
 
   const values = formValues(form);
-  const yearProjectId = Number(document.querySelector('#subtitle-list .list-row').dataset.id);
+  const yearProjectId = PAGE_YEAR_PROJECT_ID;
 
   const button = form.querySelector('button[type="submit"]');
   button.disabled = true;
@@ -361,7 +368,7 @@ async function deleteGroup(button) {
  * lib/grouping.php just committed.
  */
 async function runGrouping(button) {
-  const yearProjectId = Number(document.querySelector('#subtitle-list .list-row').dataset.id);
+  const yearProjectId = PAGE_YEAR_PROJECT_ID;
 
   button.disabled = true;
   let result;
@@ -462,55 +469,16 @@ document.addEventListener('click', (event) => {
       event.preventDefault();
       deleteGroup(el);
       break;
-    case 'clear-subtitle':
-      event.preventDefault();
-      clearSubtitle(el);
-      break;
   }
 });
 
 document.getElementById('merge-btn')?.addEventListener('click', mergeGroups);
 document.getElementById('run-grouping-btn')?.addEventListener('click', (event) => runGrouping(event.currentTarget));
 
-/* Subtitle tap-to-edit (brief §4.6) — ported ahead of need in Phase 0,
-   used for the first time here. */
-attachInlineEdit('#subtitle-list', {
-  rowSelector: '.list-row',
-  textSelector: '[data-role="subtitle"]',
-  maxLength: 190,
-  onSave: async (id, text) => {
-    const result = await apiPost('api/year-projects-update.php', { id: Number(id), subtitle: text });
-    const subtitleEl = document.querySelector('[data-role="subtitle"]');
-    subtitleEl.classList.remove('muted');
-    document.querySelector('[data-act="clear-subtitle"]')?.toggleAttribute('hidden', !result.subtitle);
-    return result.subtitle || text;
-  },
-});
-
-/* Removing the subtitle, which the tap-to-edit gesture deliberately cannot do:
-   inline-edit.js treats an emptied input as a cancel, because in the app it was
-   written for an emptied row means a delete. So clearing gets its own control,
-   the same one and the same endpoint the layout screen uses. */
-async function clearSubtitle(button) {
-  button.disabled = true;
-  try {
-    await apiPost('api/year-projects-update.php', {
-      id: Number(button.dataset.yearProject),
-      subtitle: '',
-    });
-    const subtitleEl = document.querySelector('[data-role="subtitle"]');
-    if (subtitleEl) {
-      subtitleEl.textContent = 'Tap to add a subtitle…';
-      subtitleEl.classList.add('muted');
-    }
-    button.hidden = true;
-    showSnackbar('Subtitle removed.');
-  } catch (err) {
-    showSnackbar(err.message || "That didn't save — try again.", { isError: true });
-  } finally {
-    button.disabled = false;
-  }
-}
+/* NO SUBTITLE EDITOR HERE ANY MORE. The field and its "Remove" button were a
+   duplicate of the Book tab's, which now opens the same rename dialog the ⋮
+   menu does (project-menu.js's renameProject). This tab is for the content.
+   inline-edit.js is still imported — the event-group rename below uses it. */
 
 /* Event-group rename (brief §4.1: "Kathryn can rename any group") — the
    SAME tap-to-edit gesture as the subtitle above, on the group's name line.

@@ -1632,27 +1632,20 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
    than omitted, so the two collapsed shapes stay one piece of markup. */
 .photo-cell-details:not(.is-modal) .photo-cell-bar [data-act="recrop"] { display: none; }
 
-/* ============ Review screen header (back link, subtitle + Create Book) ===
+/* ============ Back link ============
  *
- * Post-launch feedback (PLAN.md): the year screen's header used to put
- * "Book layouts" and "Years" on the right of the title, mirroring the
- * dashboard's own back-link. Kathryn asked for a dedicated back link on
- * the LEFT instead, and for the book-layout entry point (retitled "Create
- * Book") to sit next to the subtitle field instead — the two are done
- * together right before generating a layout, so the review screen's own
- * subtitle-row reads as one small pre-flight checklist rather than two
- * unrelated links.
+ * Post-launch feedback (PLAN.md): the year screen's header used to put "Book
+ * layouts" and "Years" on the right of the title. Kathryn asked for a
+ * dedicated back link on the LEFT instead, which is what lib/page.php renders
+ * on every screen below the top level now.
+ *
+ * .subtitle-row and .create-book-btn used to live here, holding a subtitle
+ * field and a "Create Book" link side by side. Both were duplicates once the
+ * two screens became two tabs — the subtitle is edited on the Book tab, on the
+ * card showing the cover it prints on, and "Create Book" pointed at a screen
+ * that is now one tap away in the tab strip.
  */
 .back-row { margin-bottom: 10px; }
-.subtitle-row {
-  gap: 12px;
-  margin-bottom: 18px;
-}
-.subtitle-row .list { flex: 1 1 auto; min-width: 0; }
-/* .link-btn is already a real tap target (min-height: var(--tap)) without
-   forcing full width the way .btn-secondary/.btn-primary do — the right
-   shape to sit beside the subtitle box rather than stack under it. */
-.create-book-btn { flex: none; white-space: nowrap; }
 
 /* ============ Event-group review (Groups view) ============ */
 
