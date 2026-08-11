@@ -39,6 +39,9 @@ $data = array(
     'type'       => $type,
     'entry_date' => $date,
     'notes'      => is_string($body['notes'] ?? null) ? trim($body['notes']) : null,
+    /* An explicit project, when the + was tapped from inside one — see
+       year_project_for_new() in lib/repo.php. 0 means "the date decides". */
+    'year_project_id' => (int) ($body['year_project_id'] ?? 0),
 );
 
 $heroPhotoId = $body['hero_photo_id'] ?? null;

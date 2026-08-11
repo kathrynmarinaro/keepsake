@@ -3,6 +3,12 @@
  */
 
 import { apiPost, apiUpload } from './api.js';
+
+/* Which project everything on this screen belongs to, or 0 for "the date
+   decides". Set by public/capture.php from ?project=, which is what the +
+   inside a project passes — see that file's header. Read once: it is a
+   property of the screen and cannot change without a navigation. */
+const YEAR_PROJECT_ID = Number(document.body.dataset.yearProjectId || 0);
 import { showSnackbar } from './swipe.js';
 import { openPhotoPicker } from './photo-picker.js';
 import { openBatch } from './photo-batch.js';
@@ -44,6 +50,7 @@ function attachQuickAddForm(form, { endpoint, textField, extra = () => ({}) }) {
     const body = {
       [textField]: text,
       entry_date: dateInput.value || today(),
+      year_project_id: YEAR_PROJECT_ID,
       ...extra(form),
     };
 
@@ -105,6 +112,7 @@ function attachSnapshotForm(form) {
       entry_date: dateInput.value || today(),
       notes: form.querySelector('[name="notes"]').value.trim(),
       hero_photo_id: heroPhotoId,
+      year_project_id: YEAR_PROJECT_ID,
     };
 
     const fieldNames = type === 'birthday'
@@ -184,6 +192,9 @@ function attachPhotoUpload() {
 
     const form = new FormData();
     for (const file of files) { form.append('files[]', file, file.name); }
+    /* Multipart, so this rides along in the body beside the files rather than
+       as JSON — photos-upload.php reads it out of $_POST. */
+    if (YEAR_PROJECT_ID > 0) { form.append('year_project_id', String(YEAR_PROJECT_ID)); }
 
     status.hidden = false;
     status.textContent = `Uploading ${files.length} photo${files.length === 1 ? '' : 's'}…`;

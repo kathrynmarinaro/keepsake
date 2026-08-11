@@ -55,6 +55,16 @@ $rejected = array();
 // each one reading a slightly different `now()` a few milliseconds apart.
 $submittedAt = date('Y-m-d H:i:s');
 
+/* An explicit project, when the upload came from the + inside one. This is a
+ * multipart POST rather than JSON, so it arrives in $_POST beside the files.
+ * A project id that does not resolve is dropped rather than refused — the
+ * upload still succeeds with everything filed by its EXIF date, which is what
+ * this endpoint did before ?project= existed. */
+$projectId = isset($_POST['year_project_id']) ? (int) $_POST['year_project_id'] : 0;
+if ($projectId > 0 && year_project_get($projectId) === null) {
+    $projectId = 0;
+}
+
 foreach (photos_upload_normalize_files($_FILES['files']) as $file) {
     $label = photos_upload_display_name($file['name']);
 
@@ -77,7 +87,7 @@ foreach (photos_upload_normalize_files($_FILES['files']) as $file) {
     }
 
     try {
-        $row = photos_upload_store($file['tmp_name'], $sniff, $submittedAt);
+        $row = photos_upload_store($file['tmp_name'], $sniff, $submittedAt, $projectId);
     } catch (Throwable $e) {
         error_log('photos-upload: ' . $e->getMessage());
         $rejected[] = array('name' => $label, 'reason' => 'save_failed');
@@ -100,19 +110,26 @@ foreach (photos_upload_normalize_files($_FILES['files']) as $file) {
  * A grouping failure (a Nominatim outage, an unexpected exception) must not
  * cost Kathryn a successful upload she's already watched complete — fail
  * soft here the same way a single photo's thumbnail failure does above. */
-$touchedYears = array();
-foreach ($created as $row) {
-    $touchedYears[(int) substr((string) $row['entry_date'], 0, 4)] = true;
-}
-foreach (array_keys($touchedYears) as $year) {
-    $yearProject = year_project_get_by_year($year);
-    if ($yearProject === null) {
-        continue;
+/* Which PROJECTS were touched, not which years. With an explicit project every
+ * photo in the batch went there whatever its date said, so re-deriving the
+ * target from the dates would cluster the wrong book — or, for a trip book with
+ * no year at all, no book. */
+$touchedProjects = array();
+if ($projectId > 0) {
+    $touchedProjects[$projectId] = true;
+} else {
+    foreach ($created as $row) {
+        $yearProject = year_project_get_by_year((int) substr((string) $row['entry_date'], 0, 4));
+        if ($yearProject !== null) {
+            $touchedProjects[(int) $yearProject['id']] = true;
+        }
     }
+}
+foreach (array_keys($touchedProjects) as $touchedId) {
     try {
-        event_grouping_run((int) $yearProject['id']);
+        event_grouping_run($touchedId);
     } catch (Throwable $e) {
-        error_log('photos-upload: auto-grouping failed for year ' . $year . ': ' . $e->getMessage());
+        error_log('photos-upload: auto-grouping failed for project ' . $touchedId . ': ' . $e->getMessage());
     }
 }
 
@@ -193,7 +210,7 @@ function photos_upload_display_name(string $raw): string
  * lib/repo.php's photo_create()). Returns the row the client needs to run
  * the batch step-through.
  */
-function photos_upload_store(string $tmpName, array $sniff, string $submittedAt): array
+function photos_upload_store(string $tmpName, array $sniff, string $submittedAt, int $projectId = 0): array
 {
     imageproc_ensure_dir('original');
 
@@ -225,6 +242,9 @@ function photos_upload_store(string $tmpName, array $sniff, string $submittedAt)
     }
 
     $id = photo_create(array(
+        /* 0 means "no explicit project" — year_project_for_new() then falls
+           back to the EXIF date, which is the original rule. */
+        'year_project_id' => $projectId,
         'original_path' => $originalRel,
         'thumb_path'    => $thumbRel,
         'width'         => $dims[0] ?? null,

@@ -7,35 +7,56 @@
  * already are. Every date field defaults to today (capture.js sets it) and
  * stays editable, per brief §3.
  *
+ * REACHED FROM THE FLOATING +, which is why there is no longer an "Add" tab:
+ * adding is an action, not a place (lib/page.php's header has the reasoning).
+ *
+ * ?project=N PINS EVERYTHING SAVED HERE TO THAT PROJECT, whatever its date
+ * says. That is the whole difference between the + inside a project and the +
+ * on the list: inside a project you have already answered "which book", so a
+ * photo taken last December still belongs to the trip book you are adding it
+ * to. With no ?project= the original rule stands and the date decides — see
+ * year_project_for_new() in lib/repo.php.
+ *
  * No separate views layer — this file IS the template, matching every
  * sibling app and every other screen in this app. */
 
 declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
+require_once __DIR__ . '/../lib/repo.php';
+require_once __DIR__ . '/../lib/page.php';
 
 require_login_page();
+
+/* A project id that does not resolve is dropped rather than refused: the
+   screen still works, everything filed by its date, which is the behaviour
+   this screen had before ?project= existed. */
+$project   = isset($_GET['project']) ? year_project_get((int) $_GET['project']) : null;
+$projectId = $project === null ? 0 : (int) $project['id'];
+
+page_head(array(
+    'title'      => $project === null ? 'Add' : 'Add to ' . year_project_title($project),
+    /* capture.js reads this and sends it with every save. On the body rather
+       than on each of the four forms: it is a property of the screen, and four
+       hidden inputs would be four chances to forget one. */
+    'body_attrs' => array('data-year-project-id' => $projectId ?: null),
+));
+
+page_screen_head(array(
+    'heading' => 'Add',
+    'sub'     => $project === null ? '' : 'to ' . year_project_title($project),
+    'back'    => $project === null ? 'index.php' : project_url($projectId),
+));
 ?>
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Keepsake — Add</title>
-<link rel="stylesheet" href="<?= asset('assets/styles.css') ?>">
-</head>
-<body>
-<main class="wrap">
-  <header class="screen-head">
-    <h1>Add</h1>
-    <div class="head-actions">
-      <a class="link-btn" href="index.php">Years</a>
-    </div>
-  </header>
 
   <p class="hint">
-    Everything below lands in the right year on its own, from its own date —
-    no need to pick a year first.
+    <?php if ($project !== null): ?>
+      Everything below goes into <?= h(year_project_title($project)) ?>, whatever
+      its date says.
+    <?php else: ?>
+      Everything below lands in the right year on its own, from its own date —
+      no need to pick a year first.
+    <?php endif; ?>
   </p>
 
   <!-- Photos first and open by default: this is what gets added most —
@@ -156,13 +177,5 @@ require_login_page();
       </form>
     </div>
   </details>
-</main>
 
-<nav class="tabbar">
-  <a href="index.php">Years</a>
-  <a href="capture.php" class="is-active">Add</a>
-</nav>
-
-<script type="module" src="<?= asset('assets/capture.js') ?>"></script>
-</body>
-</html>
+<?php page_foot(array('scripts' => array('assets/capture.js'))) ?>

@@ -59,6 +59,79 @@ function year_project_get_or_create(string $date): int
 }
 
 /**
+ * Which project a NEW piece of content belongs to.
+ *
+ * An explicit year_project_id wins over the date, always. That is the whole
+ * point: adding something from inside a project means putting it in THAT
+ * project, whatever its date says — a photo taken last December belongs in the
+ * trip book you are looking at if that is where you added it from, and a book
+ * about a trip has no year for a date to resolve to in the first place.
+ *
+ * With no explicit id, the original rule stands and is still the common case:
+ * the year comes from the date (brief §3), which is what makes backfilling
+ * 2020-2025 practical with no manual picker. Adding from the project LIST
+ * screen goes through this branch, because there the answer really is "wherever
+ * the date says".
+ *
+ * A supplied id that does not exist falls back to the date rather than
+ * inserting a row that points at nothing — fail soft, and the content lands
+ * somewhere findable instead of erroring out mid-save.
+ *
+ * @param array  $data    The create payload; 'year_project_id' is optional.
+ * @param string $dateKey Which key holds this type's date ('entry_date' for
+ *               text content, 'captured_at' for photos).
+ */
+function year_project_for_new(array $data, string $dateKey): int
+{
+    $explicit = (int) ($data['year_project_id'] ?? 0);
+    if ($explicit > 0 && year_project_get($explicit) !== null) {
+        return $explicit;
+    }
+
+    return year_project_get_or_create((string) $data[$dateKey]);
+}
+
+/**
+ * Where a piece of content should live after its date was corrected — or NULL
+ * for "leave it exactly where it is".
+ *
+ * THE RULE: a row whose project still agrees with its own date was filed by
+ * the date, so correcting the date re-files it (commit "Correcting a photo's
+ * date now re-groups it" — a photo dated 2024 by a wrong EXIF timestamp has to
+ * be able to move to 2023 when that is fixed, or the correction is cosmetic).
+ * A row whose project does NOT agree with its date was put there by hand, and
+ * a hand placement outranks an inference. Correcting its date leaves it put.
+ *
+ * WHY THIS RATHER THAN A "PINNED" COLUMN on all four content tables: the fact
+ * is already in the data. "Does this row sit where its date would have put it"
+ * is exactly the question a pinned flag would answer, and a flag would be a
+ * second copy of it that can disagree with the row it describes. It also means
+ * nothing has to be backfilled — every row that exists today was filed by date
+ * and reads as unpinned, which is correct.
+ *
+ * A yearless project can never equal the date-derived answer, so content in a
+ * trip book is never re-filed out of it. That falls out of the rule rather
+ * than needing a case of its own.
+ */
+function year_project_reassign_on_date(int $currentId, ?string $oldDate, string $newDate): ?int
+{
+    if ($oldDate === null || $oldDate === '') {
+        return null;
+    }
+
+    $derivedFromOld = year_project_get_by_year(year_from_date($oldDate));
+    if ($derivedFromOld === null || (int) $derivedFromOld['id'] !== $currentId) {
+        return null; // hand-placed — not ours to move
+    }
+
+    if (year_from_date($oldDate) === year_from_date($newDate)) {
+        return null; // same year, nothing to re-file
+    }
+
+    return year_project_get_or_create($newDate);
+}
+
+/**
  * Every year_projects row, newest first — Phase 3's dashboard (public/index.php).
  * No filtering: a year with zero content simply never got a row in the first
  * place (year_project_get_or_create() is the only thing that inserts one), so
@@ -68,7 +141,81 @@ function year_project_get_or_create(string $date): int
  */
 function year_project_list(): array
 {
-    return q('SELECT * FROM year_projects ORDER BY year DESC')->fetchAll();
+    $rows = q('SELECT * FROM year_projects')->fetchAll();
+
+    /* Sorted in PHP, not in SQL, now that `year` can be NULL.
+     *
+     * The obvious ORDER BY year DESC puts every yearless project in one block
+     * at the bottom (MySQL sorts NULLs last in DESC), so a trip book made this
+     * morning files below a 2020 book that has not been touched in years. What
+     * is wanted is one list in rough recency order, with a project's year
+     * standing in for its date when it has one.
+     *
+     * Expressing that in portable SQL means COALESCE(year, YEAR(created_at)),
+     * and YEAR() is MySQL-only — tools/test-harness.php would need to learn a
+     * strftime rewrite to run a single query on a table that holds a handful
+     * of rows. Sorting here costs nothing at this size and keeps the rule
+     * readable and testable as plain PHP. */
+    $sortYear = static function (array $row): int {
+        if ($row['year'] !== null) {
+            return (int) $row['year'];
+        }
+        return (int) substr((string) $row['created_at'], 0, 4);
+    };
+
+    usort($rows, static function (array $a, array $b) use ($sortYear): int {
+        /* Ties broken by id descending — newest first — so two projects made
+           in the same year keep a stable, meaningful order rather than
+           whatever the storage engine handed back. */
+        return $sortYear($b) <=> $sortYear($a) ?: (int) $b['id'] <=> (int) $a['id'];
+    });
+
+    return $rows;
+}
+
+/**
+ * Make a project by hand: a year book for a year that has nothing in it yet,
+ * or a book that is not about a year at all.
+ *
+ * The OTHER way projects come into existence is year_project_get_or_create()
+ * below, which derives a year from the date on whatever is being saved. That
+ * one still runs for anything captured from outside a project. This one runs
+ * when Kathryn says "new project" out loud, and is the only path that can
+ * produce a yearless one.
+ *
+ * @param int|null    $year  NULL for a project that is not a calendar year.
+ * @param string|null $title REQUIRED when $year is NULL — see schema.sql's
+ *                    comment on the column. A yearless, nameless project has
+ *                    nothing to render on a card and no way to be told apart
+ *                    from the next one.
+ * @throws InvalidArgumentException when neither a year nor a title is given.
+ */
+function year_project_create(?int $year, ?string $title = null, ?string $subtitle = null): int
+{
+    $title    = ($title === null || trim($title) === '') ? null : trim($title);
+    $subtitle = ($subtitle === null || trim($subtitle) === '') ? null : trim($subtitle);
+
+    if ($year === null && $title === null) {
+        throw new InvalidArgumentException('A project needs a year or a name.');
+    }
+
+    /* A year that already has a project is that project, not a second one —
+       the same answer year_project_get_or_create() gives, and what stops a
+       double-tap on "New project" producing a duplicate 2025 that the UNIQUE
+       key would reject with a 500 instead. */
+    if ($year !== null) {
+        $existing = year_project_get_by_year($year);
+        if ($existing !== null) {
+            return (int) $existing['id'];
+        }
+    }
+
+    q(
+        'INSERT INTO year_projects (year, title, subtitle) VALUES (?, ?, ?)',
+        array($year, $title, $subtitle)
+    );
+
+    return (int) db()->lastInsertId();
 }
 
 function year_project_get(int $id): ?array
@@ -111,7 +258,16 @@ function year_project_update_title(int $id, ?string $title): void
 function year_project_title(array $project): string
 {
     $title = trim((string) ($project['title'] ?? ''));
-    return $title !== '' ? $title : (string) $project['year'];
+    if ($title !== '') {
+        return $title;
+    }
+
+    /* No title and no year should be impossible — year_project_create()
+       refuses it and year_project_get_or_create() always supplies a year — but
+       this function is called from inside loops on every screen in the app, and
+       "Untitled project" is a better outcome for one malformed row than a blank
+       card nobody can identify or click. Fail soft, per house style. */
+    return $project['year'] !== null ? (string) $project['year'] : 'Untitled project';
 }
 
 /**
@@ -143,6 +299,153 @@ function year_project_set_active_layout(int $id, ?int $layoutId): void
     q('UPDATE year_projects SET active_book_layout_id = ? WHERE id = ?', array($layoutId, $id));
 }
 
+/**
+ * How much is about to be destroyed, for the delete confirmation to say out
+ * loud. "Delete this project?" and "Delete this project — 123 photos, 4
+ * groups and 2 layouts?" are different questions, and only the second one can
+ * be answered correctly by someone who has two projects open in two tabs.
+ *
+ * Five COUNTs on a screen that runs them once, when a finger is already on a
+ * destructive button. Cheap at that rate.
+ */
+function year_project_counts(int $id): array
+{
+    $count = static function (string $table) use ($id): int {
+        return (int) q(
+            'SELECT COUNT(*) FROM ' . $table . ' WHERE year_project_id = ?',
+            array($id)
+        )->fetchColumn();
+    };
+
+    /* Table names are literals in this file, never request input — the
+       concatenation above cannot carry anything a caller supplied. */
+    return array(
+        'photos'    => $count('photos'),
+        'quotes'    => $count('quotes'),
+        'anecdotes' => $count('anecdotes'),
+        'snapshots' => $count('snapshots'),
+        'groups'    => $count('event_groups'),
+        'layouts'   => $count('book_layouts'),
+    );
+}
+
+/**
+ * Delete a project and everything in it.
+ *
+ * The ROWS are the database's job: every child table that points here does so
+ * with ON DELETE CASCADE (schema.sql: photos, quotes, anecdotes, snapshots,
+ * event_groups, book_layouts — and book_pages/book_page_photos cascade in turn
+ * from book_layouts). One DELETE takes all of them, in one transaction,
+ * without this function needing to know the table list or keep it up to date.
+ *
+ * The FILES are not, so they are collected BEFORE the delete and unlinked
+ * after it — the same "commit the row first, clean up files after" order
+ * photos-delete.php and photos-crop.php use, for the same reason: a crash
+ * between the two leaves an orphaned file on disk rather than a row pointing
+ * at nothing. Files are unlinked one at a time and failures ignored; a
+ * photo whose file already went missing must not stop the project from
+ * being deleted.
+ *
+ * @return int how many files were removed, so the caller can log it.
+ */
+function year_project_delete(int $id): int
+{
+    require_once __DIR__ . '/imageproc.php';
+
+    $paths = array();
+    $photos = q(
+        'SELECT original_path, thumb_path FROM photos WHERE year_project_id = ?',
+        array($id)
+    )->fetchAll();
+
+    foreach ($photos as $photo) {
+        foreach (array('original_path', 'thumb_path') as $column) {
+            if ($photo[$column] === null || $photo[$column] === '') {
+                continue;
+            }
+            $abs = imageproc_resolve_upload((string) $photo[$column]);
+            if ($abs !== null) {
+                $paths[$abs] = true;
+            }
+        }
+    }
+
+    q('DELETE FROM year_projects WHERE id = ?', array($id));
+
+    $removed = 0;
+    foreach (array_keys($paths) as $abs) {
+        if (@unlink($abs)) {
+            $removed++;
+        }
+    }
+
+    return $removed;
+}
+
+/**
+ * Everything in one project, as plain arrays, for the JSON export.
+ *
+ * SELECT * on purpose, rather than naming columns. This is a backup, not an
+ * API: the one failure that matters is a column added next month that quietly
+ * stops being exported, and nobody discovers it until they need the export.
+ * Whatever the table holds is what comes out, and a reader that does not
+ * recognise a key can ignore it.
+ *
+ * Photo FILES are not in here — see year-projects-export.php's header. The
+ * paths are, so an export can be matched back up against a copy of uploads/.
+ */
+function year_project_export_data(int $id): ?array
+{
+    $project = year_project_get($id);
+    if ($project === null) {
+        return null;
+    }
+
+    $for = static function (string $table) use ($id): array {
+        return q(
+            'SELECT * FROM ' . $table . ' WHERE year_project_id = ? ORDER BY id',
+            array($id)
+        )->fetchAll();
+    };
+
+    $layouts = $for('book_layouts');
+
+    /* Pages and their slots hang off layouts rather than off the project, so
+       they need the extra hop. Two queries per layout and a book has one or
+       two layouts — the alternative is a three-table join that has to be
+       un-joined again in PHP to rebuild the nesting. */
+    foreach ($layouts as &$layout) {
+        $pages = q(
+            'SELECT * FROM book_pages WHERE book_layout_id = ? ORDER BY page_number',
+            array((int) $layout['id'])
+        )->fetchAll();
+
+        foreach ($pages as &$page) {
+            $page['slots'] = q(
+                'SELECT * FROM book_page_photos WHERE book_page_id = ? ORDER BY slot_number',
+                array((int) $page['id'])
+            )->fetchAll();
+        }
+        unset($page);
+
+        $layout['pages'] = $pages;
+    }
+    unset($layout);
+
+    return array(
+        'keepsake_export' => 1,
+        'exported_at'     => date('c'),
+        'project'         => $project,
+        'display_title'   => year_project_title($project),
+        'event_groups'    => $for('event_groups'),
+        'photos'          => $for('photos'),
+        'quotes'          => $for('quotes'),
+        'anecdotes'       => $for('anecdotes'),
+        'snapshots'       => $for('snapshots'),
+        'book_layouts'    => $layouts,
+    );
+}
+
 /* --------------------------------------------------------------- quotes */
 
 /**
@@ -151,7 +454,7 @@ function year_project_set_active_layout(int $id, ?int $layoutId): void
  */
 function quote_create(array $data): int
 {
-    $yearId = year_project_get_or_create($data['entry_date']);
+    $yearId = year_project_for_new($data, 'entry_date');
 
     q(
         'INSERT INTO quotes (year_project_id, quote_text, who_said_it, entry_date)
@@ -200,8 +503,20 @@ function quote_update(int $id, array $fields): void
     if (array_key_exists('entry_date', $fields) && $fields['entry_date'] !== '') {
         $sets[]   = 'entry_date = ?';
         $values[] = $fields['entry_date'];
-        $sets[]   = 'year_project_id = ?';
-        $values[] = year_project_get_or_create($fields['entry_date']);
+        /* Re-file into another project ONLY if this row still sits where its
+           own date put it. A row placed by hand stays placed — see
+           year_project_reassign_on_date() for why that test is the data
+           itself rather than a pinned flag on four tables. */
+        $existing = quote_get($id);
+        $moved    = $existing === null ? null : year_project_reassign_on_date(
+            (int) $existing['year_project_id'],
+            $existing['entry_date'] === null ? null : (string) $existing['entry_date'],
+            (string) $fields['entry_date']
+        );
+        if ($moved !== null) {
+            $sets[]   = 'year_project_id = ?';
+            $values[] = $moved;
+        }
     }
 
     if ($sets === array()) {
@@ -225,7 +540,7 @@ function quote_delete(int $id): void
  */
 function anecdote_create(array $data): int
 {
-    $yearId = year_project_get_or_create($data['entry_date']);
+    $yearId = year_project_for_new($data, 'entry_date');
 
     q(
         'INSERT INTO anecdotes (year_project_id, anecdote_text, entry_date) VALUES (?, ?, ?)',
@@ -267,8 +582,20 @@ function anecdote_update(int $id, array $fields): void
     if (array_key_exists('entry_date', $fields) && $fields['entry_date'] !== '') {
         $sets[]   = 'entry_date = ?';
         $values[] = $fields['entry_date'];
-        $sets[]   = 'year_project_id = ?';
-        $values[] = year_project_get_or_create($fields['entry_date']);
+        /* Re-file into another project ONLY if this row still sits where its
+           own date put it. A row placed by hand stays placed — see
+           year_project_reassign_on_date() for why that test is the data
+           itself rather than a pinned flag on four tables. */
+        $existing = anecdote_get($id);
+        $moved    = $existing === null ? null : year_project_reassign_on_date(
+            (int) $existing['year_project_id'],
+            $existing['entry_date'] === null ? null : (string) $existing['entry_date'],
+            (string) $fields['entry_date']
+        );
+        if ($moved !== null) {
+            $sets[]   = 'year_project_id = ?';
+            $values[] = $moved;
+        }
     }
 
     if ($sets === array()) {
@@ -305,7 +632,7 @@ function snapshot_create(array $data): int
         throw new InvalidArgumentException('bad snapshot type: ' . $type);
     }
 
-    $yearId = year_project_get_or_create($data['entry_date']);
+    $yearId = year_project_for_new($data, 'entry_date');
 
     // Only the fields belonging to this template are ever written — the
     // OTHER template's columns are left NULL rather than trusting the caller
@@ -386,8 +713,20 @@ function snapshot_update(int $id, array $fields): void
     if (array_key_exists('entry_date', $fields) && $fields['entry_date'] !== '') {
         $sets[]   = 'entry_date = ?';
         $values[] = $fields['entry_date'];
-        $sets[]   = 'year_project_id = ?';
-        $values[] = year_project_get_or_create($fields['entry_date']);
+        /* Re-file into another project ONLY if this row still sits where its
+           own date put it. A row placed by hand stays placed — see
+           year_project_reassign_on_date() for why that test is the data
+           itself rather than a pinned flag on four tables. */
+        $existing = snapshot_get($id);
+        $moved    = $existing === null ? null : year_project_reassign_on_date(
+            (int) $existing['year_project_id'],
+            $existing['entry_date'] === null ? null : (string) $existing['entry_date'],
+            (string) $fields['entry_date']
+        );
+        if ($moved !== null) {
+            $sets[]   = 'year_project_id = ?';
+            $values[] = $moved;
+        }
     }
     if (array_key_exists('hero_photo_id', $fields)) {
         $sets[]   = 'hero_photo_id = ?';
@@ -440,7 +779,7 @@ function photo_create(array $data): int
     // public/api/photos-upload.php) BEFORE this function ever runs, so the
     // year it derives is correct either way without this function needing
     // to know which source it came from.
-    $yearId = year_project_get_or_create($data['captured_at']);
+    $yearId = year_project_for_new($data, 'captured_at');
 
     q(
         'INSERT INTO photos
@@ -510,8 +849,20 @@ function photo_update(int $id, array $fields): void
     if (array_key_exists('captured_at', $fields) && $fields['captured_at'] !== '') {
         $sets[]   = 'captured_at = ?';
         $values[] = $fields['captured_at'];
-        $sets[]   = 'year_project_id = ?';
-        $values[] = year_project_get_or_create($fields['captured_at']);
+        /* Re-file into another project ONLY if this row still sits where its
+           own date put it. A row placed by hand stays placed — see
+           year_project_reassign_on_date() for why that test is the data
+           itself rather than a pinned flag on four tables. */
+        $existing = photo_get($id);
+        $moved    = $existing === null ? null : year_project_reassign_on_date(
+            (int) $existing['year_project_id'],
+            $existing['captured_at'] === null ? null : (string) $existing['captured_at'],
+            (string) $fields['captured_at']
+        );
+        if ($moved !== null) {
+            $sets[]   = 'year_project_id = ?';
+            $values[] = $moved;
+        }
     }
     if (array_key_exists('skip_for_book', $fields)) {
         $sets[]   = 'skip_for_book = ?';

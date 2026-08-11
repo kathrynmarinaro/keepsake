@@ -1,0 +1,574 @@
+<?php
+/* The Book tab of a project screen (public/project.php?tab=book).
+ *
+ * This was public/layout.php, whole — see lib/views/content.php's header for
+ * why the two screens became two tabs. public/project.php resolves the
+ * project, renders the chrome and the tab strip, and requires this file with
+ * $project already in scope and guaranteed non-null, which is why the
+ * null-guards the prologue used to carry are gone rather than left inert.
+ */
+
+declare(strict_types=1);
+
+if (!isset($project) || !is_array($project)) {
+    http_response_code(404);
+    exit;
+}
+
+/* Named once, here. Everything below prints the book's own name rather than
+   its year, because a project may not have one — year_project_title() is the
+   single place that decides what a book is called. */
+$projectId   = (int) $project['id'];
+$projectName = year_project_title($project);
+
+require_once __DIR__ . '/../grouping.php';
+require_once __DIR__ . '/../layout.php';
+require_once __DIR__ . '/../layout_render.php';
+require_once __DIR__ . '/../pdfexport.php';
+
+$layouts = book_layouts_for_year((int) $project['id']);
+
+/* Which version to inspect: the one asked for, else the year's active one,
+ * else the newest. A layout id that belongs to a DIFFERENT year is ignored
+ * rather than rendered — the isolation rule (PLAN.md) is a property of every
+ * screen, not just of the writes. */
+$requested = isset($_GET['layout']) ? (int) $_GET['layout'] : 0;
+$selected  = null;
+foreach ($layouts as $layout) {
+    if ((int) $layout['id'] === $requested) {
+        $selected = $layout;
+    }
+}
+if ($selected === null && $layouts !== array()) {
+    $activeId = $project['active_book_layout_id'] === null ? 0 : (int) $project['active_book_layout_id'];
+    foreach ($layouts as $layout) {
+        if ((int) $layout['id'] === $activeId) {
+            $selected = $layout;
+        }
+    }
+    if ($selected === null) {
+        $selected = $layouts[0];
+    }
+}
+
+$pages = $selected === null ? array() : book_layout_pages_with_content((int) $selected['id']);
+
+$coverPhoto = ($project['cover_photo_id'] !== null)
+    ? photo_get((int) $project['cover_photo_id'])
+    : null;
+
+/** First ~90 characters of a run of text, for a slot's card. */
+function page_snippet(string $text, int $len = 90): string
+{
+    $text = trim(preg_replace('/\s+/', ' ', $text) ?? $text);
+    return mb_strlen($text) > $len ? mb_substr($text, 0, $len - 1) . '…' : $text;
+}
+
+function page_fmt_date(string $ymd): string
+{
+    $ts = strtotime($ymd);
+    return $ts === false ? $ymd : date('M j, Y', $ts);
+}
+
+/** A snapshot page's fixed fields, birthday or school-year — brief §2.3. */
+function render_snapshot_page(array $page): string
+{
+    ob_start();
+    $isBirthday = $page['snapshot_type'] === 'birthday';
+    $hero = $page['snapshot_hero_thumb'] ?: $page['snapshot_hero_original'];
+
+    $facts = array();
+    if ($isBirthday) {
+        if ($page['snapshot_age'] !== null) { $facts[] = 'Age ' . $page['snapshot_age']; }
+        if ($page['snapshot_height']) { $facts[] = (string) $page['snapshot_height']; }
+    } else {
+        foreach (array('grade' => 'Grade', 'school' => 'School', 'teacher' => 'Teacher',
+                        'favorite_color' => 'Favorite color', 'dream_job' => 'Dream job',
+                        'favorite_class' => 'Favorite class') as $field => $label) {
+            $value = $page['snapshot_' . $field];
+            if ($value !== null && $value !== '') {
+                $facts[] = $label . ': ' . $value;
+            }
+        }
+    }
+    ?>
+    <div class="ks-snapshot">
+      <?php if ($hero): ?>
+        <img class="ks-snapshot-hero" src="<?= h((string) $hero) ?>" alt="">
+      <?php endif; ?>
+      <div class="ks-snapshot-body">
+        <span class="pill"><?= $isBirthday ? 'Birthday' : 'School year' ?></span>
+        <div class="hint"><?= h(page_fmt_date((string) $page['snapshot_date'])) ?></div>
+        <?php if ($facts !== array()): ?>
+          <ul class="ks-snapshot-facts">
+            <?php foreach ($facts as $fact): ?><li><?= h($fact) ?></li><?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
+        <?php if ($page['snapshot_notes']): ?>
+          <p class="ks-snapshot-notes"><?= h((string) $page['snapshot_notes']) ?></p>
+        <?php endif; ?>
+      </div>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+/**
+ * One photo slot — draggable, since photos are the only thing Phase 6's
+ * swap/move gestures act on (lib/repo.php's book_page_slot_swap()/_move()).
+ *
+ * $flexStyle is this leaf's `flex: <weight> 0 0` from
+ * a rectangle solved by lib/compose.php — see render_page_canvas() — so this
+ * slot is positioned and sized by the same numbers the PDF uses, rather than
+ * by anything the browser works out for itself.
+ *
+ * A slot with a manual crop override (book_page_photos.crop_x/y/w/h, set via
+ * the "Adjust crop" control) renders as a sized `background-image` instead
+ * of a plain `<img>` — lib/layout_render.php's layout_crop_css() header
+ * explains why `object-position` alone can't reproduce an arbitrary
+ * zoom+pan. Every OTHER slot (no override, the common case) stays a plain
+ * `<img>` with `object-fit: cover` — cheaper, and real `<img>` semantics.
+ */
+function render_photo_slot(array $slot, string $flexStyle = ''): string
+{
+    ob_start();
+    $src     = (string) ($slot['thumb_path'] ?: $slot['original_path']);
+    $hasCrop = $slot['crop_x'] !== null && $slot['crop_w'] !== null;
+    ?>
+    <figure class="ks-slot ks-slot-photo" draggable="true" style="<?= h($flexStyle) ?>"
+            data-slot-id="<?= (int) $slot['id'] ?>" data-photo-id="<?= (int) $slot['photo_id'] ?>"
+            data-original="<?= h((string) $slot['original_path']) ?>"
+            data-src="<?= h($src) ?>"
+            data-crop="<?= $hasCrop ? h((string) json_encode(array(
+                'x' => (float) $slot['crop_x'], 'y' => (float) $slot['crop_y'],
+                'w' => (float) $slot['crop_w'], 'h' => (float) $slot['crop_h'],
+            ))) : '' ?>">
+      <div class="ks-slot-photo-frame">
+        <?php if ($hasCrop):
+            $css = layout_crop_css(array(
+                'x' => (float) $slot['crop_x'], 'y' => (float) $slot['crop_y'],
+                'w' => (float) $slot['crop_w'], 'h' => (float) $slot['crop_h'],
+            ));
+        ?>
+          <div class="ks-slot-photo-bg"
+               style="background-image:url('<?= h($src) ?>');background-size:<?= h($css['size']) ?>;background-position:<?= h($css['position']) ?>;"></div>
+        <?php else: ?>
+          <img src="<?= h($src) ?>" alt="" loading="lazy">
+        <?php endif; ?>
+        <button type="button" class="ks-slot-crop-btn" data-act="adjust-crop"
+                data-slot-id="<?= (int) $slot['id'] ?>" aria-label="Adjust crop">⤢</button>
+      </div>
+      <?php /* No per-photo caption here any more. Kathryn chose the page-foot
+               treatment, so a photo's caption prints as part of one line at the
+               bottom of the page (book_page_caption()) — showing it under the
+               photo as well would put something on this screen that the book
+               will not have. Captions are still authored per photo, on the
+               review screen. */ ?>
+    </figure>
+    <?php
+    return ob_get_clean();
+}
+
+/** A quote/anecdote card — riding along on a photo page, or standing alone
+ *  on a page_type='text' page. Never draggable — see this file's header. */
+function render_text_slot(array $slot, bool $standalone, string $flexStyle = ''): string
+{
+    ob_start();
+    $isQuote = $slot['quote_id'] !== null;
+    ?>
+    <div class="ks-slot ks-slot-text<?= $standalone ? ' is-standalone' : '' ?>" style="<?= h($flexStyle) ?>">
+      <span class="pill is-plain"><?= $isQuote ? 'quote' : 'anecdote' ?></span>
+      <?php if ($isQuote): ?>
+        <p>“<?= h(page_snippet((string) $slot['quote_text'], $standalone ? 400 : 90)) ?>”</p>
+        <span class="hint"><?= h((string) $slot['who_said_it']) ?> · <?= h(page_fmt_date((string) $slot['quote_date'])) ?></span>
+      <?php else: ?>
+        <p><?= h(page_snippet((string) $slot['anecdote_text'], $standalone ? 400 : 90)) ?></p>
+        <span class="hint"><?= h(page_fmt_date((string) $slot['anecdote_date'])) ?></span>
+      <?php endif; ?>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+/**
+ * One occupant, positioned absolutely from a solved rectangle.
+ *
+ * The rectangle is a percentage of the square page, straight out of
+ * compose_solve(), so this function does no geometry of its own — that is the
+ * point. The same numbers drive lib/pdfexport.php, which is the only way the
+ * preview and the printed book can be guaranteed to agree.
+ */
+function render_placed_slot(array $slot, array $rect): string
+{
+    $style = sprintf(
+        'position:absolute;left:%.4f%%;top:%.4f%%;width:%.4f%%;height:%.4f%%;',
+        $rect['x'], $rect['y'], $rect['w'], $rect['h']
+    );
+
+    return $slot['photo_id'] !== null
+        ? render_photo_slot($slot, $style)
+        : render_text_slot($slot, false, $style);
+}
+
+/**
+ * The whole page canvas: a fixed-aspect box (styles.css: square, matching
+ * config's default trim) containing the composition tree built from this
+ * page's CURRENT slots. Roles (portrait/landscape) and the tree shape are
+ * recomputed here, every render — see lib/layout_render.php's header on
+ * why that's deliberate rather than reading back a decision made when the
+ * page was generated.
+ *
+ * $mirror alternates by page NUMBER, not stored anywhere — plain visual
+ * variety between two same-shaped pages a reader will see close together.
+ */
+function render_page_canvas(array $slots, ?array $choice, string $caption, int $pageId): string
+{
+    if ($choice === null) {
+        /* No template accepts these shapes. Draw the page empty and say so,
+         * rather than inventing an arrangement: a page that looks plausible and
+         * is wrong is worse than one that is visibly broken. */
+        return '<div class="ks-page-canvas is-unplaceable">'
+            . '<p class="hint">No template fits this page\'s photo shapes.</p></div>';
+    }
+
+    $tpl   = compose_templates()[$choice['name']];
+    $occ   = compose_bind(compose_occupants($slots), $tpl, $choice['order']);
+    $rects = compose_solve($tpl, $occ);
+
+    $inner = '';
+    foreach ($rects as $rect) {
+        $slot = $slots[$choice['order'][$rect['slot']]] ?? null;
+        if ($slot !== null) {
+            $inner .= render_placed_slot($slot, $rect);
+        }
+    }
+
+    /* The foot caption sits centred in the white space between the photos and
+     * the bottom of the page — Kathryn's correction to a fixed offset, which
+     * put the line in a different relationship to the photos on every page
+     * because the block's height changes. Computed from the solved rectangles
+     * rather than guessed. */
+    $bottom = 0.0;
+    foreach ($rects as $rect) {
+        $bottom = max($bottom, $rect['y'] + $rect['h']);
+    }
+    $footTop = ($bottom + 100.0) / 2.0;
+
+    $inner .= sprintf(
+        '<div class="ks-page-caption" style="top:%.4f%%" data-page-id="%d" '
+            . 'contenteditable="true" spellcheck="false" role="textbox" '
+            . 'aria-label="Page caption" data-original="%s">%s</div>',
+        $footTop,
+        $pageId,
+        h($caption),
+        h($caption)
+    );
+
+    return '<div class="ks-page-canvas">' . $inner . '</div>';
+}
+
+/** One page card: header, reflow button, and whichever body its page_type calls for. */
+function render_page(array $page, ?array $choice): string
+{
+    ob_start();
+    $type = (string) $page['page_type'];
+    ?>
+    <section class="card ks-page" data-page-id="<?= (int) $page['id'] ?>"
+              data-page-number="<?= (int) $page['page_number'] ?>" data-page-type="<?= h($type) ?>">
+      <div class="row-between ks-page-head">
+        <strong>Page <?= (int) $page['page_number'] ?></strong>
+        <div class="row ks-page-actions">
+          <span class="pill<?= $type === 'photos' ? '' : ' is-plain' ?>"><?= h($type) ?></span>
+          <button type="button" class="btn-ghost" data-act="reflow" data-page="<?= (int) $page['page_number'] ?>">
+            Reflow from here
+          </button>
+        </div>
+      </div>
+
+      <?php if ($type === 'snapshot'): ?>
+        <?= render_snapshot_page($page) ?>
+      <?php elseif ($type === 'text'): ?>
+        <?php foreach ($page['slots'] as $slot) { echo render_text_slot($slot, true); } ?>
+      <?php elseif ($page['slots'] === array()): ?>
+        <?php // Phase 6's known gap: moving the only photo off a page can leave
+              // an empty book_pages row until a reflow — see lib/pdfexport.php's
+              // identical fail-soft case. ?>
+        <p class="hint">(empty page)</p>
+      <?php else: ?>
+        <?= render_page_canvas(
+              $page['slots'],
+              $choice,
+              book_page_caption($page, $page['slots']),
+              (int) $page['id']
+            ) ?>
+      <?php endif; ?>
+    </section>
+    <?php
+    return ob_get_clean();
+}
+?>
+
+  <p class="hint">
+    Generating a layout always adds a new version — nothing is ever
+    overwritten, so re-running to see a different arrangement costs nothing.
+  </p>
+
+  <!-- Brief §4.6, final step before export: title/subtitle/cover. A
+       property of the YEAR, not of any one layout version, so it's shown
+       regardless of which version is open below. -->
+  <div class="card" data-role="title-card" data-year-project="<?= (int) $project['id'] ?>">
+    <strong>Book title &amp; cover</strong>
+    <p class="hint">Tap the title or the subtitle to change it. Both are optional — clear the title and the book goes back to being called <?= h($projectName) ?>.</p>
+    <ul class="list" id="subtitle-list">
+      <li class="list-row" data-id="<?= (int) $project['id'] ?>">
+        <div class="row-slide">
+          <div class="row-body">
+            <span class="row-sub">Title</span>
+            <?php /* Tap-to-edit, same gesture and same endpoint as the subtitle
+                     below it. Muted when she has not named the book: the year
+                     showing there is a default the app is filling in, not a
+                     value she chose, and the two should not look alike. */ ?>
+            <span class="row-text<?= $project['title'] ? '' : ' muted' ?>" data-role="title"><?= h(year_project_title($project)) ?></span>
+          </div>
+          <?php /* Clearing a field needs its own control, because inline-edit.js
+                   deliberately treats an emptied input as a cancel — "an empty
+                   name is a delete in disguise, and delete has its own gesture".
+                   That rule is right and shared with the other apps, so this is
+                   the separate gesture rather than an exception to it. Hidden
+                   when there is nothing to undo. */ ?>
+          <button type="button" class="tap-text" data-act="clear-title"
+                  <?= $project['title'] ? '' : 'hidden' ?>>Reset</button>
+        </div>
+      </li>
+      <li class="list-row" data-id="<?= (int) $project['id'] ?>">
+        <div class="row-slide">
+          <div class="row-body">
+            <span class="row-sub">Subtitle</span>
+            <span class="row-text<?= $project['subtitle'] ? '' : ' muted' ?>" data-role="subtitle"><?= h($project['subtitle'] ?: 'Tap to add a subtitle…') ?></span>
+          </div>
+          <button type="button" class="tap-text" data-act="clear-subtitle"
+                  <?= $project['subtitle'] ? '' : 'hidden' ?>>Remove</button>
+        </div>
+      </li>
+    </ul>
+
+    <?php
+      /* THE COVER AS IT WILL PRINT, not a thumbnail of the photo.
+       *
+       * Kathryn asked for this after an export whose cover was wrong in four
+       * ways at once — it was the only page in the book she could not look at
+       * before paying to print it. It is a square, the photo fills it and
+       * bleeds off every edge, and the title band sits where the PDF puts it,
+       * using cover_band_metrics() so the two cannot drift.
+       *
+       * The bleed is drawn as a dashed edge rather than hidden: the photo
+       * genuinely does run past the trim, and what is outside that line is
+       * what the printer cuts off. Better to see it than to be surprised by
+       * it on paper. */
+      $coverCrop = ($project !== null && $project['cover_crop_x'] !== null)
+          ? layout_crop_css(array(
+              'x' => (float) $project['cover_crop_x'], 'y' => (float) $project['cover_crop_y'],
+              'w' => (float) $project['cover_crop_w'], 'h' => (float) $project['cover_crop_h'],
+            ))
+          : null;
+
+      $coverGeo  = pdf_export_geometry();
+      $safeFrac  = (float) $coverGeo['content_margin_mm'] / (float) $coverGeo['page_height_mm'];
+      $subtitle  = trim((string) ($project['subtitle'] ?? ''));
+      $band      = cover_band_metrics($subtitle !== '', $safeFrac);
+      $bleedFrac = (float) $coverGeo['bleed_in'] / (float) $coverGeo['page_width_in'];
+
+      /* The type sizes come from cover_band_metrics() too, in fractions of the
+       * page, and become container units here — 1cqw is 1% of the preview's
+       * width, and the preview is the page. They used to be constants in
+       * styles.css, tuned by eye, and were nearly double what the exporter
+       * printed; a preview whose whole job is showing where the title falls
+       * cannot have its own opinion about how big the title is. */
+      $bandCss = static fn(float $frac): string => round($frac * 100, 3) . 'cqw';
+    ?>
+    <div class="ks-cover-row">
+      <div class="ks-cover-preview<?= $coverPhoto === null ? ' is-empty' : '' ?>"
+           data-role="cover-preview"
+           data-year-project="<?= (int) $project['id'] ?>"
+           data-photo-id="<?= $coverPhoto !== null ? (int) $coverPhoto['id'] : '' ?>"
+           data-original="<?= $coverPhoto !== null ? h((string) $coverPhoto['original_path']) : '' ?>"
+           data-crop="<?= $coverCrop !== null ? h((string) json_encode(array(
+               'x' => (float) $project['cover_crop_x'], 'y' => (float) $project['cover_crop_y'],
+               'w' => (float) $project['cover_crop_w'], 'h' => (float) $project['cover_crop_h'],
+           ))) : '' ?>">
+        <?php if ($coverPhoto !== null): ?>
+          <?php $coverSrc = (string) ($coverPhoto['original_path'] ?: $coverPhoto['thumb_path']); ?>
+          <div class="ks-cover-art" data-role="cover-art"
+               style="background-image:url('<?= h($coverSrc) ?>');<?= $coverCrop !== null
+                   ? 'background-size:' . h($coverCrop['size']) . ';background-position:' . h($coverCrop['position']) . ';'
+                   : '' ?>"></div>
+        <?php endif; ?>
+
+        <?php /* The band is flex-centred, which puts one line dead centre and a
+                 pair centred together — the same result the PDF gets from the
+                 explicit top margin cover_band_metrics() hands it. */ ?>
+        <div class="ks-cover-band" data-role="cover-band"
+             style="left:<?= round($band['inset'] * 100, 3) ?>%;
+             right:<?= round($band['inset'] * 100, 3) ?>%;
+             top:<?= round($band['top'] * 100, 3) ?>%;
+             height:<?= round($band['height'] * 100, 3) ?>%;
+             gap:<?= $bandCss($band['gap']) ?>;">
+          <span class="ks-cover-title" data-role="cover-title"
+                style="font-size:<?= $bandCss($band['title_size']) ?>;"><?= h(year_project_title($project)) ?></span>
+          <span class="ks-cover-sub" data-role="cover-sub"
+                style="font-size:<?= $bandCss($band['sub_size']) ?>;<?= $subtitle === '' ? 'display:none;' : '' ?>"><?= h($subtitle) ?></span>
+        </div>
+
+        <div class="ks-cover-trim" aria-hidden="true"
+             style="inset:<?= round($bleedFrac * 100, 3) ?>%;"></div>
+      </div>
+
+      <div>
+        <p class="hint" data-role="cover-status"><?= $coverPhoto !== null ? 'Cover photo set.' : 'No cover photo chosen yet.' ?></p>
+        <p class="hint">The dashed line is where the printer trims. Anything outside it is cut off.</p>
+        <div class="row">
+          <button type="button" class="btn-ghost" data-act="pick-cover"><?= $coverPhoto !== null ? 'Change cover photo' : 'Choose cover photo' ?></button>
+          <?php if ($coverPhoto !== null): ?>
+            <button type="button" class="btn-ghost" data-act="crop-cover">Adjust framing</button>
+          <?php endif; ?>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 7 (brief §5.5): the one action the exit criterion asks for.
+       Always reads year_projects.active_book_layout_id — see
+       lib/pdfexport.php's header for why that's never "the newest version".
+       A plain GET link, not a JS-driven fetch(): the browser's own download
+       handling is simpler and more robust than reimplementing it, and GET
+       requests don't need api.js's CSRF header (require_same_origin() is a
+       no-op for GET). No cover photo picked yet doesn't block this — the
+       export itself fails soft on that (see lib/pdfexport.php). -->
+  <div class="card row-between" data-role="export-bar">
+    <div>
+      <strong>Export PDF</strong>
+      <div class="hint">
+        <?php if ($project['active_book_layout_id'] !== null): ?>
+          Print-ready PDF of the active layout — the cover, then every generated page.
+        <?php else: ?>
+          Generate a layout and mark one active ("Use this one") before exporting.
+        <?php endif; ?>
+      </div>
+    </div>
+    <?php if ($project['active_book_layout_id'] !== null): ?>
+      <a class="btn-primary" href="api/export.php?id=<?= $projectId ?>">Export PDF</a>
+    <?php else: ?>
+      <button class="btn-primary" type="button" disabled>Export PDF</button>
+    <?php endif; ?>
+  </div>
+
+  <div class="card row-between" data-role="generate-bar" data-year-project="<?= (int) $project['id'] ?>">
+    <div>
+      <strong>Create book layout</strong>
+      <div class="hint">Arranges everything reviewed for <?= h($projectName) ?> into pages.</div>
+    </div>
+    <button class="btn-primary" type="button" data-act="generate">Create</button>
+  </div>
+
+  <?php if ($layouts === array()): ?>
+    <div class="empty">
+      <p>No layouts generated yet.</p>
+      <p class="hint">Review this year's content on the
+      <a href="<?= h(project_url($projectId, 'content')) ?>">Content tab</a> first —
+      skip-for-book, full-page flags and event groups all change what the
+      engine does.</p>
+    </div>
+  <?php else: ?>
+
+    <h2 class="cat-head">Versions <span class="cat-count"><?= count($layouts) ?></span></h2>
+    <div class="stack">
+      <?php foreach ($layouts as $layout):
+          $id       = (int) $layout['id'];
+          $isActive = $project['active_book_layout_id'] !== null && (int) $project['active_book_layout_id'] === $id;
+          $isOpen   = $selected !== null && (int) $selected['id'] === $id;
+      ?>
+        <div class="card version-row<?= $isOpen ? ' is-open' : '' ?>">
+          <div class="row-between">
+            <div>
+              <strong>Version <?= (int) $layout['version'] ?></strong>
+              <?php if ($isActive): ?><span class="pill">active</span><?php endif; ?>
+              <div class="hint">
+                <?= (int) $layout['page_count'] ?> pages ·
+                <?= (int) $layout['photo_pages'] ?> photo,
+                <?= (int) $layout['text_pages'] ?> text,
+                <?= (int) $layout['snapshot_pages'] ?> snapshot ·
+                <?= (int) $layout['slot_count'] ?> filled slots ·
+                <?= h(page_fmt_date((string) $layout['created_at'])) ?>
+              </div>
+            </div>
+            <div class="row version-actions">
+              <?php if (!$isActive): ?>
+                <button class="btn-secondary" type="button" data-act="activate" data-layout="<?= $id ?>">Use this one</button>
+              <?php endif; ?>
+              <a class="link-btn" href="<?= h(project_url($projectId, 'book', array('layout' => $id))) ?>">
+                <?= $isOpen ? 'Viewing' : 'View pages' ?>
+              </a>
+              <?php if (!$isActive): ?>
+                <?php /* Only ever offered for a version that is NOT active — the
+                         endpoint refuses the active one too, but a button you
+                         cannot use is worse than one that is not there. */ ?>
+                <button class="btn-danger" type="button" data-act="delete-layout"
+                        data-layout="<?= $id ?>" data-version="<?= (int) $layout['version'] ?>">Delete</button>
+              <?php endif; ?>
+            </div>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+
+    <?php if ($selected !== null): ?>
+      <h2 class="cat-head">
+        Version <?= (int) $selected['version'] ?> — pages
+        <span class="cat-count"><?= count($pages) ?></span>
+      </h2>
+
+      <?php if ($pages === array()): ?>
+        <div class="empty">
+          <p>This version has no pages.</p>
+          <p class="hint">Nothing eligible was found for this year — every
+          photo skipped, or nothing captured yet.</p>
+        </div>
+      <?php else: ?>
+        <p class="hint">
+          Drag a photo onto another photo to swap them. Drag a photo onto a
+          different page's background to move it there. Text cards aren't
+          drag targets. Tap <span aria-hidden="true">⤢</span> on a photo to
+          adjust how it's cropped on this page. “Reflow from here”
+          regenerates every page from that one to the end of the book — the
+          pages before it are never touched.
+        </p>
+        <?php
+          /* Template choice is a property of the SEQUENCE, not of one page —
+             interchangeable layouts rotate by least-recently-used so a book of
+             portraits is not the same arrangement forty times over. So it is
+             computed once for the whole layout here and handed down, which is
+             also what lets lib/pdfexport.php arrive at the same answer. */
+          $choices = array();
+          $photoPages = array();
+          foreach ($pages as $page) {
+              if ($page['page_type'] === 'photos' && $page['slots'] !== array()) {
+                  $photoPages[] = (int) $page['id'];
+                  $occupants[]  = compose_occupants($page['slots']);
+              }
+          }
+          foreach (compose_assign($occupants ?? array()) as $i => $choice) {
+              $choices[$photoPages[$i]] = $choice;
+          }
+        ?>
+        <div class="ks-book" data-layout-id="<?= (int) $selected['id'] ?>">
+          <?php foreach (array_chunk($pages, 2) as $spread): ?>
+            <div class="ks-spread">
+              <?php foreach ($spread as $page) { echo render_page($page, $choices[(int) $page['id']] ?? null); } ?>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+    <?php endif; ?>
+
+  <?php endif; ?>
+

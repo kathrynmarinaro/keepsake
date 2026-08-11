@@ -104,15 +104,36 @@ button { cursor: pointer; }
            calc(var(--safe-bottom) + var(--tap) + 34px);
 }
 
-/* Signature divider — a 2px teal rule under headings. */
+/* Signature divider — a 2px teal rule under headings.
+ *
+ * align-items:center, not baseline. Baseline is right for a lone <h1> beside a
+ * text link, and wrong the moment either side is taller than one line: a
+ * project header carries a subtitle under its title and a 48px .icon-btn on
+ * the right, and baseline-aligning those hangs the button off the title's
+ * baseline with its bottom half below the teal rule. */
 .screen-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   border-bottom: 2px solid var(--teal);
   padding-bottom: 10px;
   margin: 4px 0 20px;
+}
+
+/* The heading and its quieter second line, as one block, so the menu button
+   centres against the pair rather than against the title alone. min-width:0
+   is what lets a long book name ellipsize instead of shoving the button off
+   the right edge — a flex item's default min-width:auto refuses to shrink
+   below its content. */
+.screen-head-text { min-width: 0; }
+.screen-head-sub {
+  margin: 3px 0 0;
+  font-size: 0.9rem;
+  color: var(--slate);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 h1 { font-size: 1.7rem; font-weight: 500; margin: 0; color: var(--heading); letter-spacing: 0.2px; }
 h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--heading); }
@@ -151,6 +172,85 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   margin-top: -1px;
 }
 .tabbar a.is-active { color: var(--teal-dark); border-top-color: var(--teal); }
+
+/* ============ Project tab strip ============
+ *
+ * The two readings of one project — Content and Book — under the header that
+ * names it. NOT the bottom bar: these are not app-level destinations, they are
+ * a switch between two views of the thing directly above them, and they read
+ * that way sitting under it.
+ *
+ * Both are real links with real hrefs, so each tab is separately bookmarkable
+ * and switching involves no JavaScript at all.
+ *
+ * The underline is the same 2px teal as .screen-head's rule, so the active tab
+ * reads as continuous with the header rather than as a second, competing
+ * divider. */
+.tabstrip {
+  display: flex;
+  gap: 4px;
+  margin: -12px 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+.tabstrip a {
+  flex: 1;
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: var(--slate);
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tabstrip a:hover { color: var(--teal-dark); }
+.tabstrip a.is-active { color: var(--teal-dark); border-bottom-color: var(--teal); }
+
+/* ============ Floating add button ============
+ *
+ * Replaces the "Add" tab. Adding is an action, not a place: it was the only
+ * tab that did not navigate anywhere you could return to, and it spent half a
+ * permanent fixed bar saying so.
+ *
+ * Bottom RIGHT rather than centred: this app is one person on one phone held
+ * in one hand, and the centre of the bottom edge is the hardest part of a
+ * large screen for a thumb to reach. .wrap already reserves
+ * var(--tap) + 34px of bottom padding — it was reserving it for the tab bar —
+ * so the + cannot cover the last row of a list.
+ *
+ * z-index below .sheet's 50, so raising the add sheet puts the backdrop over
+ * the button that opened it rather than leaving it floating on top of its own
+ * menu. */
+.fab {
+  position: fixed;
+  right: 18px;
+  bottom: calc(var(--safe-bottom) + 18px);
+  z-index: 20;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--teal);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.28);
+  padding: 0;
+}
+.fab:hover { background: var(--teal-dark); }
+.fab svg {
+  width: 26px; height: 26px;
+  fill: none; stroke: currentColor; stroke-width: 2.2;
+  stroke-linecap: round;
+}
+/* Centre it on a wide screen, where .wrap is a column in the middle and a
+   right-pinned button would drift off toward the window edge, unattached to
+   the content it belongs to. */
+@media (min-width: 620px) {
+  .fab { right: calc(50% - (var(--maxw) / 2) + 18px); }
+}
 
 /* ============ Sheet (menus, pickers) ============
  *
@@ -217,6 +317,56 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   justify-content: center;
   color: var(--slate) !important;
   margin-top: 8px;
+}
+
+/* The confirmation dialog's heading and detail (confirm.js). Text rows rather
+   than buttons, so they need the padding .sheet-panel's buttons get from their
+   own rule and none of the border. */
+.sheet-title {
+  margin: 4px 0 2px;
+  padding: 0 4px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--heading);
+}
+.sheet-body {
+  margin: 0 0 10px;
+  padding: 0 4px;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--slate);
+}
+
+/* The text field in promptText()'s dialog. .sheet-panel styles its BUTTONS and
+   links; an <input> in there needs the gap put back, since the panel's grid
+   gap is 2px — right for a stack of menu rows, far too tight around a field
+   with a label above it and a button below. */
+.sheet-input { margin: 2px 0 10px; }
+
+/* .btn-primary is width:100% already, which is what this wants; it only needs
+   to opt out of .sheet-panel's button border and padding rules winning over
+   it by specificity. */
+.sheet-panel .sheet-primary {
+  justify-content: center;
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+.sheet-panel .sheet-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.sheet-panel .sheet-primary:hover:not(:disabled) {
+  background: var(--teal-dark);
+  border-color: var(--teal-dark);
+  color: #fff;
+}
+
+/* The one irreversible button in the app. Filled rather than outlined, unlike
+   .btn-danger: this sits in a stack of identically-shaped sheet rows, and an
+   outline is not enough to stop a thumb travelling down that stack. */
+.sheet-danger {
+  justify-content: center;
+  background: var(--error) !important;
+  border-color: var(--error) !important;
+  color: #fff !important;
 }
 
 /* ============ Fields ============ */
@@ -353,6 +503,53 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   padding: 14px;
 }
 .card + .card { margin-top: 10px; }
+
+/* ============ Project card (the list screen) ============
+ *
+ * The whole card is the link, with the kebab beside it rather than inside it.
+ * Nesting a <button> in an <a> is invalid HTML and every browser that tolerates
+ * it does something different with the tap, so they are siblings in a flex row
+ * and the anchor takes the remaining width.
+ *
+ * Padding lives on the anchor, not the card, so the tappable area actually
+ * reaches the card's edges — a link inset by the card's own 14px leaves a dead
+ * border you can miss on a phone. */
+.project-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 0;
+}
+.project-card-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  padding: 12px 4px 12px 14px;
+  text-decoration: none;
+  color: inherit;
+  border-radius: var(--radius);
+}
+.project-card-main:hover .project-card-name { color: var(--teal-dark); }
+
+/* Both text lines truncate rather than wrap. A book named "Two weeks in the
+   Outer Hebrides, mostly rain" must not turn its card into three lines and
+   push the status pill out of alignment with every other card in the list. */
+.project-card-name,
+.project-card-sub {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-card-name { font-weight: 600; color: var(--heading); }
+.project-card-sub { font-size: 0.82rem; color: var(--slate); opacity: 0.75; }
+
+/* The status pill sits UNDER the name rather than opposite it. Opposite, it
+   competes with the kebab for the right edge and the two read as a pair of
+   controls when only one of them is. */
+.project-card .pill { margin-top: 3px; }
 
 /* The Want to Buy intro is the one card in the app holding prose rather than
  * controls, and .card's 14px is a list-row measurement — it reads as cramped
@@ -871,12 +1068,19 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
 .cat-group { margin: 0 0 18px; }
 .cat-group:last-child { margin-bottom: 0; }
 
+/* The top margin is what separates a section heading from whatever section
+   ended above it. It used to be 0, which is correct for the timeline's month
+   headings — .cat-group already spaces those — and wrong everywhere else: as
+   an <h2> this class overrode h2's own 26px top margin with nothing, so "VERSION
+   9 — PAGES" sat flush against the last version row and read as part of it.
+   Margin here, zeroed inside .cat-group below, so the heading is spaced by
+   default and the grouped case opts out. */
 .cat-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  margin: 0 0 8px;
+  margin: 26px 0 8px;
   padding: 0 2px;
   font-size: 0.78rem;
   font-weight: 700;
@@ -896,6 +1100,7 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   padding: 6px 2px;
   margin-bottom: 4px;
 }
+.cat-group > .cat-head { margin-top: 0; }
 .cat-count { font-weight: 600; opacity: 0.7; font-variant-numeric: tabular-nums; }
 
 /* A group heading that is itself a control (rename a store, collapse a

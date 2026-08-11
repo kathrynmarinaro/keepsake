@@ -31,11 +31,21 @@ require_login_api();
 require_same_origin();
 require_method('GET');
 
-$year    = isset($_GET['year']) ? (int) $_GET['year'] : 0;
-$project = $year > 0 ? year_project_get_by_year($year) : null;
+/* ?id= is the current shape, matching every other project URL in the app now
+ * that a project need not be a calendar year (schema.sql on year_projects.year
+ * — a trip book has no year to key on). ?year= is still honoured because it is
+ * what shipped, and an export link someone saved should keep producing the
+ * book it produced before. */
+$id      = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$project = $id > 0 ? year_project_get($id) : null;
+
+if ($project === null && isset($_GET['year'])) {
+    $year    = (int) $_GET['year'];
+    $project = $year > 0 ? year_project_get_by_year($year) : null;
+}
 
 if ($project === null) {
-    json_error('no_year_project', 404, 'No year project for ' . $year . '.');
+    json_error('no_year_project', 404, 'No such project.');
 }
 
 try {

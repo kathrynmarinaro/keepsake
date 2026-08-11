@@ -161,3 +161,22 @@ public_html/keepsake/ :
       "call this book by its year", so every existing book reads exactly
       as it does today until you rename one. Clearing the title on the
       layout screen ("Reset") puts it back to NULL.
+
+  [ ] Projects that aren't years. Makes one EXISTING column nullable, so a
+      book can be about a trip rather than a calendar year — run once:
+
+          ALTER TABLE year_projects
+            MODIFY COLUMN year SMALLINT UNSIGNED NULL;
+
+      This one is a MODIFY, not an ADD, so re-running it is harmless — it
+      sets the column to the state it is already in rather than erroring.
+
+      Nothing existing changes: every project you have today has a year and
+      keeps it, the UNIQUE key still allows only one project per year (both
+      MySQL and MariaDB permit any number of NULLs in a unique index), and
+      content with no project of its own is still filed by its date. Only a
+      project created from "New project -> a name" gets year = NULL.
+
+      IF YOU SKIP THIS the app still runs, but creating a project by name
+      instead of by year fails with a database error, because the column
+      will not accept NULL.

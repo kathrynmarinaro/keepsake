@@ -71,7 +71,28 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 CREATE TABLE IF NOT EXISTS year_projects (
   id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
 
-  year            SMALLINT UNSIGNED NOT NULL,
+  -- The calendar year this book covers, and NULL when it doesn't cover one.
+  --
+  -- NULLABLE, which it did not used to be. The original model was that a
+  -- project IS a year: year_project_get_or_create() derived it from the date
+  -- on whatever was being saved, and there was no other way to make one.
+  -- Kathryn asked to be able to make a book for a trip — content she picks by
+  -- hand rather than content that happens to share a year — so "which project
+  -- does this belong to" had to stop being a function of the date. NULL here
+  -- is that: a project with no year, whose membership is only ever explicit.
+  --
+  -- NULL rather than a sentinel year (0, or 9999): those sort, compare and
+  -- GROUP BY as if they were real years, so every query that touches this
+  -- column would need to remember to exclude them, and the one that forgets
+  -- files a trip book under the year 9999 forever. NULL is refused by
+  -- comparison rather than quietly succeeding, which is the behaviour that
+  -- catches the mistake.
+  --
+  -- A project with no year MUST have a title (the app enforces it in
+  -- year_project_create(); the database can't express "one of these two" as a
+  -- constraint without a CHECK that MariaDB versions disagree about). That is
+  -- why year_project_title() can still promise to return something.
+  year            SMALLINT UNSIGNED NULL,
 
   -- The book's name on the cover. NULL — the default — means "use the year",
   -- which is brief §4.6's "Title: defaults to the year". Kathryn asked to be
@@ -147,6 +168,12 @@ CREATE TABLE IF NOT EXISTS year_projects (
 
   -- One project per calendar year. Also what makes an accidental double
   -- "New year project" click a no-op instead of a duplicate.
+  --
+  -- Still correct now that `year` is nullable, and deliberately unchanged:
+  -- both MySQL and SQLite permit any number of NULLs in a UNIQUE index, so
+  -- this goes on enforcing "at most one project per year" for the projects
+  -- that have one while placing no limit at all on how many trip books exist.
+  -- That is exactly the rule wanted, and it needs no second index to say so.
   UNIQUE KEY uniq_year (year)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
