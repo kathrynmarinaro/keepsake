@@ -26,6 +26,15 @@ if (!isset($project) || !is_array($project)) {
     exit;
 }
 
+/* For event_grouping_internal_gaps()/event_grouping_gap_days() — the Groups
+ * type asks whether each group would still be clustered the way it is, which
+ * has to be the same threshold the grouper itself uses.
+ *
+ * REQUIRED HERE, not by public/project.php. A view pulls in what it calls: the
+ * screen this came from did exactly this, and losing the require in the move
+ * left the Groups view fatally erroring on a function that was never loaded. */
+require_once __DIR__ . '/../grouping.php';
+
 /* Named once, here. Everything below prints the book's own name rather than
    its year, because a project may not have one — year_project_title() is the
    single place that decides what a book is called. */

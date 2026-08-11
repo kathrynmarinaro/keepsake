@@ -78,8 +78,17 @@ if (!function_exists('asset')) {
     }
 }
 
-require __DIR__ . '/../lib/geocode.php';
-require __DIR__ . '/../lib/grouping.php';
+/* DELIBERATELY NOT REQUIRING lib/grouping.php OR lib/geocode.php HERE.
+ *
+ * A view has to pull in whatever it calls, because public/project.php requires
+ * it and nothing else does. Requiring grouping.php in this harness — which is
+ * what this file did at first — satisfied lib/views/content.php's calls to
+ * event_grouping_internal_gaps() and event_grouping_gap_days() from the OUTSIDE,
+ * so the Groups view rendered green here and fatally errored in a browser with
+ * "call to undefined function". The test was standing in for the require the
+ * view was missing.
+ *
+ * Whatever the views need, the views must ask for. */
 
 $failures = 0;
 
