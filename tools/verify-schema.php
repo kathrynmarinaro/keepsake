@@ -69,9 +69,11 @@ $pdo->exec("INSERT INTO anecdotes (year_project_id, anecdote_text, entry_date)
             VALUES ($yearA, 'Emma named the new house Sunflower House', '2024-06-01')");
 $anecdoteA = (int) $pdo->lastInsertId();
 
-$pdo->exec("INSERT INTO snapshots (year_project_id, type, entry_date, age, height)
-            VALUES ($yearA, 'birthday', '2024-04-15', 6, '3ft 9in')");
+$pdo->exec("INSERT INTO snapshots (year_project_id, type, title, entry_date)
+            VALUES ($yearA, 'birthday', 'Emma 6th Birthday', '2024-04-15')");
 $snapshotA = (int) $pdo->lastInsertId();
+$pdo->exec("INSERT INTO snapshot_sections (snapshot_id, sort_order, heading, body)
+            VALUES ($snapshotA, 1, 'Age', '6'), ($snapshotA, 2, 'Height', '3ft 9in')");
 
 $pdo->exec("INSERT INTO book_layouts (year_project_id, version) VALUES ($yearA, 1)");
 $layoutA = (int) $pdo->lastInsertId();
@@ -101,9 +103,11 @@ $pdo->exec("INSERT INTO anecdotes (year_project_id, anecdote_text, entry_date)
             VALUES ($yearB, 'Planted three tomato seedlings, ate zero tomatoes', '2025-08-25')");
 $anecdoteB = (int) $pdo->lastInsertId();
 
-$pdo->exec("INSERT INTO snapshots (year_project_id, type, entry_date, grade, school)
-            VALUES ($yearB, 'school_year', '2025-08-25', '1st grade', 'Lincoln Elementary')");
+$pdo->exec("INSERT INTO snapshots (year_project_id, type, title, entry_date)
+            VALUES ($yearB, 'school_year', 'First day of 1st grade', '2025-08-25')");
 $snapshotB = (int) $pdo->lastInsertId();
+$pdo->exec("INSERT INTO snapshot_sections (snapshot_id, sort_order, heading, body)
+            VALUES ($snapshotB, 1, 'Grade', '1st grade'), ($snapshotB, 2, 'School', 'Lincoln Elementary')");
 
 $pdo->exec("INSERT INTO book_layouts (year_project_id, version) VALUES ($yearB, 1)");
 $layoutB = (int) $pdo->lastInsertId();

@@ -89,6 +89,54 @@ function fmt_date_human(string $ymd): string
     return $ts === false ? $ymd : date('M j, Y', $ts);
 }
 
+/**
+ * The one line that stands for a snapshot in a list or a grid cell.
+ *
+ * Its TITLE if it has one — that is the whole point of having titles, and
+ * "Emma's 8th Birthday" identifies the entry better than anything derivable.
+ * Failing that, the first section or two, which is what the fixed columns used
+ * to supply ("Age 8 · 3'9\"").
+ *
+ * Costs one query per snapshot on a screen that may show several. Acceptable
+ * at this size and on this screen; if a project ever holds enough snapshots
+ * for it to show, the fix is one IN() query up front, the same shape
+ * book_layout_pages_with_content() already uses.
+ */
+function snapshot_summary_text(array $s): string
+{
+    $title = trim((string) ($s['title'] ?? ''));
+    if ($title !== '') {
+        return $title;
+    }
+
+    $bits = array();
+    foreach (snapshot_sections((int) $s['id']) as $section) {
+        $heading = trim((string) ($section['heading'] ?? ''));
+        $body    = trim((string) ($section['body'] ?? ''));
+
+        if ($heading !== '' && $body !== '') {
+            $bits[] = $heading . ': ' . $body;
+        } elseif ($body !== '') {
+            $bits[] = $body;
+        } elseif ($heading !== '') {
+            $bits[] = $heading;
+        }
+
+        if (count($bits) === 2) {
+            break;
+        }
+    }
+
+    if ($bits === array()) {
+        /* Nothing filled in yet. The type is the only thing left to say, and
+           on SCREEN that is fine — it is the printed page that must not carry
+           it. */
+        return $s['type'] === 'birthday' ? 'Birthday' : 'School year';
+    }
+
+    return snippet(implode(' · ', $bits), 90);
+}
+
 /* ---------------------------------------------------------- entry bodies
  *
  * The edit form for one entry, on its own, so the two collapsed shapes that
@@ -111,12 +159,15 @@ function render_quote_body(array $q): string
           <span>What was said</span>
           <textarea name="quote_text" rows="2" maxlength="2000" required><?= h($q['quote_text']) ?></textarea>
         </label>
+        <?php /* Suggestions, not a closed list — see public/capture.php's
+                 copy of this field, and schema.sql on quotes.who_said_it. The
+                 datalist itself is rendered once for the screen, at the end of
+                 this file. */ ?>
         <label class="field">
           <span>Who said it</span>
-          <select name="who_said_it">
-            <option value="Kathryn"<?= $q['who_said_it'] === 'Kathryn' ? ' selected' : '' ?>>Kathryn</option>
-            <option value="Emma"<?= $q['who_said_it'] === 'Emma' ? ' selected' : '' ?>>Emma</option>
-          </select>
+          <input type="text" name="who_said_it" list="speaker-names" required
+                 maxlength="190" autocomplete="off" autocapitalize="words"
+                 value="<?= h((string) $q['who_said_it']) ?>">
         </label>
         <label class="field">
           <span>Date</span>
@@ -181,8 +232,13 @@ function render_snapshot_body(array $s): string
        summary and from a grid cell, and a body that depends on its caller
        having computed the right locals first is the bug that came out of
        splitting it off. */
-    $isBirthday = $s['type'] === 'birthday';
-    $heroLabel  = $s['hero_photo_id'] ? ('Hero photo: #' . (int) $s['hero_photo_id']) : '';
+    $heroLabel = $s['hero_photo_id'] ? ('Hero photo: #' . (int) $s['hero_photo_id']) : '';
+
+    /* Rendered server-side rather than built by sections.js on load, so the
+       saved sections are in the page before any module runs — and so the form
+       still submits them with JS off. sections.js takes over the rows it finds
+       rather than replacing them. */
+    $sections = snapshot_sections((int) $s['id']);
     ?>
     <div class="accordion-body">
       <form class="stack" data-role="entry-form">
@@ -191,26 +247,38 @@ function render_snapshot_body(array $s): string
           <input type="date" name="entry_date" value="<?= h($s['entry_date']) ?>" required>
         </label>
 
-        <?php if ($isBirthday): ?>
-          <label class="field"><span>Age</span>
-            <input type="number" name="age" min="0" max="130" value="<?= h((string) ($s['age'] ?? '')) ?>">
-          </label>
-          <label class="field"><span>Height</span>
-            <input type="text" name="height" value="<?= h((string) ($s['height'] ?? '')) ?>">
-          </label>
-        <?php else: ?>
-          <label class="field"><span>Grade</span><input type="text" name="grade" value="<?= h((string) ($s['grade'] ?? '')) ?>"></label>
-          <label class="field"><span>School</span><input type="text" name="school" value="<?= h((string) ($s['school'] ?? '')) ?>"></label>
-          <label class="field"><span>Teacher</span><input type="text" name="teacher" value="<?= h((string) ($s['teacher'] ?? '')) ?>"></label>
-          <label class="field"><span>Favorite color</span><input type="text" name="favorite_color" value="<?= h((string) ($s['favorite_color'] ?? '')) ?>"></label>
-          <label class="field"><span>Dream job</span><input type="text" name="dream_job" value="<?= h((string) ($s['dream_job'] ?? '')) ?>"></label>
-          <label class="field"><span>Favorite class</span><input type="text" name="favorite_class" value="<?= h((string) ($s['favorite_class'] ?? '')) ?>"></label>
-        <?php endif; ?>
-
         <label class="field">
-          <span>Notes</span>
-          <textarea name="notes" rows="3"><?= h((string) ($s['notes'] ?? '')) ?></textarea>
+          <span>Title</span>
+          <input type="text" name="title" value="<?= h((string) ($s['title'] ?? '')) ?>"
+                 placeholder="e.g. Emma&#8217;s 8th Birthday" autocomplete="off">
         </label>
+
+        <?php /* No type picker here. The template only decides what a NEW
+                 entry's headings start as; changing it on a saved snapshot
+                 would either do nothing or silently rewrite the sections
+                 already on the page. Rename the sections instead. */ ?>
+        <div class="sections-editor" data-role="sections">
+          <span class="label">Sections</span>
+          <div data-role="section-list">
+            <?php foreach ($sections as $i => $section): ?>
+              <div class="section-row" data-role="section-row">
+                <div class="section-row-head">
+                  <input type="text" class="input section-heading" data-role="section-heading"
+                         name="sections[<?= (int) $i ?>][heading]" placeholder="Section title"
+                         value="<?= h((string) ($section['heading'] ?? '')) ?>" autocomplete="off">
+                  <button type="button" class="icon-btn section-remove" data-act="remove-section"
+                          aria-label="Remove this section">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                  </button>
+                </div>
+                <textarea class="section-body" data-role="section-body" rows="2"
+                          name="sections[<?= (int) $i ?>][body]" placeholder="Section content"
+                          autocomplete="off"><?= h((string) ($section['body'] ?? '')) ?></textarea>
+              </div>
+            <?php endforeach; ?>
+          </div>
+          <button type="button" class="btn-ghost" data-act="add-section">Add a section</button>
+        </div>
 
         <div class="field">
           <span>Hero photo</span>
@@ -377,15 +445,11 @@ function render_entry_snapshot(array $s): string
     $isBirthday = $s['type'] === 'birthday';
     $heroLabel = $s['hero_photo_id'] ? ('Hero photo: #' . (int) $s['hero_photo_id']) : '';
 
-    $bits = array();
-    if ($isBirthday) {
-        if ($s['age'] !== null) { $bits[] = 'Age ' . $s['age']; }
-        if ($s['height']) { $bits[] = (string) $s['height']; }
-    } else {
-        if ($s['grade']) { $bits[] = (string) $s['grade']; }
-        if ($s['school']) { $bits[] = (string) $s['school']; }
-    }
-    $summaryText = $bits !== array() ? implode(' · ', $bits) : ($isBirthday ? 'Birthday' : 'School year');
+    /* The collapsed line: the title if it has one, else the first couple of
+       sections. It used to be built from whichever two fixed columns this
+       template had; a snapshot's sections are its own now, so the summary
+       reads them — see snapshot_summary_text(). */
+    $summaryText = snapshot_summary_text($s);
     ?>
     <details class="accordion entry" data-type="snapshot" data-id="<?= $id ?>">
       <summary class="accordion-head">
@@ -804,23 +868,14 @@ function render_photo_cell(array $p, array $eventGroups): string
       }
       if ($type === 'all' || $type === 'snapshot') {
           foreach ($snapshots as $sn) {
-              $isBirthday = $sn['type'] === 'birthday';
-              $bits = array();
-              if ($isBirthday) {
-                  if ($sn['age'] !== null) { $bits[] = 'Age ' . $sn['age']; }
-                  if ($sn['height']) { $bits[] = (string) $sn['height']; }
-              } else {
-                  if ($sn['grade']) { $bits[] = (string) $sn['grade']; }
-                  if ($sn['school']) { $bits[] = (string) $sn['school']; }
-              }
               $cells[] = array(
                   'date'  => (string) $sn['entry_date'],
                   'order' => 1,
                   'html'  => render_entry_cell(
                       $sn,
                       'snapshot',
-                      $isBirthday ? 'Birthday' : 'School year',
-                      $bits !== array() ? implode(' · ', $bits) : '',
+                      $sn['type'] === 'birthday' ? 'Birthday' : 'School year',
+                      snapshot_summary_text($sn),
                       (string) $sn['entry_date']
                   ),
               );
@@ -866,3 +921,10 @@ function render_photo_cell(array $p, array $eventGroups): string
 
     <?php endif; ?>
 
+<?php /* The speaker suggestions, once for the screen — every quote's edit form
+         points its <input list> at this. Rendered at the end rather than beside
+         the first quote: a <datalist> is not visible content and there is
+         exactly one of it however many quotes are on the page. */ ?>
+<datalist id="speaker-names">
+  <?php foreach (quote_speakers() as $speakerName): ?><option value="<?= h($speakerName) ?>"></option><?php endforeach; ?>
+</datalist>

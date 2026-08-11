@@ -598,14 +598,72 @@ function pdf_render_text_card_html(array $slot, bool $standalone = false): strin
     $date    = pdf_fmt_date((string) ($isQuote ? $slot['quote_date'] : $slot['anecdote_date']));
     $who     = $isQuote ? (string) $slot['who_said_it'] : null;
 
-    $fontSize = $standalone ? '20pt' : '11pt';
-    $pad      = $standalone ? 'padding:0 8mm;' : 'padding:3mm;border:0.3mm solid #ddd;';
+    /* NO TYPE LABEL. Nothing here ever printed the words "quote" or
+     * "anecdote" — those are the preview's own card chrome — but this is where
+     * the attribution line is built, and it stays a name and a date. */
+    $meta = $who !== null && $who !== '' ? pdf_esc($who) . ' &middot; ' . pdf_esc($date) : pdf_esc($date);
 
-    $meta = $who !== null ? pdf_esc($who) . ' · ' . pdf_esc($date) : pdf_esc($date);
+    if (!$standalone) {
+        /* Riding along on a photo page: a small bordered card, unchanged. */
+        return '<div style="padding:3mm;border:0.3mm solid #ddd;font-family:sans-serif;text-align:center;">'
+            . '<div style="font-size:11pt;font-style:italic;line-height:1.4;">'
+            . ($isQuote ? '&ldquo;' . nl2br(pdf_esc($text)) . '&rdquo;' : nl2br(pdf_esc($text)))
+            . '</div>'
+            . '<div style="font-size:9pt;color:#666;margin-top:3mm;">' . $meta . '</div>'
+            . '</div>';
+    }
 
-    return '<div style="' . $pad . 'font-family:sans-serif;text-align:center;">'
-        . '<div style="font-size:' . $fontSize . ';font-style:italic;line-height:1.4;">'
-        . ($isQuote ? '&ldquo;' . nl2br(pdf_esc($text)) . '&rdquo;' : nl2br(pdf_esc($text)))
+    return $isQuote
+        ? pdf_render_quote_standalone_html($text, $meta)
+        : pdf_render_anecdote_standalone_html($text, $meta);
+}
+
+/**
+ * A quote with its own page: HANGING QUOTATION MARKS.
+ *
+ * "Hanging" means the opening mark sits OUTSIDE the text block's left edge, so
+ * the first line of words aligns with every line under it instead of being
+ * pushed in by the width of a quote mark. It is the detail that makes a set
+ * quotation look set rather than typed.
+ *
+ * DONE WITH A NEGATIVE text-indent ON THE BLOCK, not with an absolutely
+ * positioned mark beside it. mPDF supports text-indent and honours a negative
+ * one; it does NOT reliably position an inline-block against a sibling's
+ * baseline, and the two-cell table alternative makes the mark's column a fixed
+ * width that stops matching the moment the type size changes. Here the indent
+ * is stated in the same em unit as the mark, so they scale together.
+ *
+ * The padding-left cancels the indent for every line after the first, which is
+ * what stops the whole block sliding into the page margin.
+ */
+function pdf_render_quote_standalone_html(string $text, string $meta): string
+{
+    $indent = '0.62em';
+
+    return '<div style="padding:0 12mm;font-family:sans-serif;">'
+        . '<div style="font-size:22pt;font-style:italic;line-height:1.45;'
+        . 'padding-left:' . $indent . ';text-indent:-' . $indent . ';">'
+        . '&ldquo;' . nl2br(pdf_esc($text)) . '&rdquo;'
+        . '</div>'
+        . '<div style="font-size:10pt;color:#666;margin-top:5mm;">' . $meta . '</div>'
+        . '</div>';
+}
+
+/**
+ * An anecdote with its own page.
+ *
+ * DELIBERATELY UNCHANGED from what it always was — 20pt, centred, italic, no
+ * quotation marks. The plan offered bigger type and more of the page for
+ * these; Kathryn's answer was "keep it how it was ... I don't know how much
+ * I'll use anecdotes anyway, so let's not invest time in that". Split out from
+ * the quote renderer above only so the quote could get its hanging marks
+ * without dragging the anecdote along with it.
+ */
+function pdf_render_anecdote_standalone_html(string $text, string $meta): string
+{
+    return '<div style="padding:0 8mm;font-family:sans-serif;text-align:center;">'
+        . '<div style="font-size:20pt;font-style:italic;line-height:1.4;">'
+        . nl2br(pdf_esc($text))
         . '</div>'
         . '<div style="font-size:9pt;color:#666;margin-top:3mm;">' . $meta . '</div>'
         . '</div>';
@@ -624,37 +682,25 @@ function pdf_render_text_page_html(array $page): string
 }
 
 /**
- * page_type='snapshot': the brief §2.3 fixed templates, rendered from their
- * REAL fields (age/height for birthday; grade/school/teacher/
- * favorite_color/dream_job/favorite_class for school_year) — not just type
- * and date. Field list/labels mirror public/layout.php's
- * render_snapshot_page() exactly, so the printed page matches what Kathryn
- * already reviewed on screen.
+ * page_type='snapshot': the hero photo on one side, the title and sections on
+ * the other. Two-up portrait, as Kathryn asked for.
+ *
+ * NO TYPE LABEL. This used to open the text column with a "Birthday" / "School
+ * year" pill — "I don't want the type of content shown on the page". The pill
+ * in the PREVIEW's page toolbar stays; it is screen chrome, outside the page.
+ *
+ * IT USED TO READ NINE FIXED COLUMNS. A snapshot is now a title, a hero photo,
+ * a date and any number of heading-and-body sections (schema.sql), which is
+ * what lets one page be "Emma's 8th Birthday" and the next "Kathryn's 40th"
+ * with entirely different things worth writing down.
+ *
+ * Field for field the same as render_snapshot_page() in lib/views/book.php, so
+ * the printed page matches what was reviewed on screen.
  */
 function pdf_render_snapshot_page_html(array $page): string
 {
-    $isBirthday = $page['snapshot_type'] === 'birthday';
-
-    $facts = array();
-    if ($isBirthday) {
-        if ($page['snapshot_age'] !== null) {
-            $facts[] = 'Age ' . $page['snapshot_age'];
-        }
-        if ($page['snapshot_height']) {
-            $facts[] = (string) $page['snapshot_height'];
-        }
-    } else {
-        foreach (array(
-            'grade' => 'Grade', 'school' => 'School', 'teacher' => 'Teacher',
-            'favorite_color' => 'Favorite color', 'dream_job' => 'Dream job',
-            'favorite_class' => 'Favorite class',
-        ) as $field => $label) {
-            $value = $page['snapshot_' . $field];
-            if ($value !== null && $value !== '') {
-                $facts[] = $label . ': ' . $value;
-            }
-        }
-    }
+    $title    = trim((string) ($page['snapshot_title'] ?? ''));
+    $sections = $page['snapshot_sections'] ?? array();
 
     $heroAbs = null;
     if ($page['snapshot_hero_photo_id'] !== null) {
@@ -662,32 +708,43 @@ function pdf_render_snapshot_page_html(array $page): string
     }
     $heroCell = $heroAbs !== null
         ? '<img src="' . pdf_esc($heroAbs) . '" style="width:100%;">'
-        : '<div style="width:100%;height:80mm;border:0.5mm dashed #bbb;display:flex;'
-            . 'align-items:center;justify-content:center;color:#888;font-family:sans-serif;font-size:9pt;">'
-            . 'No hero photo</div>';
+        : '<div style="width:100%;height:80mm;border:0.5mm dashed #bbb;"></div>';
 
-    $factsHtml = '';
-    if ($facts !== array()) {
-        $factsHtml = '<ul style="font-size:12pt;line-height:1.8;padding-left:5mm;">';
-        foreach ($facts as $fact) {
-            $factsHtml .= '<li>' . pdf_esc($fact) . '</li>';
-        }
-        $factsHtml .= '</ul>';
+    $body = '';
+    if ($title !== '') {
+        $body .= '<div style="font-size:19pt;font-weight:bold;line-height:1.2;margin-bottom:2mm;">'
+            . pdf_esc($title) . '</div>';
     }
+    $body .= '<div style="font-size:10pt;color:#666;margin-bottom:5mm;">'
+        . pdf_fmt_date((string) $page['snapshot_date']) . '</div>';
 
-    $notesHtml = $page['snapshot_notes']
-        ? '<p style="font-size:11pt;line-height:1.5;color:#333;">'
-            . nl2br(pdf_esc(pdf_clip_text((string) $page['snapshot_notes']))) . '</p>'
-        : '';
+    foreach ($sections as $section) {
+        $heading = trim((string) ($section['heading'] ?? ''));
+        $text    = trim((string) ($section['body'] ?? ''));
+        if ($heading === '' && $text === '') {
+            continue;
+        }
+
+        $body .= '<div style="margin-bottom:4mm;">';
+        if ($heading !== '') {
+            /* Bold, as asked. The body copy underneath is left at the weight
+               and size it always had — "the titles should be bold and the body
+               copy is good as-is". */
+            $body .= '<div style="font-size:12pt;font-weight:bold;line-height:1.35;">'
+                . pdf_esc($heading) . '</div>';
+        }
+        if ($text !== '') {
+            $body .= '<div style="font-size:11pt;line-height:1.5;color:#333;">'
+                . nl2br(pdf_esc(pdf_clip_text($text))) . '</div>';
+        }
+        $body .= '</div>';
+    }
 
     return '<table style="width:100%;">'
         . '<tr>'
         . '<td style="width:45%;vertical-align:top;">' . $heroCell . '</td>'
-        . '<td style="width:55%;vertical-align:top;padding-left:6mm;font-family:sans-serif;">'
-        . '<span style="display:inline-block;background:#eef1ec;padding:1mm 4mm;font-size:10pt;">'
-        . ($isBirthday ? 'Birthday' : 'School year') . '</span>'
-        . '<div style="font-size:10pt;color:#666;margin-top:2mm;">' . pdf_fmt_date((string) $page['snapshot_date']) . '</div>'
-        . $factsHtml . $notesHtml
+        . '<td style="width:55%;vertical-align:top;padding-left:7mm;font-family:sans-serif;">'
+        . $body
         . '</td>'
         . '</tr></table>';
 }

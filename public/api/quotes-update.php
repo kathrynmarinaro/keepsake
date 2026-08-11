@@ -38,10 +38,15 @@ if (array_key_exists('quote_text', $body)) {
     $fields['quote_text'] = $text;
 }
 if (array_key_exists('who_said_it', $body)) {
-    if (!in_array($body['who_said_it'], array('Kathryn', 'Emma'), true)) {
-        json_error('bad_request', 400, "who_said_it must be 'Kathryn' or 'Emma'.");
+    /* Any name — see public/api/quotes.php and schema.sql on the column. */
+    $who = is_string($body['who_said_it']) ? trim($body['who_said_it']) : '';
+    if ($who === '') {
+        json_error('bad_request', 400, 'who_said_it cannot be empty.');
     }
-    $fields['who_said_it'] = $body['who_said_it'];
+    if (mb_strlen($who) > 190) {
+        json_error('bad_request', 400, 'who_said_it is too long (190 characters max).');
+    }
+    $fields['who_said_it'] = $who;
 }
 if (array_key_exists('entry_date', $body)) {
     if (!is_string($body['entry_date']) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $body['entry_date'])) {

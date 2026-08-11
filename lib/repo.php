@@ -468,7 +468,17 @@ function year_project_export_data(int $id): ?array
         'photos'          => $for('photos'),
         'quotes'          => $for('quotes'),
         'anecdotes'       => $for('anecdotes'),
-        'snapshots'       => $for('snapshots'),
+        'snapshots'       => array_map(
+            /* Sections nest under their snapshot. Without this the export
+               would carry a snapshot's title and date and none of what is
+               written on it — which is precisely the failure this function's
+               SELECT * is meant to prevent, one table further down. */
+            static function (array $snapshot): array {
+                $snapshot['sections'] = snapshot_sections((int) $snapshot['id']);
+                return $snapshot;
+            },
+            $for('snapshots')
+        ),
         'book_layouts'    => $layouts,
     );
 }
@@ -489,6 +499,39 @@ function quote_create(array $data): int
         array($yearId, $data['quote_text'], $data['who_said_it'], $data['entry_date'])
     );
     return (int) db()->lastInsertId();
+}
+
+/**
+ * Every name that has said something, for the quote form's picker.
+ *
+ * SELECT DISTINCT off the quotes themselves rather than a `people` table —
+ * see schema.sql on quotes.who_said_it for why there isn't one. The list
+ * grows by being used and there is nothing to maintain.
+ *
+ * Kathryn and Emma are always offered even before either has said anything,
+ * because a brand-new install with an empty dropdown would look broken rather
+ * than empty. They are merged in, not prepended blindly, so neither appears
+ * twice.
+ *
+ * Not scoped to one project: a name is a person, and the same people turn up
+ * across books.
+ */
+function quote_speakers(): array
+{
+    $rows = q(
+        'SELECT DISTINCT who_said_it FROM quotes WHERE who_said_it <> \'\' ORDER BY who_said_it'
+    )->fetchAll();
+
+    $names = array_map(static fn(array $r): string => (string) $r['who_said_it'], $rows);
+
+    foreach (array('Kathryn', 'Emma') as $seed) {
+        if (!in_array($seed, $names, true)) {
+            $names[] = $seed;
+        }
+    }
+
+    sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+    return $names;
 }
 
 function quote_get(int $id): ?array
@@ -640,16 +683,31 @@ function anecdote_delete(int $id): void
 
 /* ------------------------------------------------------------- snapshots */
 
-/** Fields that only make sense for a given snapshot type — see schema.sql. */
-const SNAPSHOT_BIRTHDAY_FIELDS   = array('age', 'height');
-const SNAPSHOT_SCHOOL_YEAR_FIELDS = array(
-    'grade', 'school', 'teacher', 'favorite_color', 'dream_job', 'favorite_class',
+/**
+ * The section headings a new snapshot starts with, per template.
+ *
+ * PRE-FILL, NOT SCHEMA. These used to be real columns, one per fact, and the
+ * `type` column said which set existed. Now they are just the headings typed
+ * into a new entry's sections for you — every one of them renameable,
+ * deletable, and joinable by others you add. See schema.sql on snapshots.
+ *
+ * Empty bodies: the headings are the prompt, the answers are hers.
+ */
+const SNAPSHOT_TEMPLATES = array(
+    'birthday'    => array('Age', 'Height'),
+    'school_year' => array('Grade', 'School', 'Teacher', 'Favorite color', 'Dream job', 'Favorite class'),
 );
 
+/** The section headings a fresh snapshot of this type should start with. */
+function snapshot_template_headings(string $type): array
+{
+    return SNAPSHOT_TEMPLATES[$type] ?? array();
+}
+
 /**
- * @param array $data type, entry_date, hero_photo_id?, notes?, plus whichever
- *              of SNAPSHOT_BIRTHDAY_FIELDS / SNAPSHOT_SCHOOL_YEAR_FIELDS match
- *              `type` — every one of them optional (brief §2.3).
+ * @param array $data type, entry_date, title?, hero_photo_id?, sections?
+ *              — where sections is a list of array('heading' => …, 'body' => …).
+ *              Omit sections entirely to start from the type's template.
  * @return int the new snapshot id
  */
 function snapshot_create(array $data): int
@@ -661,34 +719,123 @@ function snapshot_create(array $data): int
 
     $yearId = year_project_for_new($data, 'entry_date');
 
-    // Only the fields belonging to this template are ever written — the
-    // OTHER template's columns are left NULL rather than trusting the caller
-    // to have not sent them. schema.sql deliberately has no CHECK enforcing
-    // this (see its comment on the snapshots table); this function is where
-    // that invariant actually gets kept.
-    $allowed = $type === 'birthday' ? SNAPSHOT_BIRTHDAY_FIELDS : SNAPSHOT_SCHOOL_YEAR_FIELDS;
-
-    $columns = array('year_project_id', 'type', 'entry_date', 'hero_photo_id', 'notes');
-    $values  = array(
-        $yearId,
-        $type,
-        $data['entry_date'],
-        isset($data['hero_photo_id']) && $data['hero_photo_id'] !== '' ? (int) $data['hero_photo_id'] : null,
-        isset($data['notes']) && $data['notes'] !== '' ? (string) $data['notes'] : null,
+    q(
+        'INSERT INTO snapshots (year_project_id, type, title, entry_date, hero_photo_id)
+         VALUES (?, ?, ?, ?, ?)',
+        array(
+            $yearId,
+            $type,
+            isset($data['title']) && trim((string) $data['title']) !== '' ? trim((string) $data['title']) : null,
+            $data['entry_date'],
+            isset($data['hero_photo_id']) && $data['hero_photo_id'] !== '' ? (int) $data['hero_photo_id'] : null,
+        )
     );
+    $id = (int) db()->lastInsertId();
 
-    foreach ($allowed as $field) {
-        $columns[] = $field;
-        $raw = $data[$field] ?? null;
-        $values[] = ($raw === null || $raw === '') ? null : $raw;
+    /* An absent `sections` key means "start me from the template"; an explicit
+       empty array means "no sections", which is a different thing and has to
+       stay possible. array_key_exists, not isset, so the two are told apart. */
+    if (array_key_exists('sections', $data)) {
+        snapshot_sections_replace($id, is_array($data['sections']) ? $data['sections'] : array());
+    } else {
+        $seed = array();
+        foreach (snapshot_template_headings($type) as $heading) {
+            $seed[] = array('heading' => $heading, 'body' => '');
+        }
+        snapshot_sections_replace($id, $seed, true);
     }
 
-    $placeholders = implode(', ', array_fill(0, count($columns), '?'));
-    q(
-        'INSERT INTO snapshots (' . implode(', ', $columns) . ') VALUES (' . $placeholders . ')',
-        $values
-    );
-    return (int) db()->lastInsertId();
+    return $id;
+}
+
+/**
+ * Normalize whatever a request called "sections" into the shape
+ * snapshot_sections_replace() stores.
+ *
+ * In the repo rather than in each endpoint because both of them need it and
+ * the rules are about the data, not about HTTP: keep only heading and body,
+ * coerce both to trimmed strings, ignore anything that is not an object.
+ * A caller sending a bare string, a number, or a row with extra keys gets the
+ * sensible reading rather than an error — this is a personal app and one
+ * malformed section should degrade that section, per the fail-soft rule.
+ *
+ * @param mixed $raw
+ */
+function snapshot_sections_from_request($raw): array
+{
+    if (!is_array($raw)) {
+        return array();
+    }
+
+    $out = array();
+    foreach ($raw as $section) {
+        if (!is_array($section)) {
+            continue;
+        }
+        $out[] = array(
+            'heading' => is_string($section['heading'] ?? null) ? trim($section['heading']) : '',
+            'body'    => is_string($section['body'] ?? null) ? trim($section['body']) : '',
+        );
+    }
+    return $out;
+}
+
+/** One snapshot's sections, in page order. */
+function snapshot_sections(int $snapshotId): array
+{
+    return q(
+        'SELECT * FROM snapshot_sections WHERE snapshot_id = ? ORDER BY sort_order, id',
+        array($snapshotId)
+    )->fetchAll();
+}
+
+/**
+ * Replace a snapshot's sections wholesale.
+ *
+ * DELETE-THEN-INSERT, not a diff. The client sends the list it is showing, in
+ * the order it is showing it, and that list IS the answer — there is no id to
+ * match rows up by, because a section has no identity beyond its position and
+ * nobody links to one. A diff would need stable ids round-tripped through the
+ * form purely so the server could work out what the client already knows.
+ *
+ * That also makes sort_order contiguous by construction: it is the loop
+ * counter, rewritten every time, so no path can leave a gap or a duplicate.
+ *
+ * EMPTY SECTIONS ARE DROPPED — a row with neither a heading nor a body is a
+ * blank line the form left behind, not content. Passing $keepEmpty keeps them,
+ * which is what seeding a new snapshot from its template needs: those rows are
+ * deliberately headings with nothing under them yet.
+ *
+ * @param array $sections list of array('heading' => …, 'body' => …)
+ * @return int how many were stored
+ */
+function snapshot_sections_replace(int $snapshotId, array $sections, bool $keepEmpty = false): int
+{
+    q('DELETE FROM snapshot_sections WHERE snapshot_id = ?', array($snapshotId));
+
+    $order = 0;
+    foreach ($sections as $section) {
+        $heading = trim((string) ($section['heading'] ?? ''));
+        $body    = trim((string) ($section['body'] ?? ''));
+
+        if (!$keepEmpty && $heading === '' && $body === '') {
+            continue;
+        }
+
+        $order++;
+        q(
+            'INSERT INTO snapshot_sections (snapshot_id, sort_order, heading, body)
+             VALUES (?, ?, ?, ?)',
+            array(
+                $snapshotId,
+                $order,
+                $heading === '' ? null : $heading,
+                $body === '' ? null : $body,
+            )
+        );
+    }
+
+    return $order;
 }
 
 function snapshot_get(int $id): ?array
@@ -760,21 +907,18 @@ function snapshot_update(int $id, array $fields): void
         $values[] = ($fields['hero_photo_id'] === null || $fields['hero_photo_id'] === '')
             ? null : (int) $fields['hero_photo_id'];
     }
-    if (array_key_exists('notes', $fields)) {
-        $sets[]   = 'notes = ?';
-        $values[] = ($fields['notes'] === null || $fields['notes'] === '') ? null : (string) $fields['notes'];
+    if (array_key_exists('title', $fields)) {
+        $title    = trim((string) ($fields['title'] ?? ''));
+        $sets[]   = 'title = ?';
+        $values[] = $title === '' ? null : $title;
     }
 
-    // Only this row's own template's fields are ever settable — the same
-    // invariant snapshot_create() keeps, applied on the way back in. A field
-    // belonging to the OTHER template sent by a confused/hostile client is
-    // silently ignored rather than allowed to write across templates.
-    $allowed = $existing['type'] === 'birthday' ? SNAPSHOT_BIRTHDAY_FIELDS : SNAPSHOT_SCHOOL_YEAR_FIELDS;
-    foreach ($allowed as $field) {
-        if (array_key_exists($field, $fields)) {
-            $sets[]   = $field . ' = ?';
-            $values[] = ($fields[$field] === null || $fields[$field] === '') ? null : $fields[$field];
-        }
+    /* Sections are their own table, so they are replaced separately and not
+       through $sets. Done BEFORE the UPDATE returns early on an empty $sets:
+       editing only the sections — which is most edits — changes no column on
+       this row at all, and an early return would silently discard them. */
+    if (array_key_exists('sections', $fields)) {
+        snapshot_sections_replace($id, is_array($fields['sections']) ? $fields['sections'] : array());
     }
 
     if ($sets === array()) {
@@ -931,6 +1075,26 @@ function photo_delete(int $id): void
     // of leaving a dangling id a later page render would have to guard
     // against.
     q('UPDATE year_projects SET cover_photo_id = NULL WHERE cover_photo_id = ?', array($id));
+}
+
+/**
+ * Every photo in one project, newest first, for the hero-photo picker.
+ *
+ * NEWEST FIRST, unlike photos_for_year() right below, which is chronological
+ * because it renders a timeline. Picking a hero is a search, and the photo you
+ * want is far more often one you added recently than one from the top of
+ * January.
+ *
+ * captured_at DESC rather than id DESC: what matters is when the photo was
+ * TAKEN, which after a bulk import of a year's camera roll has nothing to do
+ * with the order the rows were inserted.
+ */
+function photos_for_picker(int $yearProjectId, int $limit = 500): array
+{
+    return q(
+        'SELECT * FROM photos WHERE year_project_id = ? ORDER BY captured_at DESC, id DESC LIMIT ' . (int) $limit,
+        array($yearProjectId)
+    )->fetchAll();
 }
 
 /** All photos for a year, chronological — Phase 3's timeline/grid view. */
@@ -1833,6 +1997,45 @@ function book_pages_for_layout(int $layoutId): array
         }
     }
 
+    /* A snapshot page's sections, attached under 'snapshot_sections'.
+     *
+     * One query for the whole layout rather than one per page: a book has a
+     * handful of snapshot pages, but the preview and the exporter both call
+     * this, and the exporter already has enough per-page work to do. Keyed by
+     * snapshot id on the way back out.
+     *
+     * These used to be nine columns on the row above and needed no query at
+     * all — that is the cost of the sections table, and it is one IN() query. */
+    $snapshotIds = array();
+    foreach ($pages as $page) {
+        if ($page['snapshot_id'] !== null) {
+            $snapshotIds[(int) $page['snapshot_id']] = true;
+        }
+    }
+
+    $sectionsBySnapshot = array();
+    if ($snapshotIds !== array()) {
+        $ids = array_keys($snapshotIds);
+        /* Placeholders built from the COUNT of ids, with the ids themselves
+           still bound — the string interpolated into the SQL is only ever
+           "?, ?, ?". */
+        $in = implode(', ', array_fill(0, count($ids), '?'));
+        $rows = q(
+            'SELECT * FROM snapshot_sections WHERE snapshot_id IN (' . $in . ') ORDER BY snapshot_id, sort_order, id',
+            $ids
+        )->fetchAll();
+
+        foreach ($rows as $row) {
+            $sectionsBySnapshot[(int) $row['snapshot_id']][] = $row;
+        }
+    }
+
+    foreach ($pages as $index => $page) {
+        $pages[$index]['snapshot_sections'] = $page['snapshot_id'] === null
+            ? array()
+            : ($sectionsBySnapshot[(int) $page['snapshot_id']] ?? array());
+    }
+
     return $pages;
 }
 
@@ -1853,11 +2056,7 @@ function book_layout_pages_with_content(int $layoutId): array
     $pages = q(
         "SELECT bp.*,
                 s.type AS snapshot_type, s.entry_date AS snapshot_date,
-                s.notes AS snapshot_notes, s.hero_photo_id AS snapshot_hero_photo_id,
-                s.age AS snapshot_age, s.height AS snapshot_height,
-                s.grade AS snapshot_grade, s.school AS snapshot_school,
-                s.teacher AS snapshot_teacher, s.favorite_color AS snapshot_favorite_color,
-                s.dream_job AS snapshot_dream_job, s.favorite_class AS snapshot_favorite_class,
+                s.title AS snapshot_title, s.hero_photo_id AS snapshot_hero_photo_id,
                 hero.thumb_path AS snapshot_hero_thumb, hero.original_path AS snapshot_hero_original
            FROM book_pages bp
            LEFT JOIN snapshots s ON s.id = bp.snapshot_id
@@ -1893,6 +2092,45 @@ function book_layout_pages_with_content(int $layoutId): array
         if ($index !== null) {
             $pages[$index]['slots'][] = $slot;
         }
+    }
+
+    /* A snapshot page's sections, attached under 'snapshot_sections'.
+     *
+     * One query for the whole layout rather than one per page: a book has a
+     * handful of snapshot pages, but the preview and the exporter both call
+     * this, and the exporter already has enough per-page work to do. Keyed by
+     * snapshot id on the way back out.
+     *
+     * These used to be nine columns on the row above and needed no query at
+     * all — that is the cost of the sections table, and it is one IN() query. */
+    $snapshotIds = array();
+    foreach ($pages as $page) {
+        if ($page['snapshot_id'] !== null) {
+            $snapshotIds[(int) $page['snapshot_id']] = true;
+        }
+    }
+
+    $sectionsBySnapshot = array();
+    if ($snapshotIds !== array()) {
+        $ids = array_keys($snapshotIds);
+        /* Placeholders built from the COUNT of ids, with the ids themselves
+           still bound — the string interpolated into the SQL is only ever
+           "?, ?, ?". */
+        $in = implode(', ', array_fill(0, count($ids), '?'));
+        $rows = q(
+            'SELECT * FROM snapshot_sections WHERE snapshot_id IN (' . $in . ') ORDER BY snapshot_id, sort_order, id',
+            $ids
+        )->fetchAll();
+
+        foreach ($rows as $row) {
+            $sectionsBySnapshot[(int) $row['snapshot_id']][] = $row;
+        }
+    }
+
+    foreach ($pages as $index => $page) {
+        $pages[$index]['snapshot_sections'] = $page['snapshot_id'] === null
+            ? array()
+            : ($sectionsBySnapshot[(int) $page['snapshot_id']] ?? array());
     }
 
     return $pages;

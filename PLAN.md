@@ -1794,3 +1794,105 @@ the product.
 
 **One `ALTER TABLE` on an existing install**, in `DEPLOY.txt` section 5. It is a
 `MODIFY`, so running it twice is harmless.
+
+## Round 9 — a snapshot is whatever the page needs to say
+
+**Snapshots stopped being two fixed templates.** Brief §2.3 gave them nine
+columns between them — `age`/`height` for a birthday,
+`grade`/`school`/`teacher`/`favorite_color`/`dream_job`/`favorite_class` for a
+school year — plus `notes` and a hero photo, with `type` saying which set was
+populated. Kathryn wants a page for her own 40th next to Emma's 8th: "It might
+be best to have a genericized input: Title, section title, section content."
+A fixed column list cannot express that, and "Favorite class" is not a fact
+about a fortieth birthday.
+
+So a snapshot is now a **title, a hero photo, a date, and any number of
+sections** — heading and body, in `snapshot_sections`. A real table rather than
+a JSON column: it would otherwise be the only list in this schema that is not a
+list of rows, and `sort_order` would become an array index maintained by hand.
+
+`type` survives, and it is worth being precise about what it means. It no
+longer says which columns exist, because there are none — it is the TEMPLATE an
+entry was started from, and all it does is decide which headings get pre-filled
+when you create one. Nothing reads it afterwards. It stayed because Kathryn
+said she likes the dropdown, and starting a birthday with "Age" and "Height"
+already typed is most of what she liked about it. `snapshot_update()` refuses
+to change it: on a saved snapshot it would either do nothing or silently
+rewrite the sections already on the page.
+
+**Sections are replaced wholesale, never diffed.** The client sends the list it
+is showing, in the order it is showing it, and that list is the answer — a
+section has no identity beyond its position and nothing links to one. A diff
+would need stable ids round-tripped through the form purely so the server could
+work out what the client already knows. It also makes `sort_order` contiguous
+by construction: it is the loop counter.
+
+A row with neither a heading nor a body is a blank line the form left behind
+and is dropped on save. A row with a body and no heading is kept — that is what
+freeform `notes` was, and it is how `notes` migrates.
+
+**The migration is a script, and it is rehearsed.** `tools/migrate-snapshot-
+sections.php` maps each old column to its heading in the order the old page
+showed them. It runs once against a database this build environment has never
+seen, and it is the only thing standing between nine columns of typed-in facts
+and an empty page — so `tools/verify-snapshot-migration.php` builds the OLD
+table shape in the harness, fills it with rows of the kind the live database
+holds, and checks the mapping, the ordering, and the re-run.
+
+Three properties matter more than the mapping. It **skips any snapshot that
+already has sections**, so a run that died halfway can simply be run again and
+a snapshot edited since is never overwritten. It **does not drop the old
+columns** — that is a separate statement in DEPLOY.txt, to be run after the
+pages have been looked at, because a migration that destroys its own source
+data in the same breath cannot be checked afterwards. And it is **split into a
+library half and a CLI half**, guarded on being the invoked script: the first
+version was a top-to-bottom run, and the test had to strip the runnable part
+out with a regex and an `eval`, which is testing a rewrite of the script rather
+than the script.
+
+**Quotes take any name.** `who_said_it` was `ENUM('Kathryn','Emma')` and the
+endpoint rejected everything else; the brief said a closed set of two with no
+stated path to a third, and that was true until Kathryn wanted to record
+something a grandparent or a teacher said. Now `VARCHAR(190)`, offered through
+a `<datalist>` — the browser gives the dropdown, the filtering and the keyboard
+behaviour for free, it degrades to a plain text box, and there is no widget to
+keep working. The suggestions are `SELECT DISTINCT` off the quotes themselves,
+so the list grows by being used. Not a `people` table: that is rows to create,
+rename, merge and delete, and a screen to do it on, to hold a label on a quote.
+
+**The hero picker was showing the wrong 24 photos.** It was "the last 24
+uploaded", globally, on the reasoning that it is a quick picker and not the
+year-browsing gallery. That is the wrong list for the one job it has: a hero
+photo for a birthday page is a photo OF that birthday, which is nowhere near
+the most recent 24 when a book is assembled months later. Scoped to the
+project, newest first, no meaningful cap. The cover picker had the same bug and
+got the same fix.
+
+**The printed pages.** A snapshot page is two-up portrait — hero one side,
+title and sections the other, headings bold and body copy left as it was. The
+preview was drawing it stacked, which is a page the exporter was never going to
+print; a preview that disagrees with the PDF is worse than no preview.
+
+A quote on its own page gets **hanging quotation marks**: the opening mark sits
+outside the text block's left edge so the first line aligns with the ones under
+it. A negative `text-indent` cancelled by an equal `padding-left`, both in `em`
+so they track the type size — not an absolutely positioned mark, which mPDF
+will not place against a sibling's baseline, and not a two-cell table, whose
+mark column stops matching the moment the type size changes.
+
+**The type labels came off every printed page** — "I don't want the type of
+content shown on the page". The pill in the page's TOOLBAR stays: it is screen
+chrome for telling pages apart while dragging them into a new order, and it is
+outside the drawn page. `verify-screens.php` checks the drawn page markup
+specifically, not the whole document, so the two cannot be confused.
+
+Anecdotes are **deliberately unchanged**. The plan offered bigger type and more
+of the page; the answer was "keep it how it was ... I don't know how much I'll
+use anecdotes anyway, so let's not invest time in that". They were split out of
+the shared text renderer only so the quote could get its hanging marks without
+dragging the anecdote along.
+
+**One edit form for four content types, still.** The sections editor
+(`sections.js`) is one module used by the add form and the edit modal, over
+markup PHP renders identically in both — so a snapshot's rows are in the page
+before any module runs, and the form still submits them with JS off.

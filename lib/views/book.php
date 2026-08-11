@@ -70,43 +70,53 @@ function page_fmt_date(string $ymd): string
     return $ts === false ? $ymd : date('M j, Y', $ts);
 }
 
-/** A snapshot page's fixed fields, birthday or school-year — brief §2.3. */
+/**
+ * A snapshot page: the hero photo on one side, the title and sections on the
+ * other. Two-up portrait, as Kathryn asked for.
+ *
+ * NO TYPE LABEL. It used to print a "Birthday" / "School year" pill at the top
+ * of the text column — "I don't want the type of content shown on the page".
+ * The pill in the page's TOOLBAR, next to "Reflow from here", stays: that is
+ * screen chrome for telling pages apart while reordering them, and it is
+ * outside the drawn page.
+ *
+ * Mirrors pdf_render_snapshot_page_html() in lib/pdfexport.php field for
+ * field, so the printed page matches what was reviewed here.
+ */
 function render_snapshot_page(array $page): string
 {
     ob_start();
-    $isBirthday = $page['snapshot_type'] === 'birthday';
-    $hero = $page['snapshot_hero_thumb'] ?: $page['snapshot_hero_original'];
-
-    $facts = array();
-    if ($isBirthday) {
-        if ($page['snapshot_age'] !== null) { $facts[] = 'Age ' . $page['snapshot_age']; }
-        if ($page['snapshot_height']) { $facts[] = (string) $page['snapshot_height']; }
-    } else {
-        foreach (array('grade' => 'Grade', 'school' => 'School', 'teacher' => 'Teacher',
-                        'favorite_color' => 'Favorite color', 'dream_job' => 'Dream job',
-                        'favorite_class' => 'Favorite class') as $field => $label) {
-            $value = $page['snapshot_' . $field];
-            if ($value !== null && $value !== '') {
-                $facts[] = $label . ': ' . $value;
-            }
-        }
-    }
+    $hero     = $page['snapshot_hero_thumb'] ?: $page['snapshot_hero_original'];
+    $title    = trim((string) ($page['snapshot_title'] ?? ''));
+    $sections = $page['snapshot_sections'] ?? array();
     ?>
     <div class="ks-snapshot">
-      <?php if ($hero): ?>
-        <img class="ks-snapshot-hero" src="<?= h((string) $hero) ?>" alt="">
-      <?php endif; ?>
+      <div class="ks-snapshot-hero-cell">
+        <?php if ($hero): ?>
+          <img class="ks-snapshot-hero" src="<?= h((string) $hero) ?>" alt="">
+        <?php else: ?>
+          <div class="ks-snapshot-hero is-empty"><span class="hint">No hero photo</span></div>
+        <?php endif; ?>
+      </div>
       <div class="ks-snapshot-body">
-        <span class="pill"><?= $isBirthday ? 'Birthday' : 'School year' ?></span>
-        <div class="hint"><?= h(page_fmt_date((string) $page['snapshot_date'])) ?></div>
-        <?php if ($facts !== array()): ?>
-          <ul class="ks-snapshot-facts">
-            <?php foreach ($facts as $fact): ?><li><?= h($fact) ?></li><?php endforeach; ?>
-          </ul>
+        <?php if ($title !== ''): ?>
+          <h3 class="ks-snapshot-title"><?= h($title) ?></h3>
         <?php endif; ?>
-        <?php if ($page['snapshot_notes']): ?>
-          <p class="ks-snapshot-notes"><?= h((string) $page['snapshot_notes']) ?></p>
-        <?php endif; ?>
+        <div class="ks-snapshot-date"><?= h(page_fmt_date((string) $page['snapshot_date'])) ?></div>
+        <?php foreach ($sections as $section):
+            $heading = trim((string) ($section['heading'] ?? ''));
+            $body    = trim((string) ($section['body'] ?? ''));
+            if ($heading === '' && $body === '') { continue; }
+        ?>
+          <div class="ks-section">
+            <?php if ($heading !== ''): ?>
+              <div class="ks-section-heading"><?= h($heading) ?></div>
+            <?php endif; ?>
+            <?php if ($body !== ''): ?>
+              <div class="ks-section-body"><?= nl2br(h($body)) ?></div>
+            <?php endif; ?>
+          </div>
+        <?php endforeach; ?>
       </div>
     </div>
     <?php
@@ -176,10 +186,22 @@ function render_text_slot(array $slot, bool $standalone, string $flexStyle = '')
     ob_start();
     $isQuote = $slot['quote_id'] !== null;
     ?>
-    <div class="ks-slot ks-slot-text<?= $standalone ? ' is-standalone' : '' ?>" style="<?= h($flexStyle) ?>">
-      <span class="pill is-plain"><?= $isQuote ? 'quote' : 'anecdote' ?></span>
+    <?php /* NO "quote" / "anecdote" PILL. It used to open this card and it
+             printed — "I don't want the type of content shown on the page".
+             The page's own toolbar pill, outside the drawn page, stays: that
+             is how you tell pages apart while reordering them.
+
+             A quote already announces itself with quotation marks, and an
+             anecdote with a date and no attribution; neither needed a label to
+             say what it was. */ ?>
+    <div class="ks-slot ks-slot-text<?= $standalone ? ' is-standalone' : '' ?><?= $isQuote ? ' is-quote' : '' ?>" style="<?= h($flexStyle) ?>">
       <?php if ($isQuote): ?>
-        <p>“<?= h(page_snippet((string) $slot['quote_text'], $standalone ? 400 : 90)) ?>”</p>
+        <?php /* The marks are part of the text, not a pseudo-element, so they
+                 wrap and hang with it — .ks-slot-text.is-quote.is-standalone
+                 in styles.css pulls the opening one into the margin, which is
+                 the same hanging indent pdf_render_quote_standalone_html()
+                 prints. */ ?>
+        <p>&ldquo;<?= h(page_snippet((string) $slot['quote_text'], $standalone ? 400 : 90)) ?>&rdquo;</p>
         <span class="hint"><?= h((string) $slot['who_said_it']) ?> · <?= h(page_fmt_date((string) $slot['quote_date'])) ?></span>
       <?php else: ?>
         <p><?= h(page_snippet((string) $slot['anecdote_text'], $standalone ? 400 : 90)) ?></p>

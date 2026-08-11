@@ -153,22 +153,79 @@ $yearA1 = (int) $pdo->query(
 )->fetchColumn();
 check('anecdote entry_date year (2026) resolves correctly', $yearA1 === 2026);
 
-echo "\nsnapshot_create() writes only its own template's fields...\n";
-$birthdayId = snapshot_create(array(
-    'type' => 'birthday', 'entry_date' => '2026-04-15',
-    'age' => 6, 'height' => '3ft 9in', 'notes' => 'Cake was chocolate.',
-));
-$birthdayRow = $pdo->query("SELECT * FROM snapshots WHERE id = $birthdayId")->fetch();
-check('birthday snapshot: age is set', (int) $birthdayRow['age'] === 6);
-check('birthday snapshot: school-year-only fields are all NULL', $birthdayRow['grade'] === null && $birthdayRow['school'] === null && $birthdayRow['teacher'] === null);
+echo "\nsnapshot_create(): title, sections, and the template seed...\n";
 
-$schoolId = snapshot_create(array(
-    'type' => 'school_year', 'entry_date' => '2025-08-25',
-    'grade' => '1st grade', 'school' => 'Lincoln Elementary', 'dream_job' => 'marine biologist',
+/* A snapshot is a title, a hero photo, a date and any number of sections. It
+ * used to be two fixed templates with nine columns between them, and this
+ * block used to check that each template only ever wrote its own columns —
+ * there are no columns left to write across. */
+$birthdayId = snapshot_create(array(
+    'type'       => 'birthday',
+    'entry_date' => '2026-04-15',
+    'title'      => "Emma's 6th Birthday",
+    'sections'   => array(
+        array('heading' => 'Age', 'body' => '6'),
+        array('heading' => 'Height', 'body' => '3ft 9in'),
+        array('heading' => '', 'body' => 'Cake was chocolate.'),
+    ),
 ));
-$schoolRow = $pdo->query("SELECT * FROM snapshots WHERE id = $schoolId")->fetch();
-check('school-year snapshot: grade/school/dream_job are set', $schoolRow['grade'] === '1st grade' && $schoolRow['dream_job'] === 'marine biologist');
-check('school-year snapshot: birthday-only fields (age/height) are NULL', $schoolRow['age'] === null && $schoolRow['height'] === null);
+$birthdayRow = snapshot_get($birthdayId);
+check('the title is stored', $birthdayRow['title'] === "Emma's 6th Birthday");
+
+$sections = snapshot_sections($birthdayId);
+check('every section is stored', count($sections) === 3);
+check('in the order they were given', $sections[0]['heading'] === 'Age' && $sections[1]['heading'] === 'Height');
+check('sort_order is 1-based and contiguous', array_map(static fn($r): int => (int) $r['sort_order'], $sections) === array(1, 2, 3));
+check('a body with no heading is kept', $sections[2]['heading'] === null && $sections[2]['body'] === 'Cake was chocolate.');
+
+/* Omitting `sections` entirely means "seed me from the template" — which is
+ * the ONLY thing `type` does now. */
+$seeded = snapshot_create(array('type' => 'school_year', 'entry_date' => '2025-08-25'));
+$seededSections = snapshot_sections($seeded);
+check(
+    'omitting sections seeds them from the template',
+    array_map(static fn($r): string => (string) $r['heading'], $seededSections)
+        === SNAPSHOT_TEMPLATES['school_year']
+);
+check('the seeded sections are empty, not filled in', $seededSections[0]['body'] === null);
+
+/* An explicit empty array is a different thing and has to stay possible. */
+$bare = snapshot_create(array('type' => 'birthday', 'entry_date' => '2026-01-01', 'sections' => array()));
+check('an explicit empty sections list means no sections', snapshot_sections($bare) === array());
+
+/* A row with neither a heading nor a body is a blank line the form left
+ * behind, and must not reach the database. */
+$withBlanks = snapshot_create(array(
+    'type' => 'birthday', 'entry_date' => '2026-02-02',
+    'sections' => array(
+        array('heading' => 'Age', 'body' => '7'),
+        array('heading' => '', 'body' => ''),
+        array('heading' => '  ', 'body' => "\t"),
+    ),
+));
+$kept = snapshot_sections($withBlanks);
+check('blank sections are dropped', count($kept) === 1);
+check('and the survivors renumber from 1', (int) $kept[0]['sort_order'] === 1);
+
+/* Editing replaces the whole list — see snapshot_sections_replace(). */
+snapshot_update($birthdayId, array('sections' => array(
+    array('heading' => 'Height', 'body' => '3ft 10in'),
+)));
+$after = snapshot_sections($birthdayId);
+check('an edit replaces the list wholesale', count($after) === 1 && $after[0]['heading'] === 'Height');
+check('and renumbers what is left', (int) $after[0]['sort_order'] === 1);
+
+/* Editing ONLY the sections touches no column on the snapshots row, so an
+ * early return on an empty SET would silently discard them. */
+snapshot_update($birthdayId, array('sections' => array(
+    array('heading' => 'A', 'body' => '1'),
+    array('heading' => 'B', 'body' => '2'),
+)));
+check('a sections-only edit is not swallowed', count(snapshot_sections($birthdayId)) === 2);
+
+/* Deleting the snapshot takes its sections (ON DELETE CASCADE). */
+snapshot_delete($birthdayId);
+check('sections cascade with the snapshot', snapshot_sections($birthdayId) === array());
 
 echo "\nphoto_create(): THE exit-criterion behaviour — EXIF year wins over the submission year...\n";
 // 'Today', for every other check in this script, is deep in 2026 (year_projects

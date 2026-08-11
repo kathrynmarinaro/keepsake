@@ -34,6 +34,11 @@ require_login_page();
 $project   = isset($_GET['project']) ? year_project_get((int) $_GET['project']) : null;
 $projectId = $project === null ? 0 : (int) $project['id'];
 
+/* Names already used on a quote, plus Kathryn and Emma — see quote_speakers().
+   Offered as suggestions on a text input rather than as a closed <select>:
+   Kathryn asked to be able to type a name that is not on the list. */
+$speakers = quote_speakers();
+
 page_head(array(
     'title'      => $project === null ? 'Add' : 'Add to ' . year_project_title($project),
     /* capture.js reads this and sends it with every save. On the body rather
@@ -90,12 +95,22 @@ page_screen_head(array(
           <span>What was said</span>
           <textarea name="quote_text" rows="2" maxlength="2000" required autocomplete="off"></textarea>
         </label>
+        <?php /* A TEXT INPUT WITH SUGGESTIONS, not a <select>. It was a closed
+                 dropdown of two, matching a column that was an ENUM of two;
+                 both changed together so a grandparent, a teacher or a friend
+                 can be quoted too.
+
+                 <datalist> rather than a JS combo: the browser gives the
+                 dropdown affordance, the filtering and the keyboard behaviour
+                 for free, it degrades to a plain text box everywhere it is not
+                 supported, and there is no third-party widget to keep working.
+                 The list grows by being used — quote_speakers() is a SELECT
+                 DISTINCT over the quotes themselves. */ ?>
         <label class="field">
           <span>Who said it</span>
-          <select name="who_said_it" required>
-            <option value="Kathryn">Kathryn</option>
-            <option value="Emma">Emma</option>
-          </select>
+          <input type="text" name="who_said_it" list="speaker-names" required
+                 maxlength="190" autocomplete="off" autocapitalize="words"
+                 placeholder="Pick a name or type a new one">
         </label>
         <label class="field">
           <span>Date</span>
@@ -141,30 +156,23 @@ page_screen_head(array(
           <input type="date" name="entry_date" required>
         </label>
 
-        <div data-fields="birthday">
-          <label class="field">
-            <span>Age</span>
-            <input type="number" name="age" min="0" max="130" inputmode="numeric">
-          </label>
-          <label class="field">
-            <span>Height</span>
-            <input type="text" name="height" placeholder="e.g. 3&#8217;9&quot;" autocomplete="off">
-          </label>
-        </div>
-
-        <div data-fields="school_year" hidden>
-          <label class="field"><span>Grade</span><input type="text" name="grade" autocomplete="off"></label>
-          <label class="field"><span>School</span><input type="text" name="school" autocomplete="off"></label>
-          <label class="field"><span>Teacher</span><input type="text" name="teacher" autocomplete="off"></label>
-          <label class="field"><span>Favorite color</span><input type="text" name="favorite_color" autocomplete="off"></label>
-          <label class="field"><span>Dream job</span><input type="text" name="dream_job" autocomplete="off"></label>
-          <label class="field"><span>Favorite class</span><input type="text" name="favorite_class" autocomplete="off"></label>
-        </div>
-
+        <?php /* The type dropdown seeds the SECTIONS below with that
+                 template's headings and does nothing else — it used to say
+                 which of nine fixed columns this row had. See schema.sql on
+                 snapshots, and sections.js for why switching it will not
+                 overwrite anything already typed. */ ?>
         <label class="field">
-          <span>Notes</span>
-          <textarea name="notes" rows="3" autocomplete="off"></textarea>
+          <span>Title</span>
+          <input type="text" name="title" placeholder="e.g. Emma&#8217;s 8th Birthday" autocomplete="off">
         </label>
+
+        <div class="sections-editor" data-role="sections">
+          <span class="label">Sections</span>
+          <p class="hint">A heading and what goes under it. Add as many as the
+          page needs, or delete the ones you do not want.</p>
+          <div data-role="section-list"></div>
+          <button type="button" class="btn-ghost" data-act="add-section">Add a section</button>
+        </div>
 
         <div class="field">
           <span>Hero photo</span>
@@ -177,5 +185,9 @@ page_screen_head(array(
       </form>
     </div>
   </details>
+
+<datalist id="speaker-names">
+  <?php foreach ($speakers as $name): ?><option value="<?= h($name) ?>"></option><?php endforeach; ?>
+</datalist>
 
 <?php page_foot(array('scripts' => array('assets/capture.js'))) ?>

@@ -38,8 +38,17 @@ $projectId = (int) ($body['year_project_id'] ?? 0);
 if ($text === '') {
     json_error('bad_request', 400, 'quote_text is required.');
 }
-if (!in_array($who, array('Kathryn', 'Emma'), true)) {
-    json_error('bad_request', 400, "who_said_it must be 'Kathryn' or 'Emma'.");
+/* ANY NAME, not just Kathryn or Emma. The column was an ENUM of exactly those
+ * two and this rejected everything else; both changed together — see
+ * schema.sql on quotes.who_said_it. Still required and still bounded, because
+ * the column is VARCHAR(190) and an unbounded string would be truncated by the
+ * database rather than refused here. */
+$who = is_string($who) ? trim($who) : '';
+if ($who === '') {
+    json_error('bad_request', 400, 'who_said_it is required.');
+}
+if (mb_strlen($who) > 190) {
+    json_error('bad_request', 400, 'who_said_it is too long (190 characters max).');
 }
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
     json_error('bad_request', 400, 'entry_date must be Y-m-d.');

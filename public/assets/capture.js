@@ -3,6 +3,16 @@
  */
 
 import { apiPost, apiUpload } from './api.js';
+import { attachSections } from './sections.js';
+
+/* Which section headings each template starts a new snapshot with. Must match
+   SNAPSHOT_TEMPLATES in lib/repo.php — the server seeds the same list when a
+   create request omits `sections` entirely, and the two disagreeing would mean
+   a snapshot added with JS off looked different from one added with it on. */
+const SNAPSHOT_TEMPLATES = {
+  birthday: ['Age', 'Height'],
+  school_year: ['Grade', 'School', 'Teacher', 'Favorite color', 'Dream job', 'Favorite class'],
+};
 
 /* Which project everything on this screen belongs to, or 0 for "the date
    decides". Set by public/capture.php from ?project=, which is what the +
@@ -78,15 +88,19 @@ function attachSnapshotForm(form) {
   dateInput.value = today();
 
   const typeSelect = form.querySelector('#snapshot-type');
-  const groups = form.querySelectorAll('[data-fields]');
 
-  function syncFields() {
-    for (const group of groups) {
-      group.hidden = group.dataset.fields !== typeSelect.value;
-    }
+  /* The type dropdown seeds the section headings and does nothing else. It
+     used to show and hide two fixed sets of inputs; a snapshot no longer has
+     fixed fields at all — see sections.js and schema.sql on snapshots. */
+  const sections = attachSections(form.querySelector('[data-role="sections"]'));
+
+  function seedFromTemplate() {
+    /* setTemplate() refuses when anything has been typed, so switching the
+       dropdown after filling a section in cannot wipe it. */
+    sections.setTemplate(SNAPSHOT_TEMPLATES[typeSelect.value] || []);
   }
-  typeSelect.addEventListener('change', syncFields);
-  syncFields();
+  typeSelect.addEventListener('change', seedFromTemplate);
+  seedFromTemplate();
 
   const pickBtn = form.querySelector('[data-act="pick-hero"]');
   const chosenEl = form.querySelector('[data-role="hero-chosen"]');
@@ -94,7 +108,10 @@ function attachSnapshotForm(form) {
   let heroPhotoId = null;
 
   pickBtn.addEventListener('click', async () => {
-    const photo = await openPhotoPicker({ title: 'Choose a hero photo' });
+    const photo = await openPhotoPicker({
+      title: 'Choose a hero photo',
+      yearProjectId: YEAR_PROJECT_ID,
+    });
     if (!photo) { return; }
     heroPhotoId = photo.id;
     chosenEl.textContent = `Hero photo: #${photo.id}`;
@@ -106,22 +123,17 @@ function attachSnapshotForm(form) {
     e.preventDefault();
     errorEl.textContent = '';
 
-    const type = typeSelect.value;
     const body = {
-      type,
+      type: typeSelect.value,
       entry_date: dateInput.value || today(),
-      notes: form.querySelector('[name="notes"]').value.trim(),
+      title: form.querySelector('[name="title"]').value.trim(),
       hero_photo_id: heroPhotoId,
       year_project_id: YEAR_PROJECT_ID,
+      /* Always sent, even when empty — an explicit empty array means "no
+         sections", which the endpoint has to be able to tell apart from
+         "seed me from the template". */
+      sections: sections.read(),
     };
-
-    const fieldNames = type === 'birthday'
-      ? ['age', 'height']
-      : ['grade', 'school', 'teacher', 'favorite_color', 'dream_job', 'favorite_class'];
-    for (const name of fieldNames) {
-      const el = form.querySelector(`[name="${name}"]`);
-      body[name] = el.value.trim();
-    }
 
     const button = form.querySelector('button[type="submit"]');
     button.disabled = true;
@@ -140,7 +152,13 @@ function attachSnapshotForm(form) {
     heroPhotoId = null;
     chosenEl.hidden = true;
     pickBtn.textContent = 'Choose hero photo (optional)';
-    syncFields();
+
+    /* form.reset() empties the inputs but leaves the ROWS, so the next entry
+       would start with the last one's headings and no way to tell they are
+       stale. Clearing them first makes setTemplate() see an empty editor and
+       re-seed, which is what a fresh form should look like. */
+    form.querySelectorAll('[data-role="section-row"]').forEach((row) => row.remove());
+    seedFromTemplate();
   });
 }
 

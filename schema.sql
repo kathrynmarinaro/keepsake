@@ -349,17 +349,32 @@ CREATE TABLE IF NOT EXISTS photos (
 
 -- ------------------------------------------------------------------- quotes
 
--- Brief §2.1. "Who said it" is a closed set of exactly two people (Kathryn
--- or Emma) with no stated path to a third — unlike Personal CRM's
--- relationship_tags, which the brief there explicitly says can grow, this
--- has no such requirement, so a plain ENUM is the honest shape rather than a
--- lookup table standing in for a set of two.
+-- Brief §2.1.
 CREATE TABLE IF NOT EXISTS quotes (
   id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
   year_project_id  INT UNSIGNED NOT NULL,
 
   quote_text       TEXT NOT NULL,
-  who_said_it      ENUM('Kathryn','Emma') NOT NULL,
+
+  -- FREE TEXT, not the ENUM('Kathryn','Emma') this used to be.
+  --
+  -- The brief described a closed set of exactly two people with no stated
+  -- path to a third, and an ENUM was the honest shape for that. It stopped
+  -- being true the moment Kathryn wanted to record something a grandparent,
+  -- a teacher or a friend said: "the drop down is okay for person, but I need
+  -- the ability to type in a name too".
+  --
+  -- NOT a `people` table. That would be Personal CRM's relationship_tags —
+  -- rows to create, rename, merge and delete, and a second screen to do it
+  -- on — to hold what is a label on a quote. The names offered in the picker
+  -- are derived with SELECT DISTINCT from the quotes themselves, so the list
+  -- grows by using it and there is nothing to maintain. The cost is that a
+  -- typo makes a new name, which is a cost worth paying at this size: a
+  -- misspelled name on one quote is one edit, and a lookup table would not
+  -- have prevented it either (it would have created a second row).
+  --
+  -- 190 is the utf8mb4 index-safe width used everywhere in this schema.
+  who_said_it      VARCHAR(190) NOT NULL,
 
   -- Defaults to submission date, editable (brief §3). DATE, not DATETIME —
   -- unlike photos.captured_at, nothing about a quote's page placement needs
@@ -405,64 +420,106 @@ CREATE TABLE IF NOT EXISTS anecdotes (
 
 -- ------------------------------------------------------------------ snapshots
 
--- Brief §2.3: two fixed templates (birthday, school year), both with a set
--- of OPTIONAL fields plus freeform notes and a manually-picked hero photo.
--- ONE TABLE, NOT TWO, for the two templates: they share every non-template
--- field (type, entry_date, hero_photo_id, notes) and the type-specific
--- fields are few enough (2 for birthday, 6 for school year) that a second
--- table joined 1:1 back to a base row would be more indirection than the
--- data justifies. The `type` column is what a screen reads to know which
--- fields to show; there is deliberately NO cross-field CHECK forcing the
--- other template's columns to NULL (unlike book_page_photos' CHECK below)
--- — that would be one more thing to get exactly right for six columns'
--- worth of low-stakes optional data, for a constraint whose only job is
--- catching a bug the UI already prevents by only ever showing one
--- template's fields at a time.
+-- Brief §2.3 started this as two fixed templates — birthday and school year —
+-- each with its own set of optional columns: age/height for one,
+-- grade/school/teacher/favorite_color/dream_job/favorite_class for the other,
+-- plus freeform notes and a hero photo.
+--
+-- THOSE NINE COLUMNS ARE GONE. Kathryn wants a page for her own 40th birthday
+-- next to Emma's 8th, with whatever headings each one deserves — "It might be
+-- best to have a genericized input: Title, section title, section content".
+-- A fixed column list cannot express that: every new kind of fact would be an
+-- ALTER, and "Favorite class" is not a fact about a fortieth birthday.
+--
+-- So the shape is now a TITLE, a HERO PHOTO, a DATE, and any number of
+-- SECTIONS, which live in snapshot_sections below.
+--
+-- `type` SURVIVES, and it is worth being clear about what it means now. It no
+-- longer says which columns are populated, because there are none — it is the
+-- TEMPLATE the entry was started from, and all it does is decide which section
+-- headings get pre-filled when you create one. Nothing reads it afterwards and
+-- nothing is constrained by it. It is kept because Kathryn said she likes the
+-- dropdown, and starting a birthday page with "Age" and "Height" already typed
+-- is most of what she liked about it.
 CREATE TABLE IF NOT EXISTS snapshots (
   id               INT UNSIGNED NOT NULL AUTO_INCREMENT,
   year_project_id  INT UNSIGNED NOT NULL,
 
+  -- Which template this was started from. See above: a hint about what to
+  -- pre-fill, not a statement about what the row contains.
   type             ENUM('birthday','school_year') NOT NULL,
+
+  -- What the page is called: "Emma's 8th Birthday", "Kathryn's 40th".
+  --
+  -- NULL means no title, and the page prints without one rather than
+  -- inventing something from the type and the date. A title that reads
+  -- "Birthday · Apr 15" is not a title anybody chose, and there is nowhere
+  -- else in this app that fabricates prose.
+  title            VARCHAR(190) NULL,
+
   entry_date       DATE NOT NULL,
 
-  -- Brief §2.3: "both paired with a hero photo Kathryn selects manually at
-  -- submission time (not auto-pulled)." Nullable anyway (rather than
-  -- NOT NULL, which the plain reading of that sentence would suggest):
-  -- Phase 2 hasn't built the capture flow yet, and forcing a photo to exist
-  -- before a snapshot can be saved forecloses a "save the fields now, attach
-  -- a hero photo later" path that costs nothing to leave open at the schema
-  -- level. ON DELETE SET NULL for the same "fail soft" reason as photos
-  -- above — the snapshot's real content is the fields and notes, not
-  -- fundamentally the photo.
+  -- Manually picked (brief §2.3: "not auto-selected"). Kathryn can now choose
+  -- from every photo in the project rather than the last two dozen uploaded.
   hero_photo_id    INT UNSIGNED NULL,
-
-  -- ---- birthday-only (brief §2.3) ----
-  age              SMALLINT UNSIGNED NULL,
-  -- Free text, not a number: "3'2\"", "97 cm" and "just shy of 40in" are all
-  -- things a parent actually writes down, and the brief names no unit.
-  height           VARCHAR(32)  NULL,
-
-  -- ---- school-year-only (brief §2.3) ----
-  grade            VARCHAR(32)  NULL,
-  school           VARCHAR(190) NULL,
-  teacher          VARCHAR(190) NULL,
-  favorite_color   VARCHAR(64)  NULL,
-  dream_job        VARCHAR(190) NULL,
-  favorite_class   VARCHAR(190) NULL,
-
-  -- Shared by both templates.
-  notes            TEXT NULL,
 
   created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   PRIMARY KEY (id),
-
   KEY idx_year_date (year_project_id, entry_date),
 
   CONSTRAINT fk_snapshot_year FOREIGN KEY (year_project_id)
     REFERENCES year_projects(id) ON DELETE CASCADE,
   CONSTRAINT fk_snapshot_hero_photo FOREIGN KEY (hero_photo_id)
     REFERENCES photos(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ---------------------------------------------------------- snapshot_sections
+
+-- One heading-and-body pair on a snapshot page. "Grade: 2nd" is one; so is a
+-- paragraph headed "What she's into this year".
+--
+-- A REAL TABLE, NOT A JSON COLUMN on snapshots. JSON would be one column and
+-- no join, and it would also be the only place in this schema where a list of
+-- things is not a list of rows — nothing could count them, order them or
+-- migrate them without parsing, and the sort_order below would have to be an
+-- array index maintained by hand.
+--
+-- BOTH HALVES ARE OPTIONAL, and the pair is what carries the meaning:
+--   heading + body  -> "Grade" / "2nd", the ordinary case
+--   body only       -> a paragraph with no heading, which is what the old
+--                      `notes` column was, and how it migrates
+--   heading only    -> a heading with nothing under it yet, which is a
+--                      half-finished thought and allowed to exist while she
+--                      is typing. A row with NEITHER is dropped on save
+--                      rather than stored (see snapshot_sections_replace).
+--
+-- ON DELETE CASCADE, so deleting a snapshot takes its sections. Nothing else
+-- points here.
+CREATE TABLE IF NOT EXISTS snapshot_sections (
+  id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  snapshot_id  INT UNSIGNED NOT NULL,
+
+  -- Where this sits on the page, 1-based and contiguous after every save.
+  -- Rewritten wholesale by snapshot_sections_replace() rather than patched,
+  -- so there is no path that leaves a gap or a duplicate.
+  sort_order   SMALLINT UNSIGNED NOT NULL,
+
+  heading      VARCHAR(190) NULL,
+
+  -- TEXT, not VARCHAR: a section body can be a paragraph. The old `notes`
+  -- column was TEXT for the same reason and migrates straight into one of
+  -- these.
+  body         TEXT NULL,
+
+  PRIMARY KEY (id),
+
+  -- Serves the only read there is: every section for one snapshot, in order.
+  KEY idx_snapshot_order (snapshot_id, sort_order),
+
+  CONSTRAINT fk_section_snapshot FOREIGN KEY (snapshot_id)
+    REFERENCES snapshots(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

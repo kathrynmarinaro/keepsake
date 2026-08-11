@@ -183,9 +183,13 @@ foreach (array($yearId, $tripId) as $pid) {
     snapshot_create(array(
         'type'            => 'birthday',
         'entry_date'      => '2025-04-15',
-        'age'             => 8,
-        'height'          => '4 feet',
+        'title'           => "Emma's 8th Birthday",
         'year_project_id' => $pid,
+        'sections'        => array(
+            array('heading' => 'Age', 'body' => '8'),
+            array('heading' => 'Height', 'body' => '4 feet'),
+            array('heading' => '', 'body' => 'Cake was chocolate.'),
+        ),
     ));
     photo_create(array(
         'year_project_id' => $pid,
@@ -209,6 +213,18 @@ event_group_create(array(
  * grid rather than only the empty state. */
 $layoutId = book_layout_create($yearId);
 book_page_create($layoutId, 1, 'photos');
+
+/* A snapshot PAGE, so the Book tab renders the two-up snapshot layout rather
+   than only photo pages — that page reads snapshot_sections through the join
+   in book_layout_pages_with_content(), which nothing else here exercises. */
+$snapForPage = q(
+    'SELECT id FROM snapshots WHERE year_project_id = ? ORDER BY id LIMIT 1',
+    array($yearId)
+)->fetchColumn();
+if ($snapForPage) {
+    book_page_create($layoutId, 2, 'snapshot', (int) $snapForPage);
+}
+
 year_project_set_active_layout($yearId, $layoutId);
 
     return array(
@@ -418,6 +434,35 @@ foreach (array('name="quote_text"', 'name="who_said_it"', 'name="entry_date"', '
         str_contains($grid['html'], $field) && str_contains($timeline['html'], $field)
     );
 }
+
+/* ------------------------------------------------- the printed pages */
+
+echo "\nPrinted pages...\n";
+
+$book = render_in_child('book', 'year', array('tab' => 'book'));
+
+check('the book tab renders', $book['fatal'] === null, (string) $book['fatal']);
+check('a snapshot page draws its title', str_contains($book['html'], "Emma&#039;s 8th Birthday"));
+check('and its section headings', str_contains($book['html'], 'ks-section-heading'));
+check('and its section bodies', str_contains($book['html'], 'Cake was chocolate.'));
+check('the hero and the text are two cells', str_contains($book['html'], 'ks-snapshot-hero-cell'));
+
+/* THE TYPE LABELS MUST NOT PRINT. Kathryn: "I don't want the type of content
+ * shown on the page". The words still appear in the page's TOOLBAR pill, which
+ * is screen chrome outside the drawn page — so the check is on the drawn page
+ * markup, not on the whole document. */
+$drawn = '';
+if (preg_match_all('/<div class="ks-snapshot".*?<\/div>\s*<\/div>\s*<\/div>/s', $book['html'], $m)) {
+    $drawn = implode("\n", $m[0]);
+}
+check('no "Birthday" label on the drawn snapshot page', !str_contains($drawn, '>Birthday<'));
+check('no "School year" label either', !str_contains($drawn, '>School year<'));
+
+/* The toolbar pill is the one that stays — it is how pages are told apart
+   while being dragged into a new order. */
+check('the page toolbar still says what kind of page it is',
+    str_contains($book['html'], '<span class="pill is-plain">snapshot</span>')
+    || str_contains($book['html'], '>snapshot<'));
 
 /* ------------------------------------------------------------ project_url */
 

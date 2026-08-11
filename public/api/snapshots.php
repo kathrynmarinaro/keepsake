@@ -1,17 +1,21 @@
 <?php
 /* POST /api/snapshots.php
- *   { type: 'birthday'|'school_year', entry_date, hero_photo_id?, notes?,
- *     ...template fields }
+ *   { type: 'birthday'|'school_year', entry_date, title?, hero_photo_id?,
+ *     sections? }
  *
- * Two templates (brief §2.3), both with every field optional except type and
- * entry_date. Which extra fields are read depends on `type` — see
- * lib/repo.php's SNAPSHOT_BIRTHDAY_FIELDS / SNAPSHOT_SCHOOL_YEAR_FIELDS,
- * which is also where the "only this template's columns get written" rule
- * actually lives, not here.
+ * A snapshot is a title, a hero photo, a date and any number of sections.
+ * `type` picks the TEMPLATE — which section headings a new one starts with,
+ * SNAPSHOT_TEMPLATES in lib/repo.php — and does nothing after that. It used
+ * to say which of nine fixed columns existed; those columns are gone
+ * (schema.sql on snapshots).
  *
- * hero_photo_id is Kathryn's manual pick (brief: "not auto-pulled") — the
- * client gets it from public/assets/photo-picker.js, the same component the
- * quick-add quote/anecdote forms use to bundle a photo.
+ * OMITTING `sections` MEANS "seed me from the template". Sending an empty
+ * array means "no sections at all", which is a different thing and stays
+ * possible — snapshot_create() tells them apart with array_key_exists.
+ *
+ * hero_photo_id is Kathryn's manual pick (brief: "not auto-pulled"), from
+ * public/assets/photo-picker.js — which can now offer every photo in the
+ * project rather than the last two dozen uploaded.
  */
 
 declare(strict_types=1);
@@ -38,27 +42,19 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
 $data = array(
     'type'       => $type,
     'entry_date' => $date,
-    'notes'      => is_string($body['notes'] ?? null) ? trim($body['notes']) : null,
+    'title'      => is_string($body['title'] ?? null) ? trim($body['title']) : null,
     /* An explicit project, when the + was tapped from inside one — see
        year_project_for_new() in lib/repo.php. 0 means "the date decides". */
     'year_project_id' => (int) ($body['year_project_id'] ?? 0),
 );
 
+if (array_key_exists('sections', $body)) {
+    $data['sections'] = snapshot_sections_from_request($body['sections']);
+}
+
 $heroPhotoId = $body['hero_photo_id'] ?? null;
 $data['hero_photo_id'] = ($heroPhotoId !== null && $heroPhotoId !== '') ? (int) $heroPhotoId : null;
 
-if ($type === 'birthday') {
-    // Numeric age only — a stray non-numeric value is dropped (fail soft)
-    // rather than failing the whole submission over one optional field.
-    $age = $body['age'] ?? null;
-    $data['age']    = (is_numeric($age) && (int) $age >= 0) ? (int) $age : null;
-    $data['height'] = is_string($body['height'] ?? null) ? trim($body['height']) : null;
-} else {
-    foreach (array('grade', 'school', 'teacher', 'favorite_color', 'dream_job', 'favorite_class') as $field) {
-        $data[$field] = is_string($body[$field] ?? null) ? trim($body[$field]) : null;
-    }
-}
-
 $id = snapshot_create($data);
 
-json_out(array('id' => $id), 201);
+json_out(array('id' => $id, 'sections' => snapshot_sections($id)), 201);

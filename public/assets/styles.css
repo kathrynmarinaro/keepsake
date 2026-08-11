@@ -1868,6 +1868,27 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   justify-content: center;
   overflow: auto;
 }
+/* A QUOTE ON ITS OWN PAGE GETS HANGING QUOTATION MARKS.
+ *
+ * "Hanging" means the opening mark sits outside the text block's left edge, so
+ * the first line of words lines up with every line under it instead of being
+ * pushed in by the width of a quote mark. It is what makes a set quotation
+ * look set rather than typed.
+ *
+ * text-indent pulls the first line left by one mark's width; padding-left puts
+ * the block back where it started, so only that first line hangs. Both in em,
+ * so they track the type size rather than needing a second number when it
+ * changes. The same two declarations, in the same unit, are what
+ * pdf_render_quote_standalone_html() prints.
+ *
+ * Only when standalone: a quote riding along in a small slot on a photo page
+ * has no margin to hang into. */
+.ks-slot-text.is-quote.is-standalone p {
+  padding-left: 0.62em;
+  text-indent: -0.62em;
+  text-align: left;
+}
+
 .ks-slot-photo { cursor: grab; display: block; }
 
 /* The image (or its cropped background-image stand-in — see
@@ -2038,25 +2059,73 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
  * year so birthday pages read like each other year to year, and school-year
  * pages read like each other year to year.
  */
-.ks-snapshot { display: flex; flex-direction: column; gap: 10px; }
+/* A snapshot page: TWO-UP. Hero on one side, title and sections on the other,
+ * matching the 45/55 table pdf_render_snapshot_page_html() prints.
+ *
+ * It used to be stacked — hero above a list of facts — which drew a page the
+ * exporter was never going to print. A preview that disagrees with the PDF is
+ * worse than no preview.
+ *
+ * NO TYPE LABEL anywhere below: "I don't want the type of content shown on the
+ * page". The pill in the page's toolbar, outside this block, stays. */
+.ks-snapshot {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ks-snapshot-hero-cell { flex: 0 0 45%; min-width: 0; }
 .ks-snapshot-hero {
   display: block;
   width: 100%;
-  max-height: 260px;
+  /* PORTRAIT. The printed cell is a column down one side of the page, so a
+     hero cropped landscape here would flatter an arrangement the PDF does not
+     produce. 4:5 is the shape the column actually has. */
+  aspect-ratio: 4 / 5;
   object-fit: cover;
-  border-radius: var(--radius);
+  border-radius: 2px;
 }
-.ks-snapshot-body { display: flex; flex-direction: column; gap: 6px; }
-.ks-snapshot-facts {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
+.ks-snapshot-hero.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border);
+  background: var(--bg);
+}
+.ks-snapshot-body {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 0.85rem;
 }
-.ks-snapshot-notes { font-size: 0.85rem; color: var(--ink); }
+.ks-snapshot-title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--heading);
+}
+.ks-snapshot-date {
+  font-size: 0.7rem;
+  color: var(--slate);
+  opacity: 0.8;
+  margin-bottom: 4px;
+}
+
+/* One heading-and-body pair. Bold heading, body copy as it was — "the titles
+   should be bold and the body copy is good as-is". */
+.ks-section { margin-bottom: 5px; }
+.ks-section-heading {
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--heading);
+}
+.ks-section-body {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--slate);
+}
 
 /* ============ The cover, as it will print (brief §4.6 + Round 6) ============
  *
@@ -2283,3 +2352,54 @@ body.has-entry-modal { overflow: hidden; }
   flex-shrink: 0;
   min-width: 44px;
 }
+
+/* ============ Snapshot sections editor ============
+ *
+ * The add and edit forms both build a snapshot's heading-and-body rows here —
+ * see sections.js. They replaced two fixed sets of inputs (Age/Height, or
+ * Grade/School/Teacher/…) with a list you build, because Kathryn wants her own
+ * 40th birthday page next to Emma's 8th with different things worth writing on
+ * each.
+ */
+.sections-editor { display: grid; gap: 8px; }
+.sections-editor > .hint { margin: -4px 0 0; }
+
+.section-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.section-row-head { display: flex; gap: 8px; align-items: center; }
+.section-heading { flex: 1; min-width: 0; font-weight: 600; }
+
+/* Smaller than a full .icon-btn: it sits beside a field rather than in a
+   header, and a 48px square next to a 48px input reads as a second field. The
+   row is tall enough that the target is still comfortably tappable. */
+.section-remove {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  color: var(--slate);
+}
+.section-remove:hover { color: var(--error); border-color: var(--error); }
+.section-remove svg { width: 18px; height: 18px; }
+
+.section-body {
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  /* 16px minimum, like every other input in the suite: below it, iOS zooms on
+     focus and never zooms back. */
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+  resize: vertical;
+}
+.section-body:focus, .section-heading:focus { outline: 2px solid var(--teal); outline-offset: -1px; }

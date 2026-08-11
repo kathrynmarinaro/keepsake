@@ -1,16 +1,21 @@
 <?php
 /* POST /api/snapshots-update.php
- *   { id, entry_date?, hero_photo_id?, notes?, ...type-appropriate fields }
+ *   { id, title?, entry_date?, hero_photo_id?, sections? }
  *
- * Phase 3's full edit on a snapshot (brief §5.2/§2.3). Which extra fields
- * are accepted depends on the ROW'S OWN type (birthday or school_year) —
- * lib/repo.php's snapshot_update() reads that off the existing row and only
- * writes that template's columns, same invariant snapshot_create() keeps at
- * creation time. There is no `type` field here — see snapshot_update()'s
- * own header for why changing a saved snapshot's template isn't supported.
+ * A snapshot's full edit. `sections` is the whole list, in page order —
+ * [{heading, body}, …] — because that is what the form is showing and a
+ * section has no identity to diff against; see snapshot_sections_replace().
  *
- * hero_photo_id comes from the same public/assets/photo-picker.js used at
- * creation time; null/empty clears it.
+ * THE TYPE-SPECIFIC FIELDS ARE GONE. This used to accept age/height or
+ * grade/school/teacher/… depending on the row's own type, and only ever wrote
+ * that template's columns. Those columns no longer exist: a snapshot is a
+ * title, a hero photo, a date and any number of sections (schema.sql). `type`
+ * survives as the template a new entry is seeded from and is still not
+ * editable here.
+ *
+ * hero_photo_id comes from public/assets/photo-picker.js, which can now offer
+ * every photo in the project rather than the last two dozen uploaded;
+ * null/empty clears it.
  */
 
 declare(strict_types=1);
@@ -46,20 +51,14 @@ if (array_key_exists('hero_photo_id', $body)) {
     $fields['hero_photo_id'] = ($body['hero_photo_id'] === null || $body['hero_photo_id'] === '')
         ? null : (int) $body['hero_photo_id'];
 }
-if (array_key_exists('notes', $body)) {
-    $fields['notes'] = is_string($body['notes']) ? trim($body['notes']) : null;
+if (array_key_exists('title', $body)) {
+    $fields['title'] = is_string($body['title']) ? trim($body['title']) : null;
 }
-
-$templateFields = $snapshot['type'] === 'birthday' ? SNAPSHOT_BIRTHDAY_FIELDS : SNAPSHOT_SCHOOL_YEAR_FIELDS;
-foreach ($templateFields as $field) {
-    if (array_key_exists($field, $body)) {
-        $raw = $body[$field];
-        if ($field === 'age') {
-            $fields[$field] = (is_numeric($raw) && (int) $raw >= 0) ? (int) $raw : null;
-        } else {
-            $fields[$field] = is_string($raw) ? trim($raw) : null;
-        }
-    }
+if (array_key_exists('sections', $body)) {
+    /* Normalized here rather than trusted: the repo stores whatever shape it
+       is handed, and a section arriving as a bare string or with extra keys
+       would otherwise reach the INSERT. */
+    $fields['sections'] = snapshot_sections_from_request($body['sections']);
 }
 
 snapshot_update($id, $fields);
@@ -72,4 +71,10 @@ $snapshot = snapshot_get($id);
 // stray "5" !== 5 there would misfire on every single save.
 $snapshot['id'] = (int) $snapshot['id'];
 $snapshot['year_project_id'] = (int) $snapshot['year_project_id'];
+
+/* The sections travel back with the row so the screen can repaint its summary
+   from what was actually stored — empty rows are dropped on the way in, so
+   what came back is not necessarily what was sent. */
+$snapshot['sections'] = snapshot_sections($id);
+
 json_out($snapshot);

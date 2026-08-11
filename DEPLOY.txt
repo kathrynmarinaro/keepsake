@@ -162,6 +162,69 @@ public_html/keepsake/ :
       as it does today until you rename one. Clearing the title on the
       layout screen ("Reset") puts it back to NULL.
 
+  [ ] Snapshots become title + sections, and quotes take any name.
+      THIS ONE HAS THREE STEPS AND A SCRIPT. Back up the database first
+      (hPanel -> Databases -> phpMyAdmin -> Export) — it is the only
+      change in this app's history that moves data rather than adding
+      to it.
+
+      STEP 1 — make room. Run in phpMyAdmin -> SQL:
+
+          ALTER TABLE quotes
+            MODIFY COLUMN who_said_it VARCHAR(190) NOT NULL;
+
+          ALTER TABLE snapshots
+            ADD COLUMN title VARCHAR(190) NULL AFTER type;
+
+          CREATE TABLE IF NOT EXISTS snapshot_sections (
+            id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            snapshot_id  INT UNSIGNED NOT NULL,
+            sort_order   SMALLINT UNSIGNED NOT NULL,
+            heading      VARCHAR(190) NULL,
+            body         TEXT NULL,
+            PRIMARY KEY (id),
+            KEY idx_snapshot_order (snapshot_id, sort_order),
+            CONSTRAINT fk_section_snapshot FOREIGN KEY (snapshot_id)
+              REFERENCES snapshots(id) ON DELETE CASCADE
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+      The quotes ALTER widens a column that was ENUM('Kathryn','Emma')
+      so anyone can be quoted; existing quotes keep their names exactly.
+      The other two ADD things, so nothing existing changes at all.
+
+      STEP 2 — move the data. This one is a script, because it is a loop
+      with an ordering and SQL in a text file cannot be tested:
+
+          php tools/migrate-snapshot-sections.php --dry-run
+          php tools/migrate-snapshot-sections.php
+
+      It turns each snapshot's Age/Height (or Grade/School/Teacher/…)
+      into sections, in the order the page showed them, and turns Notes
+      into a section with no heading. It prints what it did.
+
+      SAFE TO RUN TWICE: it skips any snapshot that already has sections,
+      so a run that dies halfway can just be run again, and a snapshot
+      you have edited since is never overwritten.
+
+      NO SHELL ON HOSTINGER? hPanel has a "Cron Jobs" page that can run a
+      PHP file once — point it at tools/migrate-snapshot-sections.php,
+      let it fire, then delete the job. Or ask and I will hand you the
+      INSERT statements for your actual rows.
+
+      STEP 3 — only after checking a snapshot page in the app looks
+      right. This is the step that throws the old data away:
+
+          ALTER TABLE snapshots
+            DROP COLUMN age, DROP COLUMN height, DROP COLUMN grade,
+            DROP COLUMN school, DROP COLUMN teacher,
+            DROP COLUMN favorite_color, DROP COLUMN dream_job,
+            DROP COLUMN favorite_class, DROP COLUMN notes;
+
+      Until you run it the old values are still sitting there, which is
+      what makes step 2 checkable. The app ignores those columns either
+      way, so there is no rush — but leaving them means your database
+      and schema.sql disagree, so do it once you are happy.
+
   [ ] Projects that aren't years. Makes one EXISTING column nullable, so a
       book can be about a trip rather than a calendar year — run once:
 

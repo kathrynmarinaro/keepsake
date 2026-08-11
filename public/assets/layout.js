@@ -229,7 +229,13 @@ async function pickCover(button) {
   const card = button.closest('[data-role="title-card"]');
   const yearProjectId = Number(card.dataset.yearProject);
 
-  const photo = await openPhotoPicker({ title: 'Choose a cover photo' });
+  const photo = await openPhotoPicker({
+    title: 'Choose a cover photo',
+    /* A cover is a photo from THIS book, so the picker is scoped to it — the
+       same fix as the hero picker, and for the same reason: the cover is
+       chosen at the end, long after the photos on it were uploaded. */
+    yearProjectId: Number(document.body.dataset.yearProjectId || 0),
+  });
   if (!photo) { return; }
 
   button.disabled = true;

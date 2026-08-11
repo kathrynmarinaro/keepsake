@@ -99,31 +99,39 @@ check('anecdote date correction lands in the new year (2026)', $anecYear === 202
 
 echo "\nsnapshot_update(): year re-resolves; template fields stay isolated...\n";
 $birthdayId = snapshot_create(array(
-    'type' => 'birthday', 'entry_date' => '2025-04-15', 'age' => 5, 'height' => '3ft 6in',
+    'type' => 'birthday', 'entry_date' => '2025-04-15',
+    'title' => 'Fifth birthday',
+    'sections' => array(array('heading' => 'Age', 'body' => '5')),
 ));
-snapshot_update($birthdayId, array('entry_date' => '2022-04-15', 'age' => 6));
+snapshot_update($birthdayId, array(
+    'entry_date' => '2022-04-15',
+    'title'      => 'Sixth birthday',
+    'sections'   => array(array('heading' => 'Age', 'body' => '6')),
+));
 $row = $pdo->query("SELECT * FROM snapshots WHERE id = $birthdayId")->fetch();
 $birthdayYear = (int) $pdo->query("SELECT year FROM year_projects WHERE id = " . (int) $row['year_project_id'])->fetchColumn();
 check('snapshot date correction re-resolved year_project_id (now 2022)', $birthdayYear === 2022);
-check('snapshot_update() applied the birthday-template field (age -> 6)', (int) $row['age'] === 6);
+check('snapshot_update() applied the title', $row['title'] === 'Sixth birthday');
 
-// A client (confused or hostile) sending a school_year-only field for a
-// birthday snapshot must not have it written — snapshot_update() reads the
-// row's own type and only accepts that template's columns.
-snapshot_update($birthdayId, array('grade' => '2nd grade'));
-$rowAfter = $pdo->query("SELECT * FROM snapshots WHERE id = $birthdayId")->fetch();
+$sections = snapshot_sections($birthdayId);
+check('snapshot_update() replaced the sections', count($sections) === 1 && $sections[0]['body'] === '6');
+
+/* The old cross-template guard is gone with the columns it protected: there is
+ * no "birthday-only" or "school-year-only" field left for a confused client to
+ * write into the wrong row. `type` now only decides what a NEW entry's section
+ * headings start as, and snapshot_update() does not accept it at all — the
+ * template a saved snapshot was started from is not something to change after
+ * the fact. */
+snapshot_update($birthdayId, array('type' => 'school_year'));
 check(
-    "snapshot_update() ignores a field belonging to the OTHER template (grade sent to a birthday row)",
-    $rowAfter['grade'] === null
+    'snapshot_update() will not change the template a snapshot was started from',
+    snapshot_get($birthdayId)['type'] === 'birthday'
 );
 
-$schoolId = snapshot_create(array('type' => 'school_year', 'entry_date' => '2025-08-25', 'grade' => 'K'));
-snapshot_update($schoolId, array('age' => 99));
-$schoolRow = $pdo->query("SELECT * FROM snapshots WHERE id = $schoolId")->fetch();
-check(
-    'snapshot_update() ignores a birthday-only field sent to a school_year row',
-    $schoolRow['age'] === null
-);
+/* Clearing the title puts it back to NULL rather than storing an empty string,
+   matching every other optional text field in the repo. */
+snapshot_update($birthdayId, array('title' => '   '));
+check('an emptied title is stored as NULL', snapshot_get($birthdayId)['title'] === null);
 
 /* ========================================== skip_for_book / full_page ===*/
 

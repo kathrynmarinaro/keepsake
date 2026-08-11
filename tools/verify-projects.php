@@ -425,5 +425,52 @@ check(
 $bare = year_project_create(null, 'Just a name');
 check('a yearless book with no subtitle has no second line', project_sub_line(year_project_get($bare)) === '');
 
+/* ------------------------------------------- 9. free-text speaker names */
+
+echo "\nquote_speakers()...\n";
+
+$speakerProject = year_project_create(null, 'Who said it');
+foreach (array('Grandma', 'Emma', 'Ms. Devore') as $who) {
+    quote_create(array(
+        'quote_text'      => 'Something ' . $who . ' said.',
+        'who_said_it'     => $who,
+        'entry_date'      => '2025-03-03',
+        'year_project_id' => $speakerProject,
+    ));
+}
+
+/* The column was ENUM('Kathryn','Emma') and the endpoint rejected anything
+ * else. Both changed together so a grandparent or a teacher can be quoted. */
+$names = quote_speakers();
+check('a name that is not Kathryn or Emma is stored', in_array('Grandma', $names, true));
+check('and so is one with a title in it', in_array('Ms. Devore', $names, true));
+check('Kathryn is always offered, even having said nothing', in_array('Kathryn', $names, true));
+check('Emma appears once, not twice', count(array_keys($names, 'Emma', true)) === 1);
+
+$sorted = $names;
+sort($sorted, SORT_NATURAL | SORT_FLAG_CASE);
+check('the list is sorted', $names === $sorted);
+
+/* ------------------------------- 10. sections travel with the export */
+
+echo "\nsnapshots in the export...\n";
+
+$exportProject = year_project_create(null, 'Exportable');
+$exportSnap = snapshot_create(array(
+    'type'            => 'birthday',
+    'entry_date'      => '2025-04-15',
+    'title'           => 'A birthday',
+    'year_project_id' => $exportProject,
+    'sections'        => array(array('heading' => 'Age', 'body' => '8')),
+));
+
+$exported = year_project_export_data($exportProject);
+check('the snapshot is exported', count($exported['snapshots']) === 1);
+check('with its title', $exported['snapshots'][0]['title'] === 'A birthday');
+check(
+    'and its sections nested under it',
+    ($exported['snapshots'][0]['sections'][0]['heading'] ?? null) === 'Age'
+);
+
 echo "\n" . ($failures === 0 ? "All checks passed.\n" : $failures . " CHECK(S) FAILED.\n");
 exit($failures === 0 ? 0 : 1);

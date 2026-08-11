@@ -31,6 +31,25 @@ import { openPhotoPicker } from './photo-picker.js';
    HERE rather than added as a second <script> on the page so that a screen
    loading review.js cannot end up without it. */
 import './entry-modal.js';
+import { attachSections } from './sections.js';
+
+/* One sections editor per snapshot entry on the page, wired on load.
+ *
+ * NOT LAZILY, on first open: "Add a section" and the per-row remove buttons
+ * have to work the moment the entry is opened, and there is no open event to
+ * hang the wiring on that fires before the user can reach them. attachSections
+ * is a handful of listeners over rows PHP already rendered, so doing it up
+ * front for every snapshot on the screen costs nothing worth measuring.
+ *
+ * Keyed by the <details> — the element every other handler here already has in
+ * hand — in a WeakMap, so an entry removed from the page (a date correction
+ * that moved it to another project) takes its editor with it. */
+const sectionEditors = new WeakMap();
+
+document.querySelectorAll('.entry[data-type="snapshot"]').forEach((details) => {
+  const root = details.querySelector('[data-role="sections"]');
+  if (root) { sectionEditors.set(details, attachSections(root)); }
+});
 
 /* Which project this screen is showing. public/project.php puts it on the
    <body>, which is the canonical place for it — it used to be read out of the
@@ -93,7 +112,19 @@ async function saveEntry(details) {
   }
   if (type === 'snapshot') {
     if (body.hero_photo_id === '') { body.hero_photo_id = null; }
-    if ('age' in body && body.age === '') { body.age = null; }
+
+    /* Sections come off the editor rather than out of formValues(): they are
+       an ARRAY of pairs, and the flat name/value scrape formValues() does
+       would hand the endpoint "sections[0][heading]" as a key. Always sent, so
+       deleting the last section actually deletes it. */
+    const editor = sectionEditors.get(details);
+    body.sections = editor ? editor.read() : [];
+
+    /* The names are positional and the server rebuilds them anyway, so the
+       bracketed keys the inputs carry for the no-JS case are noise here. */
+    Object.keys(body).forEach((key) => {
+      if (key.startsWith('sections[')) { delete body[key]; }
+    });
   }
 
   button.disabled = true;
@@ -278,7 +309,10 @@ async function recrop(button) {
 /* ------------------------------------------------------------ hero photo pick */
 
 async function pickHero(button) {
-  const photo = await openPhotoPicker({ title: 'Choose a hero photo' });
+  const photo = await openPhotoPicker({
+    title: 'Choose a hero photo',
+    yearProjectId: PAGE_YEAR_PROJECT_ID,
+  });
   if (!photo) { return; }
 
   const form = button.closest('form');
