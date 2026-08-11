@@ -40,6 +40,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/repo.php';
+/* For event_grouping_internal_gaps()/event_grouping_gap_days() — the Groups
+ * view asks whether each group would still be clustered the way it is, which
+ * has to be the same threshold the grouper itself uses. */
+require_once __DIR__ . '/../lib/grouping.php';
 
 require_login_page();
 
@@ -578,6 +582,37 @@ function render_photo_cell(array $p, array $eventGroups): string
         </div>
       </details>
 
+      <?php
+        /* PHOTOS IN NO GROUP AT ALL, which this screen used to show nowhere.
+           It listed event_groups rows and nothing else, so an ungrouped photo
+           was invisible here — and an ungrouped photo is not inert: the layout
+           engine puts it in its own bucket, clusters it by time of day, and
+           sweeps whatever is left over onto shared pages. "I can't find them in
+           the group page" was a true and complete description of the bug. */
+        $orphans = array_values(array_filter(
+            $photos,
+            static fn(array $p): bool => $p['event_group_id'] === null
+        ));
+      ?>
+      <?php if ($orphans !== array()): ?>
+        <div class="card">
+          <p><strong><?= count($orphans) ?> photo<?= count($orphans) === 1 ? '' : 's' ?> in no group</strong></p>
+          <p class="hint">
+            These are placed in the book by date alone, and a lone one may be
+            combined onto a page with other leftovers. <strong>Group photos</strong>
+            above files them with the event they belong to.
+          </p>
+          <div class="group-members">
+            <?php foreach ($orphans as $o): ?>
+              <a class="group-member" href="review.php?year=<?= $year ?>&amp;view=grid&amp;type=photo#entry-photo-<?= (int) $o['id'] ?>">
+                <img class="thumb" src="<?= h((string) ($o['thumb_path'] ?: $o['original_path'])) ?>" alt="">
+                <span class="hint"><?= h(fmt_date_human(substr((string) $o['captured_at'], 0, 10))) ?></span>
+              </a>
+            <?php endforeach; ?>
+          </div>
+        </div>
+      <?php endif; ?>
+
       <?php if ($groups === array()): ?>
         <div class="empty"><p>No event groups yet for <?= h((string) $year) ?>.</p></div>
       <?php else: ?>
@@ -585,6 +620,21 @@ function render_photo_cell(array $p, array $eventGroups): string
           <?php foreach ($groups as $g):
               $groupId = (int) $g['id'];
               $members = array_values(array_filter($photos, static fn(array $p): bool => (int) ($p['event_group_id'] ?? 0) === $groupId));
+
+              /* Would these photos still be grouped together if they were
+                 grouped today? A group is clustered from the dates its photos
+                 had at the time, and correcting a date afterwards deliberately
+                 does NOT move the photo — auto-grouping never touches a photo
+                 already in a group, which is what stops it overruling a merge
+                 or a split made by hand. The cost is that a photo uploaded with
+                 the wrong date stays filed under the wrong date's neighbours,
+                 and until now the only place that showed was the finished book.
+                 See event_grouping_internal_gaps(). */
+              $memberDates = array_map(
+                  static fn(array $p): string => substr((string) $p['captured_at'], 0, 10),
+                  $members
+              );
+              $gaps = event_grouping_internal_gaps($memberDates, event_grouping_gap_days());
           ?>
             <div class="card group-row" data-id="<?= $groupId ?>">
               <div class="row-between group-row-actions">
@@ -613,7 +663,41 @@ function render_photo_cell(array $p, array $eventGroups): string
                 <button type="button" class="btn-danger" data-act="delete-group" data-id="<?= $groupId ?>">Ungroup</button>
               </div>
 
+              <?php if ($gaps !== array()): ?>
+                <?php /* Named rather than counted: "10 days between Nov 16 and
+                         Nov 26" is something she can check against her memory
+                         of the year, where "spans 13 days" is not. */ ?>
+                <p class="field-err group-gap-warn">
+                  These photos would not be grouped together today —
+                  <?php $shown = array_slice($gaps, 0, 2); ?>
+                  <?= h(implode(', ', array_map(
+                      static fn(array $gap): string => $gap['days'] . ' days between '
+                          . fmt_date_human($gap['from']) . ' and ' . fmt_date_human($gap['to']),
+                      $shown
+                  ))) ?><?= count($gaps) > count($shown) ? ', and ' . (count($gaps) - count($shown)) . ' more' : '' ?>.
+                  Usually this means a date was corrected after the group was made.
+                  <strong>Ungroup</strong> it, then <strong>Group photos</strong> at the top,
+                  to file these by their real dates — then generate the book again.
+                </p>
+              <?php endif; ?>
+
               <?php if ($members !== array()): ?>
+                <?php /* The group's photos, with their dates, WITHOUT having to
+                         open anything. They used to be visible only inside the
+                         "Split…" accordion below, which meant a group could sit
+                         in this list holding four photos from four different
+                         weeks and read, at a glance, exactly like a correct
+                         one. The whole point of this screen is seeing what is
+                         in a group. */ ?>
+                <div class="group-members">
+                  <?php foreach ($members as $m): ?>
+                    <a class="group-member" href="review.php?year=<?= $year ?>&amp;view=grid&amp;type=photo#entry-photo-<?= (int) $m['id'] ?>">
+                      <img class="thumb" src="<?= h((string) ($m['thumb_path'] ?: $m['original_path'])) ?>" alt="">
+                      <span class="hint"><?= h(fmt_date_human(substr((string) $m['captured_at'], 0, 10))) ?></span>
+                    </a>
+                  <?php endforeach; ?>
+                </div>
+
                 <details class="accordion">
                   <summary class="accordion-head">Split…</summary>
                   <div class="accordion-body">

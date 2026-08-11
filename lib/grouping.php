@@ -182,6 +182,51 @@ function event_grouping_cluster_ungrouped(array $photos, int $gapDays): array
 }
 
 /**
+ * Would this group's photos still be grouped together if they were grouped
+ * today? Returns the internal gaps that say no — pairs of consecutive member
+ * dates further apart than the threshold. Empty means the group holds together.
+ *
+ * WHY THIS EXISTS. A group is clustered from the dates its photos had AT THE
+ * TIME. Correct a date afterwards and the membership does not move: the group
+ * is a decision, and auto-grouping deliberately never touches a photo already
+ * in one. That is the right rule — it is what stops the clusterer overruling a
+ * merge or a split she made by hand — but it means a photo uploaded with the
+ * wrong date stays filed under the wrong date's neighbours forever, and there
+ * was NOTHING anywhere in the app that said so. The Groups view showed a name,
+ * a stored range and a count; the photos themselves sat behind a collapsed
+ * "Split…" accordion. Kathryn hit this twice: four photos uploaded on one wrong
+ * date, corrected one by one, and still emitted onto a single book page
+ * together weeks away from where any of them belonged.
+ *
+ * Deliberately measured against the MEMBERS' OWN dates rather than against the
+ * group's stored start_date/end_date. A stale stored range is a second symptom
+ * of the same cause and gets recomputed on the next write, at which point the
+ * range would look fine while the membership was still wrong. The gaps do not
+ * heal on their own, which is what makes them the honest signal.
+ *
+ * Pure — takes dates, returns gaps, decides nothing. The Groups view turns
+ * these into a warning; nothing regroups automatically on the strength of them,
+ * because a ten-day gap inside one group can also be a deliberate merge.
+ *
+ * @param list<string> $dates member 'Y-m-d' dates, any order
+ * @return list<array{from:string,to:string,days:int}> in chronological order
+ */
+function event_grouping_internal_gaps(array $dates, int $gapDays): array
+{
+    sort($dates);
+
+    $gaps = array();
+    for ($i = 1, $n = count($dates); $i < $n; $i++) {
+        $days = event_grouping_day_gap($dates[$i - 1], $dates[$i]);
+        if ($days > $gapDays) {
+            $gaps[] = array('from' => $dates[$i - 1], 'to' => $dates[$i], 'days' => $days);
+        }
+    }
+
+    return $gaps;
+}
+
+/**
  * Step 2 of the heuristic: the closest existing group within the gap
  * threshold of a cluster's date range, or null if none qualifies. Pure.
  *

@@ -103,6 +103,8 @@ if ($regroup) {
     $fields['event_group_id'] = null;
 }
 
+$wasInGroup = $photo['event_group_id'] !== null ? (int) $photo['event_group_id'] : null;
+
 photo_update($id, $fields);
 
 $regrouped = null;
@@ -110,6 +112,32 @@ if ($regroup) {
     event_grouping_run((int) $photo['year_project_id']);
     $after = photo_get($id);
     $regrouped = $after['event_group_id'] !== null ? (int) $after['event_group_id'] : null;
+}
+
+/* KEEP EVERY GROUP THIS TOUCHED HONEST ABOUT ITS OWN DATES.
+ *
+ * event_groups.start_date/end_date are a cache of the members' dates, and
+ * nothing here used to refresh them: a photo could leave a group, or have its
+ * date corrected while staying in one, and the group would go on advertising a
+ * range that included a photo it no longer held or a date nobody had any more.
+ * The grouper recomputes on join, so the gap was only ever on the edit paths —
+ * which is to say on exactly the path that produced the wrong range.
+ *
+ * The vacated group is recomputed but never deleted, even when it is now empty:
+ * deleting it would let an edit to one photo destroy a group Kathryn may have
+ * named by hand, and an empty group is visible in the Groups view where she can
+ * remove it herself.
+ *
+ * This is a second symptom of the mis-dated-photo problem, not the problem —
+ * the membership is what actually goes wrong, and event_grouping_internal_gaps()
+ * is what surfaces that. Fixed here anyway because a cached range that quietly
+ * disagrees with the rows it summarises is worth nobody's afternoon later. */
+$after   = photo_get($id);
+$nowIn   = $after['event_group_id'] !== null ? (int) $after['event_group_id'] : null;
+$touched = array_unique(array_filter(array($wasInGroup, $nowIn), static fn($g): bool => $g !== null));
+
+foreach ($touched as $groupId) {
+    event_group_recompute_dates($groupId);
 }
 
 $photo = photo_get($id);

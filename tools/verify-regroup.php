@@ -85,9 +85,18 @@ function save_photo(int $id, array $body): ?int
 
     if ($regroup) { $fields['event_group_id'] = null; }
 
+    $wasInGroup = $photo['event_group_id'] !== null ? (int) $photo['event_group_id'] : null;
+
     photo_update($id, $fields);
 
     if ($regroup) { event_grouping_run((int) $photo['year_project_id']); }
+
+    /* Mirrors the endpoint's own group-date refresh — see photos-update.php. */
+    $after = photo_get($id);
+    $nowIn = $after['event_group_id'] !== null ? (int) $after['event_group_id'] : null;
+    foreach (array_unique(array_filter(array($wasInGroup, $nowIn), static fn($g): bool => $g !== null)) as $gid) {
+        event_group_recompute_dates($gid);
+    }
 
     $after = photo_get($id);
     return $after['event_group_id'] !== null ? (int) $after['event_group_id'] : null;
@@ -142,12 +151,6 @@ save_photo($march[0], array('entry_date' => '2025-03-10'));
 check('re-saving the same date does not regroup',
     (int) photo_get($march[0])['event_group_id'] === $before);
 
-/* An explicit assignment is a decision and outranks the clusterer — even when
- * the date moves in the same request, which is the case that would otherwise
- * silently undo her. */
-save_photo($march[1], array('entry_date' => '2025-07-20', 'event_group_id' => $marchGroup));
-check('a hand-picked group survives a date change in the same save',
-    (int) photo_get($march[1])['event_group_id'] === $marchGroup);
 
 /* And a date change on an ungrouped photo places it, rather than needing the
  * button pressed afterwards. */
@@ -155,6 +158,94 @@ $loose = add_photo($yearId, '2025-01-05 08:00:00');
 check('a brand-new photo starts ungrouped', photo_get($loose)['event_group_id'] === null);
 $placed = save_photo($loose, array('entry_date' => '2025-07-21'));
 check('correcting its date places it straight into the July group', $placed === $julyGroup);
+
+/* An explicit assignment is a decision and outranks the clusterer — even when
+ * the date moves in the same request, which is the case that would otherwise
+ * silently undo her.
+ *
+ * Runs AFTER the placement check above, deliberately: it puts a July photo into
+ * the March group, and since a group's stored range now follows its members,
+ * that group really does stretch to July afterwards. Anything asked to place
+ * itself in late July from here on has two honest answers. */
+save_photo($march[1], array('entry_date' => '2025-07-20', 'event_group_id' => $marchGroup));
+check('a hand-picked group survives a date change in the same save',
+    (int) photo_get($march[1])['event_group_id'] === $marchGroup);
+
+$row = q('SELECT end_date FROM event_groups WHERE id = ?', array($marchGroup))->fetch();
+check('...and the group it was pinned to now says so in its own dates',
+    $row['end_date'] === '2025-07-20');
+
+/* ---------------------------------------- a group's dates stay honest --- */
+
+/* event_groups.start_date/end_date is a cache of the members' dates, and
+ * nothing on the edit paths used to refresh it. A group left advertising a
+ * range that included a photo it no longer held is the second symptom of the
+ * same problem — the first being the membership itself. */
+$twin = add_photo($yearId, '2025-09-01 09:00:00');
+$mate = add_photo($yearId, '2025-09-02 09:00:00');
+event_grouping_run($yearId);
+$sept = (int) photo_get($twin)['event_group_id'];
+check('the two September photos landed in one group',
+    $sept === (int) photo_get($mate)['event_group_id']);
+
+$row = q('SELECT start_date, end_date FROM event_groups WHERE id = ?', array($sept))->fetch();
+check('...spanning exactly their two days',
+    $row['start_date'] === '2025-09-01' && $row['end_date'] === '2025-09-02');
+
+/* Move the later one far away. It leaves the group; the group must stop
+ * claiming September 2nd. */
+save_photo($mate, array('entry_date' => '2025-12-24'));
+$row = q('SELECT start_date, end_date FROM event_groups WHERE id = ?', array($sept))->fetch();
+check('a photo leaving shrinks the group it left',
+    $row['start_date'] === '2025-09-01' && $row['end_date'] === '2025-09-01');
+
+/* And a date change on a photo that STAYS put — an explicit assignment in the
+ * same save — has to move the range with it. */
+save_photo($twin, array('entry_date' => '2025-09-05', 'event_group_id' => $sept));
+$row = q('SELECT start_date, end_date FROM event_groups WHERE id = ?', array($sept))->fetch();
+check('a date change inside a group moves the group with it',
+    $row['start_date'] === '2025-09-05' && $row['end_date'] === '2025-09-05');
+
+/* ------------------------------- naming a group that no longer holds --- */
+
+/* The warning the Groups view shows. Pure, so it is checked directly rather
+ * than by scraping markup: the question is only whether these photos would be
+ * clustered together today, and the answer must use the grouper's own
+ * threshold. */
+$gap = event_grouping_gap_days();
+
+check('a run of consecutive days reports no gaps',
+    event_grouping_internal_gaps(array('2025-03-01', '2025-03-02', '2025-03-03'), $gap) === array());
+
+check('two days exactly at the threshold are not a gap',
+    event_grouping_internal_gaps(
+        array('2025-03-01', (new DateTime('2025-03-01'))->modify("+$gap days")->format('Y-m-d')), $gap
+    ) === array());
+
+check('one day past the threshold is',
+    count(event_grouping_internal_gaps(
+        array('2025-03-01', (new DateTime('2025-03-01'))->modify('+' . ($gap + 1) . ' days')->format('Y-m-d')), $gap
+    )) === 1);
+
+/* Kathryn's actual case: four photos uploaded on one wrong date, corrected one
+ * by one, still sharing a group — Nov 16, 26, 26 and 29. ONE gap, not three:
+ * the 26th to the 29th is exactly the threshold and the two 26ths are the same
+ * day. That is the point of reporting gaps rather than the span. A group
+ * covering the 26th to the 29th is an ordinary long weekend; what makes this
+ * one wrong is the ten-day jump sitting inside it. */
+$hers = event_grouping_internal_gaps(
+    array('2025-11-26', '2025-11-16', '2025-11-29', '2025-11-26'), $gap
+);
+check('her four mis-dated photos report exactly one gap', count($hers) === 1);
+check('...the ten days between the 16th and the 26th',
+    $hers[0]['from'] === '2025-11-16' && $hers[0]['to'] === '2025-11-26' && $hers[0]['days'] === 10);
+
+check('unsorted input is sorted first, not taken as given',
+    event_grouping_internal_gaps(array('2025-03-03', '2025-03-01', '2025-03-02'), $gap) === array());
+
+check('a single photo cannot have an internal gap',
+    event_grouping_internal_gaps(array('2025-03-01'), $gap) === array());
+check('...nor can an empty group', event_grouping_internal_gaps(array(), $gap) === array());
 
 print "\n";
 if ($failures > 0) {

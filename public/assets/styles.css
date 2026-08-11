@@ -1439,6 +1439,35 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   gap: 6px;
   margin: 10px 0;
 }
+/* A group's photos, with their dates, shown WITHOUT opening anything. Read-only
+   and outside the split form on purpose: the split form's grid is a set of
+   checkboxes for an action, and this is the answer to "what is actually in this
+   group" — a question the screen could not answer at all until a group holding
+   four photos from four different weeks read exactly like a correct one.
+
+   Each tile links to that photo's own row in the grid view, where the date and
+   the event-group picker live. Finding a photo and fixing it are then one hop
+   apart rather than a hunt. */
+.group-members {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.group-member {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  color: inherit;
+}
+.group-member .thumb { aspect-ratio: 1; border-radius: 6px; width: 100%; }
+.group-member .hint { display: block; font-size: 0.75rem; line-height: 1.3; }
+
+/* The "this group would not be clustered this way today" warning. Uses the
+   error colour rather than a softer one because it is not advice — it means a
+   page in the finished book is wrong, and the book is the expensive artifact. */
+.group-gap-warn { margin: 8px 0 0; }
+
 .group-photos label {
   position: relative;
   display: block;
