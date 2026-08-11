@@ -223,6 +223,80 @@ pdf_draw_photos_page($mpdf, array('slots' => array(), 'page_type' => 'photos'), 
 $checks++;
 check('an empty page draws no photos', $mpdf->drawn === array());
 
+/* ------------------------------------------------------------------ cover */
+
+echo "\nThe cover: full bleed, upright, and a title you can read...\n";
+
+$geoC     = $geo;
+$pageMm   = (float) $geoC['page_width_mm'];
+$safeMm   = (float) $geoC['content_margin_mm'];
+
+/* A portrait cover photo — the case that printed on its side, because the old
+ * cover handed mPDF a raw <img> and never went near imageproc. */
+$coverPhoto = array(
+    'id' => 1, 'width' => 3024, 'height' => 4032,
+    'original_path' => 'uploads/original/nope.jpg', 'thumb_path' => 'uploads/thumb/nope.jpg',
+);
+
+$mpdf = new RecordingMpdf();
+pdf_draw_cover_page($mpdf, $geoC, array('year' => 2025, 'subtitle' => 'The best year ever!'), $coverPhoto);
+
+$checks++;
+/* No file on disk here, so nothing is drawn — but the BAND must still be
+ * placed, which is the fail-soft promise. */
+check('a cover with an unreadable photo still gets its title band', count($mpdf->placed) >= 1);
+
+$band = end($mpdf->placed);
+check('the title band sits inside the safety margin',
+    $band['x'] >= $safeMm - 0.01 && $band['y'] >= $safeMm - 0.01
+    && $band['x'] + $band['w'] <= $pageMm - $safeMm + 0.01
+    && $band['y'] + $band['h'] <= $pageMm - $safeMm + 0.01);
+check('the band is at the foot, not the middle', $band['y'] > $pageMm / 2);
+check('the band carries the year and the subtitle',
+    strpos($band['html'], '2025') !== false && strpos($band['html'], 'best year ever') !== false);
+
+/* With a real file, the photo must cover the WHOLE physical page — trim plus
+ * bleed, all four edges. A cover that stops at the safety margin is what
+ * Kathryn's first export did, and it reads as a mistake. */
+$realCover = imageproc_export_cache_dir() . '/cover-fixture.jpg';
+@mkdir(dirname($realCover), 0700, true);
+$im = imagecreatetruecolor(400, 600);
+imagefill($im, 0, 0, imagecolorallocate($im, 120, 140, 160));
+imagejpeg($im, $realCover, 80);
+imagedestroy($im);
+
+$rel = 'uploads/original/cover-fixture.jpg';
+@mkdir(UPLOAD_DIR . '/original', 0775, true);
+copy($realCover, UPLOAD_DIR . '/original/cover-fixture.jpg');
+
+$mpdf = new RecordingMpdf();
+pdf_draw_cover_page(
+    $mpdf,
+    $geoC,
+    array('year' => 2025, 'subtitle' => ''),
+    array('id' => 1, 'width' => 400, 'height' => 600,
+          'original_path' => $rel, 'thumb_path' => $rel)
+);
+
+$checks++;
+check('the cover photo is drawn', count($mpdf->drawn) === 1);
+if ($mpdf->drawn !== array()) {
+    $art = $mpdf->drawn[0];
+    check('...bleeding to every edge of the physical page',
+        abs($art['x']) < 0.01 && abs($art['y']) < 0.01
+        && abs($art['w'] - $pageMm) < 0.01 && abs($art['h'] - (float) $geoC['page_height_mm']) < 0.01);
+
+    /* The file handed to mPDF must be a PREPARED copy, never the original.
+     * That is what bakes in the rotation and converts the colour, and drawing
+     * the original is exactly the bug being fenced here. */
+    check('...from a prepared copy, not the original file',
+        $art['file'] !== UPLOAD_DIR . '/original/cover-fixture.jpg');
+}
+
+@unlink(UPLOAD_DIR . '/original/cover-fixture.jpg');
+@unlink($realCover);
+imageproc_prune_export_cache(0);
+
 printf("\n%d page drawings checked\n", $checks);
 if ($failures > 0) {
     printf("FAILED (%d)\n", $failures);

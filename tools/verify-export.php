@@ -198,31 +198,19 @@ check('an unresolvable photo renders a visible placeholder, not an <img>', !str_
 
 /* ==================================================== pure: cover shape == */
 
-echo "\npdf_render_cover_html(): the single-fixed-wrapper, zero-nested-absolute shape...\n";
+/* The cover's shape assertions moved to tools/verify-pdf-geometry.php when the
+ * cover stopped being HTML.
+ *
+ * They checked that the markup had exactly one position:fixed wrapper and no
+ * nested position:absolute, which was real: that shape avoided an mPDF quirk
+ * that produced a phantom page. The cover is now drawn with the coordinate API
+ * and has no wrapper at all, so those checks have nothing to describe — while
+ * the questions that actually matter (does the photo bleed to every edge, is it
+ * a prepared copy rather than the sideways original, is the title band inside
+ * the safety margin) are asked over there against the drawing calls.
+ */
 
 $fakeProject = array('year' => 2024, 'subtitle' => 'A year of firsts');
-
-$coverWithPhoto = pdf_render_cover_html($geo, $fakeProject, $realPhoto);
-check(
-    'a cover with a photo has EXACTLY ONE top-level position:fixed wrapper (part of avoiding the mPDF phantom-page quirk)',
-    substr_count($coverWithPhoto, 'position:fixed') === 1
-);
-check(
-    '...and NO nested position:absolute anywhere inside it (the actual trigger — see pdf_render_cover_html()\'s header)',
-    !str_contains($coverWithPhoto, 'position:absolute')
-);
-check('...and embeds the cover photo as a real <img>', str_contains($coverWithPhoto, '<img src='));
-check('...carrying the year', str_contains($coverWithPhoto, '2024'));
-check('...and the subtitle', str_contains($coverWithPhoto, 'A year of firsts'));
-
-$coverNoPhoto = pdf_render_cover_html($geo, $fakeProject, null);
-check(
-    'a cover with NO photo chosen still has exactly one fixed wrapper — fail soft, not a crash',
-    substr_count($coverNoPhoto, 'position:fixed') === 1
-);
-check('...and still no nested position:absolute', !str_contains($coverNoPhoto, 'position:absolute'));
-check('...but no <img> at all (placeholder background instead)', !str_contains($coverNoPhoto, '<img'));
-check('...and still carries the year, so the page is not blank', str_contains($coverNoPhoto, '2024'));
 
 $title = pdf_render_title_html($fakeProject);
 check('the title page carries the year', str_contains($title, '2024'));

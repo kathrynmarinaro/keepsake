@@ -39,18 +39,14 @@
  * safety margin measured in from the TRIM edge. See pdf_export_geometry()
  * for the exact math and the citations for both printers' numbers.
  *
- * ONE DELIBERATE SIMPLIFICATION: only the COVER page bleeds a photo to the
- * true page edge (a book cover conventionally does; it uses a single
- * position:fixed wrapper spanning the whole physical page — see
- * pdf_render_cover_html()'s own comment for an mPDF quirk that shape avoids).
- * Every interior page's content — photo grids, text cards, snapshot
- * templates — stays inside the safety-margin box using mPDF's ordinary
- * document flow. Interior photos in this build are not edge-to-edge;
- * nothing in brief §5.5 requires it, and it keeps every page renderer
- * simple, uniform, and easy to reason about against the page-count/
- * dimension checks in tools/verify-export.php. Worth reconsidering later if
- * Kathryn wants a more magazine-style bleed treatment on interior spreads —
- * flagged in the Phase 7 report, not decided unilaterally here.
+ * ONE DELIBERATE SIMPLIFICATION: only the COVER bleeds a photo to the true
+ * page edge, which is what the bleed allowance exists for and what a book
+ * cover conventionally does — see pdf_draw_cover_page(). Every interior page
+ * keeps its content inside the safety margin. Interior photos in this build
+ * are not edge-to-edge; nothing in brief 5.5 requires it, and it keeps the
+ * page-count and dimension checks in tools/verify-export.php meaningful.
+ * Worth reconsidering if Kathryn wants a magazine-style bleed on interior
+ * spreads — flagged, not decided unilaterally here.
  *
  * ROUND 6: a page's shape comes from lib/compose.php's solved rectangles,
  * the same ones public/layout.php draws — see pdf_render_photos_page_html().
@@ -233,60 +229,76 @@ function pdf_photo_html(array $photo, string $imgStyle, string $placeholderStyle
 /* ------------------------------------------------------------- pages */
 
 /**
- * Cover page. Bleeds the cover photo to the true physical edge — the one
- * place this file intentionally breaks the "stay inside the safety margin"
- * rule, because a printed book cover conventionally runs edge to edge.
+ * The cover: one photo bleeding to the true page edge, with the year and
+ * subtitle in a band across the foot.
  *
- * IMPLEMENTATION NOTE, hard-won empirically (see tools/verify-export.php's
- * "single-fixed-wrapper shape" checks and the Phase 7 session report): mPDF
- * 8.3.1 silently inserts a phantom extra page when a page's markup nests
- * TWO percentage-sized `position:absolute` children inside ONE
- * `position:fixed` wrapper — reproduced and isolated directly (a plain
- * background-color div plus a second absolutely-positioned text overlay was
- * enough to trigger it; a single absolute child, or two children in ordinary
- * document flow, were not). Rather than depend on that undocumented
- * threshold, this function uses `position:absolute` NOWHERE: ONE
- * `position:fixed` wrapper for the whole bled page, and everything inside it
- * — the photo (or placeholder background) and the year/subtitle caption —
- * in ordinary block flow. The caption overlaps the bottom of the photo using
- * a NEGATIVE top margin instead of absolute positioning, which reads
- * identically on the page and doesn't touch the code path that misbehaves.
- * Do not reintroduce `position:absolute` here without re-running
- * tools/verify-export.php's page-count assertions against it.
+ * DRAWN, NOT WRITTEN AS HTML, for the same reason the photo pages are. The
+ * previous version handed mPDF an <img> and a block with a -30mm top margin to
+ * pull the title back over the photo, and Kathryn's first real cover shows what
+ * that produced: the photo on its side (the raw <img> never went through
+ * imageproc, so the EXIF rotation was never baked in), the colours unconverted,
+ * the photo stopping short of the edge at 190x143mm inside the margins, and the
+ * title landing somewhere on top of the picture where it could not be read.
+ *
+ * A cover conventionally bleeds — that is what the bleed allowance is for — so
+ * the photo covers the whole physical page, trim plus bleed on all four edges,
+ * and is centre-cropped to the page's shape. Whatever the printer trims is
+ * photo, which is the point.
+ *
+ * The title band is opaque rather than translucent. mPDF's support for rgba
+ * backgrounds is patchy, and a cover title that is sometimes readable is worse
+ * than one that is plainly a band; it also survives being printed on paper that
+ * absorbs ink, which a wash over a dark photo does not.
  */
-function pdf_render_cover_html(array $geo, array $project, ?array $coverPhoto): string
+function pdf_draw_cover_page(\Mpdf\Mpdf $mpdf, array $geo, array $project, ?array $coverPhoto): void
 {
-    $pageMm   = $geo['page_width_mm'];
+    $pageMm   = (float) $geo['page_width_mm'];
+    $tallMm   = (float) $geo['page_height_mm'];
+    $safeMm   = (float) $geo['content_margin_mm'];
     $year     = (string) $project['year'];
-    $subtitle = $project['subtitle'] ?? null;
-
-    $captionHtml = '<div style="margin-top:-30mm;width:100%;text-align:center;'
-        . 'background:rgba(255,255,255,0.85);padding:6mm 0;font-family:sans-serif;">'
-        . '<div style="font-size:30pt;font-weight:bold;">' . pdf_esc($year) . '</div>'
-        . ($subtitle ? '<div style="font-size:14pt;margin-top:2mm;">' . pdf_esc((string) $subtitle) . '</div>' : '')
-        . '</div>';
+    $subtitle = trim((string) ($project['subtitle'] ?? ''));
 
     $photoAbs = $coverPhoto !== null ? pdf_resolve_photo_file($coverPhoto) : null;
 
     if ($photoAbs !== null) {
-        $art = '<img src="' . pdf_esc($photoAbs) . '" style="width:100%;height:100%;display:block;">';
-        $inner = $art . $captionHtml;
-        $wrapperBg = '';
+        /* Cropped to the PAGE's shape, not the photo's — this is the one place
+         * in the book where filling the frame outranks showing the whole
+         * picture, because a cover with white edges is not a cover. */
+        $w = (int) ($coverPhoto['width'] ?? 0);
+        $h = (int) ($coverPhoto['height'] ?? 0);
+        $rect = ($w > 0 && $h > 0)
+            ? layout_auto_crop_rect($w, $h, $pageMm / $tallMm)
+            : array('x' => 0.0, 'y' => 0.0, 'w' => 1.0, 'h' => 1.0);
+
+        list($maxW, $maxH) = pdf_print_pixel_budget($pageMm, $tallMm);
+        $prepared = imageproc_prepare_cached($photoAbs, $rect, $maxW, $maxH);
+
+        $mpdf->Image($prepared ?? $photoAbs, 0, 0, $pageMm, $tallMm, '', '', true, false);
     } else {
-        // No cover photo chosen yet — fail soft (see this file's header): a
-        // plain background carrying just the title text, not a crash and
-        // not a skipped page. Text sits centered in the middle of the page
-        // via padding, since there's no photo bottom edge to anchor against.
-        $inner = '<div style="text-align:center;padding-top:42%;font-family:sans-serif;">'
-            . '<div style="font-size:30pt;font-weight:bold;">' . pdf_esc($year) . '</div>'
-            . ($subtitle ? '<div style="font-size:14pt;margin-top:2mm;">' . pdf_esc((string) $subtitle) . '</div>' : '')
-            . '</div>';
-        $wrapperBg = 'background:#eef1ec;';
+        /* No cover photo chosen yet — fail soft, as this file's header
+         * promises: a plain ground carrying the title, never a skipped page. */
+        $mpdf->WriteFixedPosHTML(
+            '<div style="background:#eef1ec;width:100%;height:100%;"></div>',
+            0, 0, $pageMm, $tallMm
+        );
     }
 
-    return '<div style="position:fixed;left:0mm;top:0mm;width:' . $pageMm . 'mm;height:' . $pageMm . 'mm;' . $wrapperBg . '">'
-        . $inner
+    /* The band sits inside the safety margin, so nothing a printer trims can
+     * take a letter off. Its height is set here rather than left to the text,
+     * because a fixed-position box in mPDF does not grow and silently clipping
+     * a subtitle would be worse than a band with room to spare. */
+    $bandHMm = $subtitle !== '' ? 34.0 : 26.0;
+    $bandYMm = $tallMm - $safeMm - $bandHMm;
+
+    $html = '<div style="background:#ffffff;width:100%;height:100%;text-align:center;'
+        . 'font-family:sans-serif;">'
+        . '<div style="font-size:30pt;font-weight:bold;margin-top:5mm;">' . pdf_esc($year) . '</div>'
+        . ($subtitle !== ''
+            ? '<div style="font-size:14pt;margin-top:2mm;">' . pdf_esc(pdf_clip_text($subtitle)) . '</div>'
+            : '')
         . '</div>';
+
+    $mpdf->WriteFixedPosHTML($html, $safeMm, $bandYMm, $pageMm - (2 * $safeMm), $bandHMm);
 }
 
 /**
@@ -691,7 +703,13 @@ function pdf_export_build(int $yearProjectId): array
     // schema.sql's own comment on book_pages for why). Every page but the
     // very last one carries page-break-after so mPDF starts a fresh
     // physical page for what follows.
-    $mpdf->WriteHTML(pdf_wrap_page(pdf_render_cover_html($geo, $project, $coverPhoto), false));
+    /* mPDF has no page until something asks for one, and Image() is not
+     * something that asks: called first, it draws into nowhere and the page is
+     * silently short. WriteHTML used to open the document by accident, which is
+     * why this was never needed before the cover became a drawn page. */
+    $mpdf->AddPage();
+
+    pdf_draw_cover_page($mpdf, $geo, $project, $coverPhoto);
     $mpdf->AddPage();
     $mpdf->WriteHTML(pdf_wrap_page(pdf_render_title_html($project), false));
     if ($pages !== array()) {
