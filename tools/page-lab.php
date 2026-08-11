@@ -275,6 +275,9 @@ function lab_snapshot_page(array $page, array $geo, ?string $heroUri): string
     $textW    = ($boxW - $gutterMm) * 0.55;
     $textX    = $boxX + $heroW + $gutterMm;
 
+    /* The book's portrait ratio, from the same constant the exporter reads. */
+    $heroH = min($boxH, $heroW / COMPOSE_CANON['P']);
+
     $hero = $page['snapshot_hero_photo_id'] !== null && $heroUri !== null
         ? '<img src="' . $heroUri . '" style="width:100%;height:100%;object-fit:cover;">'
         : '<div style="border:0.5mm dashed #bbb;width:100%;height:100%;"></div>';
@@ -282,7 +285,7 @@ function lab_snapshot_page(array $page, array $geo, ?string $heroUri): string
     return sprintf(
         '<div style="position:absolute;left:%.2fmm;top:%.2fmm;width:%.2fmm;height:%.2fmm;">%s</div>'
         . '<div style="position:absolute;left:%.2fmm;top:%.2fmm;width:%.2fmm;height:%.2fmm;overflow:hidden;">%s</div>',
-        $boxX, $boxY, $heroW, $boxH, $hero,
+        $boxX, $boxY, $heroW, $heroH, $hero,
         $textX, $boxY, $textW, $boxH, pdf_render_snapshot_text_html($page)
     );
 }

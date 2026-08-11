@@ -518,8 +518,26 @@ $assigned = layout_assign_texts(
 check('a quote inside an event\'s range lands on that event', isset($assigned['assigned'][1]));
 check('...on the page-group closest to its own date', count($assigned['assigned'][1] ?? array()) === 1);
 check('a leftover within the attach window rides along with nearby photos', isset($assigned['assigned'][2]));
-check('a leftover with nothing near it stands alone', count($assigned['standalone']) === 1);
-check('...and it is the December one', $assigned['standalone'][0]['id'] === 3);
+
+/* A SHORT TEXT NO LONGER STANDS ALONE JUST BECAUSE NOTHING IS NEAR IT.
+ *
+ * It used to: a text more than text_attach_days from any page-group got a page
+ * of its own, so a quote from a quiet December week was printed at 22pt across
+ * a whole sheet. Kathryn's rule is that length alone decides — "quotes and
+ * anecdotes should fit within an existing slot in the layouts unless it's too
+ * long, then it gets its own page" — and this one is short.
+ *
+ * The date still decides WHICH page it rides on; it just no longer refuses to
+ * travel. */
+check('a short leftover with nothing near it still rides along', $assigned['standalone'] === array());
+check(
+    'and it goes to the nearest page-group, not just any',
+    isset($assigned['assigned'][2]) && count($assigned['assigned'][2]) === 2
+);
+check(
+    '...and the December quote is one of the two riding on it',
+    in_array(3, array_column($assigned['assigned'][2] ?? array(), 'id'), true)
+);
 
 $noSubgroups = layout_assign_texts(
     array(array('kind' => 'anecdote', 'id' => 9, 'text' => 'a year with no photos at all', 'date' => '2024-05-05')),
@@ -761,7 +779,17 @@ check('every text page holds exactly one slot', $textPages !== array() && array_
     true
 ));
 check('the >180-char anecdote is on a page of its own', in_array($longAnecdote, slot_ids($textPages, 'anecdote_id'), true));
-check('the far-away orphan quote is on a page of its own', in_array($orphanQuote, slot_ids($textPages, 'quote_id'), true));
+/* The far-away orphan is SHORT, so it now rides in a slot rather than taking a
+ * page — see layout_assign_texts(). It used to be here because distance could
+ * promote a short quote to a whole page; only length can now. */
+check(
+    'a far-away SHORT quote rides in a slot, not a page of its own',
+    !in_array($orphanQuote, slot_ids($textPages, 'quote_id'), true)
+);
+check(
+    '...and it is somewhere in the book',
+    in_array($orphanQuote, slot_ids($pages, 'quote_id'), true)
+);
 
 $cardPages = array_values(array_filter($photoPages, static fn(array $p): bool => slot_ids(array($p), 'quote_id') !== array()));
 check('short quotes ride in a slot on a photo page, not a page of their own', $cardPages !== array());

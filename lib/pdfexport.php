@@ -103,6 +103,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/compose.php';
+
 require_once __DIR__ . '/imageproc.php';
 require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/layout_render.php';
@@ -456,7 +458,9 @@ function pdf_draw_photos_page(\Mpdf\Mpdf $mpdf, array $page, array $geo, ?array 
         $bottomPct = max($bottomPct, $rect['y'] + $rect['h']);
 
         if ($slot['photo_id'] === null) {
-            $mpdf->WriteFixedPosHTML(pdf_render_text_card_html($slot), $xMm, $yMm, $wMm, $hMm);
+            /* The slot's own height, so the card centres in it — see
+               pdf_render_text_card_html(). */
+            $mpdf->WriteFixedPosHTML(pdf_render_text_card_html($slot, false, $hMm), $xMm, $yMm, $wMm, $hMm);
             continue;
         }
 
@@ -591,82 +595,94 @@ function pdf_snippet(string $text, int $len = 90): string
 
 /** A quote/anecdote text card — riding along on a photo page (brief §4.3:
  *  "occupy one of the page's slots") or standing alone on its own page. */
-function pdf_render_text_card_html(array $slot, bool $standalone = false): string
+/**
+ * The words of a quote or an anecdote, laid out.
+ *
+ * HANGING QUOTATION MARKS, DONE WITH A TWO-CELL TABLE rather than a negative
+ * text-indent. The indent version was the first attempt and Kathryn caught what
+ * was wrong with it: an indent is a guess at how wide the quote mark is, so the
+ * first word sat somewhere other than where the second line started. A table
+ * cell IS the mark's width, whatever the font decides that is, so the text
+ * column lines up with itself exactly — verified out of a real PDF's text
+ * positioning operators, not by eye.
+ *
+ * THE ATTRIBUTION SITS IN THE TEXT CELL, not under the whole table: "the person
+ * and date should be left aligned with the words, not the quotation mark".
+ *
+ * An anecdote gets no marks and therefore no mark cell — just the text, which
+ * is what "keep it how it was" meant.
+ */
+function pdf_render_text_block_html(array $slot, float $textPt, float $metaPt): string
 {
     $isQuote = $slot['quote_id'] !== null;
     $text    = pdf_clip_text((string) ($isQuote ? $slot['quote_text'] : $slot['anecdote_text']));
     $date    = pdf_fmt_date((string) ($isQuote ? $slot['quote_date'] : $slot['anecdote_date']));
-    $who     = $isQuote ? (string) $slot['who_said_it'] : null;
+    $who     = $isQuote ? trim((string) $slot['who_said_it']) : '';
 
-    /* NO TYPE LABEL. Nothing here ever printed the words "quote" or
-     * "anecdote" — those are the preview's own card chrome — but this is where
-     * the attribution line is built, and it stays a name and a date. */
-    $meta = $who !== null && $who !== '' ? pdf_esc($who) . ' &middot; ' . pdf_esc($date) : pdf_esc($date);
+    $meta = $who !== '' ? pdf_esc($who) . ' &middot; ' . pdf_esc($date) : pdf_esc($date);
 
-    if (!$standalone) {
-        /* Riding along on a photo page: a small bordered card, unchanged. */
-        return '<div style="padding:3mm;border:0.3mm solid #ddd;font-family:sans-serif;text-align:center;">'
-            . '<div style="font-size:11pt;font-style:italic;line-height:1.4;">'
-            . ($isQuote ? '&ldquo;' . nl2br(pdf_esc($text)) . '&rdquo;' : nl2br(pdf_esc($text)))
-            . '</div>'
-            . '<div style="font-size:9pt;color:#666;margin-top:3mm;">' . $meta . '</div>'
-            . '</div>';
+    /* The OPENING mark lives in its own table cell below so it can hang; the
+       closing one belongs with the last word, which is where it would be if
+       both were inline. */
+    $body = '<div style="font-size:' . $textPt . 'pt;font-style:italic;line-height:1.4;">'
+        . nl2br(pdf_esc($text)) . ($isQuote ? '&rdquo;' : '')
+        . '</div>'
+        . '<div style="font-size:' . $metaPt . 'pt;color:#666;margin-top:3mm;">' . $meta . '</div>';
+
+    if (!$isQuote) {
+        return $body;
     }
 
-    return $isQuote
-        ? pdf_render_quote_standalone_html($text, $meta)
-        : pdf_render_anecdote_standalone_html($text, $meta);
+    /* The opening mark in its own cell, so it hangs and the text column stays
+     * straight. white-space:nowrap and no padding keep the cell exactly as wide
+     * as the glyph. */
+    return '<table style="width:auto;"><tr>'
+        . '<td style="vertical-align:top;padding:0;white-space:nowrap;'
+        . 'font-size:' . $textPt . 'pt;font-style:italic;line-height:1.4;">&ldquo;</td>'
+        . '<td style="vertical-align:top;padding:0;">' . $body . '</td>'
+        . '</tr></table>';
 }
 
 /**
- * A quote with its own page: HANGING QUOTATION MARKS.
+ * A quote or anecdote, CENTRED IN WHATEVER IT SITS IN — a slot on a photo page
+ * or a page of its own. "Quotes and anecdotes should be centered in their slot
+ * (that being within a layout or a whole page)."
  *
- * "Hanging" means the opening mark sits OUTSIDE the text block's left edge, so
- * the first line of words aligns with every line under it instead of being
- * pushed in by the width of a quote mark. It is the detail that makes a set
- * quotation look set rather than typed.
+ * Centred as a BLOCK, with the words still left-aligned inside it: the hanging
+ * mark only means anything against a straight left edge, so centring the text
+ * itself would undo the two changes above.
  *
- * DONE WITH A NEGATIVE text-indent ON THE BLOCK, not with an absolutely
- * positioned mark beside it. mPDF supports text-indent and honours a negative
- * one; it does NOT reliably position an inline-block against a sibling's
- * baseline, and the two-cell table alternative makes the mark's column a fixed
- * width that stops matching the moment the type size changes. Here the indent
- * is stated in the same em unit as the mark, so they scale together.
- *
- * The padding-left cancels the indent for every line after the first, which is
- * what stops the whole block sliding into the page margin.
+ * The full-height table with a vertical-align:middle cell is how vertical
+ * centring is done in mPDF — it has no flexbox and honours vertical-align only
+ * inside a table cell whose height is stated. Checked against a real PDF's
+ * positioning operators rather than assumed.
  */
-function pdf_render_quote_standalone_html(string $text, string $meta): string
+function pdf_render_text_card_html(array $slot, bool $standalone = false, ?float $heightMm = null): string
 {
-    $indent = '0.62em';
+    $textPt = $standalone ? 22.0 : 11.0;
+    $metaPt = $standalone ? 10.0 : 9.0;
 
-    return '<div style="padding:0 12mm;font-family:sans-serif;">'
-        . '<div style="font-size:22pt;font-style:italic;line-height:1.45;'
-        . 'padding-left:' . $indent . ';text-indent:-' . $indent . ';">'
-        . '&ldquo;' . nl2br(pdf_esc($text)) . '&rdquo;'
-        . '</div>'
-        . '<div style="font-size:10pt;color:#666;margin-top:5mm;">' . $meta . '</div>'
-        . '</div>';
-}
+    $block = pdf_render_text_block_html($slot, $textPt, $metaPt);
 
-/**
- * An anecdote with its own page.
- *
- * DELIBERATELY UNCHANGED from what it always was — 20pt, centred, italic, no
- * quotation marks. The plan offered bigger type and more of the page for
- * these; Kathryn's answer was "keep it how it was ... I don't know how much
- * I'll use anecdotes anyway, so let's not invest time in that". Split out from
- * the quote renderer above only so the quote could get its hanging marks
- * without dragging the anecdote along with it.
- */
-function pdf_render_anecdote_standalone_html(string $text, string $meta): string
-{
-    return '<div style="padding:0 8mm;font-family:sans-serif;text-align:center;">'
-        . '<div style="font-size:20pt;font-style:italic;line-height:1.4;">'
-        . nl2br(pdf_esc($text))
-        . '</div>'
-        . '<div style="font-size:9pt;color:#666;margin-top:3mm;">' . $meta . '</div>'
-        . '</div>';
+    /* A standalone page centres a column narrower than the page; a slot card
+       uses the whole slot it was given. */
+    $inner = $standalone
+        ? '<table style="width:78%;margin:0 auto;"><tr><td style="padding:0;">' . $block . '</td></tr></table>'
+        : $block;
+
+    $pad = $standalone ? '' : 'padding:3mm;border:0.3mm solid #ddd;';
+
+    if ($heightMm === null) {
+        /* No height to centre within — flow from the top, which is what a
+           caller that did not say how tall its box is has asked for. */
+        return '<div style="' . $pad . 'font-family:sans-serif;">' . $inner . '</div>';
+    }
+
+    return '<table style="width:100%;height:' . round($heightMm, 2) . 'mm;font-family:sans-serif;">'
+        . '<tr><td style="vertical-align:middle;height:' . round($heightMm, 2) . 'mm;'
+        . ($standalone ? '' : 'padding:3mm;border:0.3mm solid #ddd;') . '">'
+        . $inner
+        . '</td></tr></table>';
 }
 
 /** page_type='text': a quote/anecdote over the ~180-char threshold
@@ -678,7 +694,13 @@ function pdf_render_text_page_html(array $page): string
     if ($slots === array()) {
         return '<div style="text-align:center;padding-top:45%;color:#999;font-family:sans-serif;">(empty page)</div>';
     }
-    return '<div style="padding-top:35%;">' . pdf_render_text_card_html($slots[0], true) . '</div>';
+    /* Centred in the content box rather than pushed down it by a percentage
+     * padding, which is what this did and which put the words at a different
+     * height on every page depending on how long they were. */
+    $geo      = pdf_export_geometry();
+    $heightMm = $geo['page_height_mm'] - (2 * $geo['content_margin_mm']);
+
+    return pdf_render_text_card_html($slots[0], true, $heightMm);
 }
 
 /**
@@ -732,6 +754,23 @@ function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
     $textW    = ($boxW - $gutterMm) * 0.55;
     $textX    = $boxX + $heroW + $gutterMm;
 
+    /* THE HERO IS THE BOOK'S PORTRAIT SHAPE, not the full height of its column.
+     *
+     * Filling the column was the first version and it made the hero a 1:2.3
+     * slab — taller and narrower than any photograph anywhere else in the book,
+     * so a birthday page did not look like it belonged to the same book as the
+     * page before it. "The image should be the same ratio as the other portrait
+     * images in the book."
+     *
+     * COMPOSE_CANON['P'] is that ratio, and it is the number lib/compose.php
+     * already uses for every portrait slot the layout engine solves — imported
+     * rather than restated, so there is one portrait in this app.
+     *
+     * The panel is top-aligned in its column: the text column starts at the top
+     * too, and two panels that start on the same line read as a pair even when
+     * one is shorter. */
+    $heroH = min($boxH, $heroW / COMPOSE_CANON['P']);
+
     /* ---- the hero column ---- */
 
     $heroAbs = null;
@@ -740,7 +779,7 @@ function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
     }
 
     if ($heroAbs !== null) {
-        list($maxW, $maxH) = pdf_print_pixel_budget($heroW, $boxH);
+        list($maxW, $maxH) = pdf_print_pixel_budget($heroW, $heroH);
         $prepared = imageproc_prepare_cached(
             $heroAbs,
             /* Centre-crop to the column. A hand crop for the hero would be a
@@ -750,14 +789,14 @@ function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
             $maxW,
             $maxH
         );
-        $mpdf->Image($prepared ?? $heroAbs, $boxX, $boxY, $heroW, $boxH, '', '', true, false);
+        $mpdf->Image($prepared ?? $heroAbs, $boxX, $boxY, $heroW, $heroH, '', '', true, false);
     } else {
         /* Visible rather than blank, the same call pdf_draw_photos_page()
            makes for a photo missing from disk: a proof should show you that
            there is no hero, not quietly print a narrower page. */
         $mpdf->WriteFixedPosHTML(
             '<div style="border:0.5mm dashed #bbb;height:100%;"></div>',
-            $boxX, $boxY, $heroW, $boxH
+            $boxX, $boxY, $heroW, $heroH
         );
     }
 

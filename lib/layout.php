@@ -981,7 +981,29 @@ function layout_assign_texts(array $texts, array $subgroups, array $groups, int 
             }
         }
 
-        if ($bestIndex === null || (!$restrict && $bestDist > $attachDays)) {
+        /* A SHORT TEXT ALWAYS RIDES ALONG IF THERE IS ANYWHERE AT ALL TO RIDE.
+         *
+         * This used to give up when the nearest page was more than
+         * $attachDays away, and hand the text a page of its own. Kathryn's
+         * rule is simpler and is the one the length threshold already
+         * implies: "quotes and anecdotes should fit within an existing slot
+         * in the layouts unless it's too long, then it gets its own page".
+         * Length decides that, and nothing else should — a quote from a quiet
+         * week is still a short quote, and giving it a whole page because
+         * nothing was photographed nearby is the opposite of what the
+         * threshold is for.
+         *
+         * $attachDays still does real work above: it is not consulted here,
+         * but the nearest-subgroup search is, and a text falling inside an
+         * event's date range is still restricted to THAT event's pages. So a
+         * quote from the middle of a trip cannot drift onto a page from the
+         * week before; it just no longer refuses to travel when nothing is
+         * close.
+         *
+         * The only way out now is having no pages to attach to at all — a
+         * book of nothing but text — where a page of its own is the only
+         * thing left. */
+        if ($bestIndex === null) {
             $standalone[] = $text;
             continue;
         }

@@ -199,16 +199,18 @@ function render_text_slot(array $slot, bool $standalone, string $flexStyle = '')
              say what it was. */ ?>
     <div class="ks-slot ks-slot-text<?= $standalone ? ' is-standalone' : '' ?><?= $isQuote ? ' is-quote' : '' ?>" style="<?= h($flexStyle) ?>">
       <?php if ($isQuote): ?>
-        <?php /* The marks are part of the text, not a pseudo-element, so they
-                 wrap and hang with it — .ks-slot-text.is-quote.is-standalone
-                 in styles.css pulls the opening one into the margin, which is
-                 the same hanging indent pdf_render_quote_standalone_html()
-                 prints. */ ?>
-        <p>&ldquo;<?= h(page_snippet((string) $slot['quote_text'], $standalone ? 400 : 90)) ?>&rdquo;</p>
-        <span class="hint"><?= h((string) $slot['who_said_it']) ?> · <?= h(page_fmt_date((string) $slot['quote_date'])) ?></span>
+        <?php /* The opening mark is its own grid cell so it hangs and the words
+                 keep one straight left edge — the CSS mirror of the two-cell
+                 table pdf_render_text_block_html() prints. The closing mark
+                 stays with the last word, where it would be inline. */ ?>
+        <div class="ks-quote-body">
+          <span class="ks-quote-mark">&ldquo;</span>
+          <p class="ks-quote-lines"><?= h(page_snippet((string) $slot['quote_text'], $standalone ? 400 : 90)) ?>&rdquo;</p>
+          <span class="hint ks-quote-meta"><?= h((string) $slot['who_said_it']) ?> · <?= h(page_fmt_date((string) $slot['quote_date'])) ?></span>
+        </div>
       <?php else: ?>
         <p><?= h(page_snippet((string) $slot['anecdote_text'], $standalone ? 400 : 90)) ?></p>
-        <span class="hint"><?= h(page_fmt_date((string) $slot['anecdote_date'])) ?></span>
+        <span class="hint ks-quote-meta"><?= h(page_fmt_date((string) $slot['anecdote_date'])) ?></span>
       <?php endif; ?>
     </div>
     <?php

@@ -102,6 +102,20 @@ final class RecordingMpdf extends \Mpdf\Mpdf
     public function WriteHTML($html, $mode = 0, $init = true, $close = true) {}
 }
 
+/** Every decompressed content stream in a PDF, concatenated. */
+function gzuncompress_all(string $pdf): string
+{
+    $out = '';
+    if (preg_match_all('/stream\r?\n(.*?)endstream/s', $pdf, $m) === false) {
+        return $out;
+    }
+    foreach ($m[1] as $chunk) {
+        $plain = @gzuncompress($chunk);
+        if ($plain !== false) { $out .= $plain . "\n"; }
+    }
+    return $out;
+}
+
 $geo = pdf_export_geometry();
 
 /* The solver's percentages are of the TRIM — the page as it will be after the
@@ -477,14 +491,27 @@ if (count($snapMpdf->placed) === 2) {
         abs($heroBox['x'] - $expectX) < 0.01 && abs($heroBox['y'] - $expectY) < 0.01,
         sprintf('hero at %.2f,%.2f expected %.2f,%.2f', $heroBox['x'], $heroBox['y'], $expectX, $expectY));
 
-    /* THE POINT OF THE WHOLE CHANGE: both panels are the full height of the
-       content box, not the height of their own contents. */
-    check('the hero panel is full height',
-        abs($heroBox['h'] - $expectH) < 0.01,
-        sprintf('%.2fmm, expected %.2fmm', $heroBox['h'], $expectH));
-    check('the text panel is full height too',
+    /* THE HERO IS THE BOOK'S PORTRAIT SHAPE — COMPOSE_CANON['P'], the same
+       ratio every portrait slot the layout engine solves uses. It filled the
+       column at first, which made it a 1:2.3 slab taller and narrower than any
+       photograph anywhere else in the book: "the image should be the same
+       ratio as the other portrait images in the book". */
+    $expectHeroH = min($expectH, $heroBox['w'] / COMPOSE_CANON['P']);
+    check('the hero is the book\'s portrait ratio',
+        abs($heroBox['h'] - $expectHeroH) < 0.01,
+        sprintf('%.2fmm, expected %.2fmm', $heroBox['h'], $expectHeroH));
+    check('...which is 3:4, like every other portrait slot',
+        abs(($heroBox['w'] / $heroBox['h']) - COMPOSE_CANON['P']) < 0.001,
+        sprintf('ratio %.4f', $heroBox['w'] / $heroBox['h']));
+
+    /* The TEXT panel still gets the full height: it is what the sections flow
+       down, and a short one simply leaves white space under itself. */
+    check('the text panel is full height',
         abs($textBox['h'] - $expectH) < 0.01,
         sprintf('%.2fmm, expected %.2fmm', $textBox['h'], $expectH));
+
+    check('the hero does not run past the page',
+        $heroBox['y'] + $heroBox['h'] <= $originMm + $tallMm + 0.01);
 
     check('the two panels are side by side, not stacked',
         $textBox['x'] > $heroBox['x'] + $heroBox['w'] - 0.01
@@ -498,7 +525,7 @@ if (count($snapMpdf->placed) === 2) {
 
     /* Nothing may cross the trim. */
     $rightEdge = $textBox['x'] + $textBox['w'];
-    $lowEdge   = $heroBox['y'] + $heroBox['h'];
+    $lowEdge   = $textBox['y'] + $textBox['h'];
     check('nothing reaches the trim edge',
         $heroBox['x'] >= $originMm - 0.01
         && $rightEdge <= $originMm + $boxMm + 0.01
@@ -525,6 +552,87 @@ $heroMpdf = new RecordingMpdf();
 pdf_draw_snapshot_page($heroMpdf, $withHero, $geo);
 check('a hero that cannot be resolved still leaves the page whole',
     count($heroMpdf->placed) + count($heroMpdf->drawn) === 2);
+
+/* ============================================== hanging quotation marks === */
+
+echo "\nQuote pages — the mark hangs, the words line up...\n";
+
+/* WHY THIS IS MEASURED AND NOT EYEBALLED. The first version hung the mark with
+ * a negative text-indent, which is a GUESS at how wide a quote mark is: the
+ * first word landed somewhere other than where the second line started, and
+ * Kathryn spotted it in the page lab. A table cell IS the mark's width, and the
+ * only way to know it worked is to read the text positions back out of a real
+ * PDF — which is what this does. */
+
+$quoteSlot = array(
+    'quote_id' => 1, 'anecdote_id' => null,
+    'quote_text' => "When I grow up I want to be a marine biologist and also a person who drives the little truck at the airport, and I want to live next door to you.",
+    'anecdote_text' => null,
+    'quote_date' => '2025-09-14', 'anecdote_date' => null,
+    'who_said_it' => 'Emma',
+);
+
+@mkdir('/tmp/keepsake-geometry-mpdf', 0777, true);
+$qm = new \Mpdf\Mpdf(array(
+    'format'       => array($geo['page_width_mm'], $geo['page_height_mm']),
+    'margin_left'  => $geo['content_margin_mm'], 'margin_right'  => $geo['content_margin_mm'],
+    'margin_top'   => $geo['content_margin_mm'], 'margin_bottom' => $geo['content_margin_mm'],
+    'tempDir'      => '/tmp/keepsake-geometry-mpdf',
+));
+$qm->AddPage();
+$qm->WriteHTML(pdf_wrap_page(pdf_render_page_html(array(
+    'page_type' => 'text',
+    'slots'     => array($quoteSlot),
+)), false));
+$quotePdf = $qm->Output('', 'S');
+
+/* Every text-showing operation, as (x, y, text). */
+$runs = array();
+foreach (explode("\n", (string) gzuncompress_all($quotePdf)) as $line) {
+    if (preg_match('/BT\s+([\d.]+)\s+([\d.]+)\s+Td\s+\((.*)\)\s*Tj/', $line, $m) === 1) {
+        $runs[] = array('x' => (float) $m[1], 'y' => (float) $m[2], 'raw' => $m[3]);
+    }
+}
+
+$checks++;
+check('the quote page produced text', count($runs) >= 3, count($runs) . ' runs');
+
+if (count($runs) >= 3) {
+    /* The mark is its own run, at the smallest x. Everything else — every
+       wrapped line AND the attribution — must share one larger x. */
+    $xs = array_map(static fn(array $r): float => $r['x'], $runs);
+    sort($xs);
+
+    $markX = $xs[0];
+    $rest  = array_slice($xs, 1);
+
+    check('the mark hangs left of everything else', $markX < $rest[0] - 0.5,
+        sprintf('mark at %.2f, next at %.2f', $markX, $rest[0]));
+
+    check(
+        'every other line shares one left edge',
+        abs(max($rest) - min($rest)) < 0.5,
+        sprintf('spread %.3fpt between %.2f and %.2f', max($rest) - min($rest), min($rest), max($rest))
+    );
+
+    /* The attribution is the LAST run down the page, and it has to be on that
+       same edge — "the person and date should be left aligned with the words,
+       not the quotation mark". */
+    usort($runs, static fn(array $a, array $b): int => $b['y'] <=> $a['y']);
+    $meta = end($runs);
+    check('the attribution sits on the words\' edge, not the mark\'s',
+        abs($meta['x'] - min($rest)) < 0.5,
+        sprintf('meta at %.2f, words at %.2f', $meta['x'], min($rest)));
+
+    /* Centred in the page rather than pushed down it by a percentage: the
+       block's midpoint should be near the middle of the content box. */
+    $ys       = array_map(static fn(array $r): float => $r['y'], $runs);
+    $midPt    = (max($ys) + min($ys)) / 2.0;
+    $pageHPt  = $geo['page_height_mm'] * 72.0 / 25.4;
+    check('the block is centred down the page, not top-anchored',
+        abs($midPt - $pageHPt / 2.0) < $pageHPt * 0.12,
+        sprintf('mid %.1fpt of %.1fpt', $midPt, $pageHPt));
+}
 
 printf("\n%d page drawings checked\n", $checks);
 if ($failures > 0) {
