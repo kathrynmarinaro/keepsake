@@ -1666,3 +1666,131 @@ from `2 + pages` to `1 + pages`, and an empty year now exports a single page.
 `DEPLOY.txt`, `docs/SCHEMA.md`, and four `tools/verify-*` scripts. The cover
 band's millimetres were checked against three real exports (subtitle, no
 subtitle, renamed); the browser side is still traced by hand, not clicked.
+
+## Round 8 — one screen per project, and projects that need not be years
+
+**Two screens became two tabs.** `review.php` and `layout.php` were separate
+URLs with no way between them except going up to the list and back down. They
+are two readings of one project, so they are the Content and Book tabs of
+`project.php`, keyed by `id` rather than `?year=`. Both old URLs 302 with their
+query strings intact — a 302, not a 301, because a permanent redirect is cached
+forever and "forever" is a long time to be unable to take a merge back. The
+templates moved into `lib/views/` unchanged apart from their links.
+
+**A project can be a trip.** `year_projects.year` is nullable. The original
+model was that a project IS a year: every `*_create()` derived one from the date
+on the row being saved, and there was no other way to make one. Two rules
+replace it.
+
+The first is that an explicit `year_project_id` beats the date. That is what the
++ inside a project passes, so a photo taken last December lands in the book you
+added it from. Without one the date still decides, which is what adding from the
+project list does and what makes backfilling 2020–2025 practical.
+
+The second is subtler and is the one worth remembering: **correcting a date
+re-files content that was filed BY date, and leaves content placed BY HAND where
+it is.** The test is whether the row still sits where its own date would have put
+it. That fact is already in the data, so there is no `pinned` column on four
+content tables and nothing to backfill — every row that exists today was filed
+by date and reads as unpinned, which is correct. A yearless project can never
+equal the date-derived answer, so a trip book never loses a photo to a typo
+being fixed; that falls out of the rule rather than needing a case of its own.
+
+The `UNIQUE KEY uniq_year` was deliberately left alone. Both MySQL and SQLite
+permit any number of NULLs in a unique index, so it goes on enforcing one
+project per year while placing no limit on how many trip books exist — exactly
+the rule wanted, with no second index to say so. A sentinel year (0, or 9999)
+was the alternative and it sorts, compares and groups as if it were real.
+
+**`lib/page.php`, and the bottom bar is gone.** Four screens hand-rolled their
+own doctype, head, header and tab bar, and had already drifted apart doing it —
+`index.php` put Log out in `.head-actions`, `layout.php` put a Years link in the
+same slot, `review.php` had neither. The tab bar had two entries: "Add" is now
+the floating +, because adding is an action and not a place, and "Years" is the
+back arrow. A fixed bar costing 56px of a phone screen to hold one link that
+says "up" was not paying for itself, and removing it is what makes room for the
++ where a thumb actually is.
+
+The list screen gets a hamburger (app-level: export everything, log out); a
+project gets a kebab (its own: rename, export data, delete). Same glyph for the
+same scope is the whole convention — ☰ means "this app", ⋮ means "this thing
+here" — so a project screen has no hamburger at all. The kebab's three entries
+are one module shared with the kebab on that project's card in the list;
+`project-menu.js` is separate from `projects.js` precisely because the latter
+wires the list screen on import, and a module with side effects is not
+importable for its exports.
+
+**Delete says what it is about to destroy.** "123 photos, 4 groups and 2
+layouts", from a GET on the same endpoint, because a dialog that can be checked
+against the project you meant is worth a round trip and "are you sure?" is not.
+No typing to unlock it — Kathryn's call. The rows are the database's job (every
+child cascades); the files are not, so they are collected before the DELETE and
+unlinked after it, the same order `photos-delete.php` uses.
+
+**Export data is JSON, `SELECT *`.** This is a backup, not an API: the failure
+that matters is a column added next month quietly not being exported, and nobody
+finding out until they need it. Photo files are not in it — `DEPLOY.txt` already
+treats `uploads/` as a separate backup, and zipping a few hundred megabytes on
+shared hosting is the same shape as the timeout PDF export had to be taught to
+resume from. The paths are in it, so an export can be matched back up against a
+copy of `uploads/`.
+
+**The Book tab shows the book first.** Title/subtitle/cover collapse into a
+`<details>` — four controls touched once per book, which sat above the version
+list and the page grid. Create and Export are one row instead of two stacked
+cards, with Export disabled until a layout is active, because that is what it
+exports; disabled rather than hidden, so the order of the two steps stays
+visible. Versions are a dropdown: nothing is ever overwritten, so after a few
+tries the version list was the tallest thing on the screen and all but one row
+of it was history.
+
+**Pages move.** Drag the grip in a page header onto another page and the whole
+page goes there — photos, captions and crops with it. The client sends the whole
+new order rather than "page 7 to position 3": it already knows the answer, and
+one renumber on the server beats two implementations of it.
+`book_pages_reorder()` parks every page past the end of the book and brings it
+back, because `uniq_layout_page` refuses the collision any one-pass renumber
+walks into. A list that is not exactly the layout's pages is refused whole
+rather than partly applied — a partial apply produces a shuffled book, which
+looks like a bug in the engine rather than like a rejected request.
+
+HTML5 drag-and-drop, matching the photo drag beside it, which makes this
+desktop-only as that already is. Reordering does not survive regenerating, and
+"Reflow from here" discards it from that page onward; both confirmations say so
+now.
+
+**View and type are two axes.** They were tangled: "groups" was a third VIEW, so
+it could not be combined with the other two, and the type filter only existed
+inside the grid — switch to Timeline and it silently vanished along with
+whatever it was set to. Groups is a TYPE, because that is what it is. All twelve
+combinations are real URLs and `verify-screens.php` renders every one. Type
+defaults to All rather than Photos: with the filter permanently visible, a
+default that hides three of the four content types without saying so is a filter
+you have to notice before you can trust the screen.
+
+**Entries open full screen.** Tapping one used to expand it in place, which on a
+phone put the form half off the bottom of the screen and, in a grid of a hundred
+photos, reflowed the whole grid under your thumb. `entry-modal.js` MOVES the
+`<details>` into a fixed overlay and moves it back on close. It is the same
+element, still in the document, so every delegated handler in `review.js` goes
+on working without knowing the module exists. Rebuilding the form inside a
+dialog would have meant a second copy of markup PHP already renders; cloning
+would have left two elements with one `data-id` answering to the same handler.
+
+A photo's three actions — In book / Skipped, Full page, Recrop — are one row
+under the enlarged image. Recrop moved out of the form, where it was the only
+control wearing a field label despite not being a field.
+
+**`tools/verify-screens.php` is new and is the reason this pass is trustworthy.**
+Every other verify file tests logic through repo functions with no template
+involved, so a view referencing a variable the merge left behind passes all of
+them and fails the first time the page is opened — and `php -l` cannot see it
+either, because an undefined variable is a runtime warning. This one renders
+each view against the harness database with warnings promoted to failures. Each
+render runs in its own process: the views declare functions at the top level, as
+the screens they came from always did, and wrapping every helper in
+`function_exists()` to please a test would be the test dictating the shape of
+the product.
+
+**One `ALTER TABLE` on an existing install**, in `DEPLOY.txt` section 5. It is a
+`MODIFY`, so running it twice is harmless.
