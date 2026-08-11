@@ -1663,6 +1663,77 @@ function book_page_slot_move(int $slotId, int $targetPageId, ?int $targetSlotNum
  * reach another version or another year's pages than any other write path
  * in this file (PLAN.md's year/version-isolation rule).
  */
+/**
+ * Put a layout's pages in a new order.
+ *
+ * @param int   $layoutId
+ * @param int[] $orderedPageIds Every page in this layout, top to bottom. It
+ *        must be exactly the layout's own set — same ids, no more, no fewer.
+ *        A partial list is refused rather than applied to the pages it covers:
+ *        the pages it left out would end up sharing numbers with the ones it
+ *        did, and the result reads as a shuffled book rather than as a failed
+ *        request.
+ * @return bool false if the list does not match the layout's pages.
+ *
+ * TWO PASSES, because of uniq_layout_page (book_layout_id, page_number). Any
+ * one-pass renumber walks into a collision the moment a page moves into a
+ * number another page has not yet vacated — moving page 3 to position 1 tries
+ * to write a 1 that page 1 is still holding. So every page is first parked
+ * beyond the end of the book, then brought back to its final number.
+ *
+ * The offset is added and subtracted rather than the numbers being written
+ * twice, so the second pass cannot itself collide: at that point the parked
+ * numbers are already in the new order, just all shifted by the same amount.
+ *
+ * NO TRANSACTION, matching every other multi-statement write in this file.
+ * The consequence of a crash between the passes is a layout whose pages are
+ * all numbered above REORDER_PARK — visibly, uniformly wrong rather than
+ * subtly wrong, and fixed by re-running this. That is the right failure shape
+ * for something with a Generate button that can rebuild it from scratch.
+ */
+const REORDER_PARK = 30000;
+
+function book_pages_reorder(int $layoutId, array $orderedPageIds): bool
+{
+    $existing = q(
+        'SELECT id FROM book_pages WHERE book_layout_id = ? ORDER BY page_number',
+        array($layoutId)
+    )->fetchAll();
+
+    $have = array_map('intval', array_column($existing, 'id'));
+    $want = array_values(array_map('intval', $orderedPageIds));
+
+    if ($want === array() || count($want) !== count($have)) {
+        return false;
+    }
+
+    /* Compared as sets: the whole point is that the ORDER differs. array_diff
+       both ways rather than sorting and comparing, so a list containing the
+       same id twice — which would otherwise pass a naive count check — is
+       caught by the missing id on the other side. */
+    $sortedHave = $have;
+    $sortedWant = $want;
+    sort($sortedHave);
+    sort($sortedWant);
+    if ($sortedHave !== $sortedWant) {
+        return false;
+    }
+
+    foreach ($want as $index => $pageId) {
+        q(
+            'UPDATE book_pages SET page_number = ? WHERE id = ? AND book_layout_id = ?',
+            array(REORDER_PARK + $index + 1, $pageId, $layoutId)
+        );
+    }
+
+    q(
+        'UPDATE book_pages SET page_number = page_number - ? WHERE book_layout_id = ?',
+        array(REORDER_PARK, $layoutId)
+    );
+
+    return true;
+}
+
 function book_page_delete_and_renumber(int $pageId): bool
 {
     $page = book_page_get($pageId);

@@ -186,9 +186,14 @@ async function reflowFrom(button) {
   const layoutId = Number(document.querySelector('.ks-book')?.dataset.layoutId);
   if (!layoutId || !page) { return; }
 
+  /* Says out loud that a hand-arranged order does not survive this. Reflow
+     rebuilds page ROWS from that point on, so any pages you dragged into place
+     after it go back to the order the engine picks. Pages before it are
+     genuinely untouched, order included. */
   if (!window.confirm(
     `Reflow from page ${page} onward? Every page from ${page} to the end of `
-    + 'this version is regenerated. Pages before it are never touched.'
+    + 'this version is regenerated, including any pages you dragged into a '
+    + 'different order after it. Pages before it are never touched.'
   )) {
     return;
   }
@@ -640,3 +645,119 @@ document.addEventListener('keydown', (event) => {
     field.blur();
   }
 });
+
+/* ============================================================ page reorder ==
+ *
+ * Drag a page's grip onto another page to move it there. Everything on the
+ * page travels with it — its photos, its captions, its crops — because this
+ * only ever changes book_pages.page_number. Moving a photo BETWEEN pages is
+ * the separate gesture above.
+ *
+ * ITS OWN dragPageId, alongside the slot drag's dragSlotId, rather than one
+ * shared "what is being dragged". Each handler above already bails when its
+ * own state is null, so the two gestures pass through each other's listeners
+ * untouched, and neither has to know the other exists.
+ *
+ * THE WHOLE ORDER IS SENT, not "page 7 moved to position 3" — the DOM already
+ * holds the answer after the move, and one renumber on the server beats two
+ * implementations of the same one. See api/book-pages-reorder.php.
+ *
+ * A RELOAD ON SUCCESS rather than patching the DOM. Page NUMBERS change, the
+ * spread pairing changes (pages are chunked two at a time, so moving one page
+ * re-pairs every spread after it), and the composition template each page gets
+ * is assigned across the whole sequence — none of which this module can
+ * recompute. Rendering it wrong would be worse than a reload.
+ */
+
+let dragPageId = null;
+
+document.addEventListener('dragstart', (event) => {
+  const grip = event.target.closest('[data-page-drag]');
+  if (!grip) { return; }
+
+  dragPageId = grip.dataset.pageDrag;
+  event.dataTransfer.effectAllowed = 'move';
+  // Firefox requires setData for a drag to proceed at all.
+  event.dataTransfer.setData('text/plain', dragPageId);
+  grip.closest('.ks-page')?.classList.add('is-dragging');
+});
+
+document.addEventListener('dragend', (event) => {
+  if (dragPageId === null) { return; }
+  event.target.closest('[data-page-drag]')?.closest('.ks-page')?.classList.remove('is-dragging');
+  dragPageId = null;
+  document.querySelectorAll('.ks-page.is-page-target')
+    .forEach((el) => el.classList.remove('is-page-target'));
+});
+
+/** The page under the pointer, unless it is the one being dragged. */
+function pageDropTarget(event) {
+  if (dragPageId === null) { return null; }
+  const page = event.target.closest('.ks-page');
+  if (!page || page.dataset.pageId === dragPageId) { return null; }
+  return page;
+}
+
+document.addEventListener('dragover', (event) => {
+  if (!pageDropTarget(event)) { return; }
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+});
+
+document.addEventListener('dragenter', (event) => {
+  if (dragPageId === null) { return; }
+  const target = pageDropTarget(event);
+  document.querySelectorAll('.ks-page.is-page-target')
+    .forEach((el) => el.classList.remove('is-page-target'));
+  target?.classList.add('is-page-target');
+});
+
+document.addEventListener('drop', async (event) => {
+  const target = pageDropTarget(event);
+  if (!target) { return; }
+  event.preventDefault();
+
+  const movedId = dragPageId;
+  dragPageId = null;
+  target.classList.remove('is-page-target');
+
+  const book = document.querySelector('.ks-book');
+  const layoutId = Number(book?.dataset.layoutId);
+  if (!layoutId) { return; }
+
+  /* Read the order out of the DOM, then move the id. Document order across the
+     spread wrappers IS page order — the pages are chunked into spreads for
+     layout only, so a flat querySelectorAll over the book gives the sequence. */
+  const ids = Array.from(book.querySelectorAll('.ks-page'))
+    .map((el) => el.dataset.pageId);
+
+  const from = ids.indexOf(movedId);
+  const to   = ids.indexOf(target.dataset.pageId);
+  if (from === -1 || to === -1 || from === to) { return; }
+
+  ids.splice(from, 1);
+  ids.splice(to, 0, movedId);
+
+  book.classList.add('is-busy');
+  try {
+    await apiPost('api/book-pages-reorder.php', {
+      layout_id: layoutId,
+      page_ids: ids.map(Number),
+    });
+    window.location.reload();
+  } catch (err) {
+    book.classList.remove('is-busy');
+    showSnackbar(describe(err));
+  }
+});
+
+/* The version picker submits on change, so switching version is one tap
+   instead of "choose, then press Show". The button stays in the markup and is
+   hidden here rather than never rendered: without this module the <form> is
+   still a working GET and needs something to submit it. */
+const versionSelect = document.querySelector('[data-role="version-select"]');
+if (versionSelect) {
+  const form = versionSelect.closest('form');
+  form?.querySelector('.version-go')?.setAttribute('hidden', '');
+  versionSelect.addEventListener('change', () => form?.submit());
+}

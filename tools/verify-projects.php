@@ -289,5 +289,87 @@ check(
     in_array(null, array_column($list, 'year'), true)
 );
 
+/* -------------------------------------------------------- 7. page reorder */
+
+echo "\nbook_pages_reorder()...\n";
+
+$reorderProject = year_project_create(null, 'Reorderable');
+$reorderLayout  = book_layout_create($reorderProject);
+
+$pageIds = array();
+foreach (range(1, 5) as $n) {
+    $pageIds[] = book_page_create($reorderLayout, $n, 'photos');
+}
+
+/** The layout's page ids in stored page_number order. */
+function page_order(int $layoutId): array
+{
+    return array_map(
+        'intval',
+        array_column(
+            q(
+                'SELECT id FROM book_pages WHERE book_layout_id = ? ORDER BY page_number',
+                array($layoutId)
+            )->fetchAll(),
+            'id'
+        )
+    );
+}
+
+check('the pages start in creation order', page_order($reorderLayout) === $pageIds);
+
+/* Move the LAST page to the front. This is the case a one-pass renumber
+   cannot do: page 5 has to become page 1 while page 1 still holds a 1, and
+   uniq_layout_page (book_layout_id, page_number) refuses that. */
+$moved = array($pageIds[4], $pageIds[0], $pageIds[1], $pageIds[2], $pageIds[3]);
+check('a reorder is accepted', book_pages_reorder($reorderLayout, $moved) === true);
+check('the last page is now the first', page_order($reorderLayout) === $moved);
+
+/* And the numbers themselves have to come out 1..5 with no gaps and nothing
+   left parked above REORDER_PARK — a half-applied reorder would still pass an
+   ORDER BY check while printing "Page 30001" on the screen. */
+$numbers = array_map(
+    'intval',
+    array_column(
+        q(
+            'SELECT page_number FROM book_pages WHERE book_layout_id = ? ORDER BY page_number',
+            array($reorderLayout)
+        )->fetchAll(),
+        'page_number'
+    )
+);
+check('the numbers are 1..5 with no gaps', $numbers === array(1, 2, 3, 4, 5));
+
+/* Reversing is the other end of the same problem. */
+$reversed = array_reverse($moved);
+check('a full reversal is accepted', book_pages_reorder($reorderLayout, $reversed) === true);
+check('the reversal took', page_order($reorderLayout) === $reversed);
+
+/* Everything below must be refused and must leave the order alone — a request
+   that is not exactly this layout's pages is a bug or a stale tab, and
+   applying the part of it that makes sense produces a shuffled book. */
+$before = page_order($reorderLayout);
+
+check(
+    'a short list is refused',
+    book_pages_reorder($reorderLayout, array_slice($reversed, 0, 3)) === false
+);
+check(
+    'a list with a duplicate is refused',
+    book_pages_reorder(
+        $reorderLayout,
+        array($reversed[0], $reversed[0], $reversed[2], $reversed[3], $reversed[4])
+    ) === false
+);
+check(
+    'a list with a foreign page id is refused',
+    book_pages_reorder(
+        $reorderLayout,
+        array($reversed[0], $reversed[1], $reversed[2], $reversed[3], 999999)
+    ) === false
+);
+check('an empty list is refused', book_pages_reorder($reorderLayout, array()) === false);
+check('none of the refusals moved anything', page_order($reorderLayout) === $before);
+
 echo "\n" . ($failures === 0 ? "All checks passed.\n" : $failures . " CHECK(S) FAILED.\n");
 exit($failures === 0 ? 0 : 1);

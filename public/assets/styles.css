@@ -1905,6 +1905,76 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
 .ks-slot.is-drop-target,
 .ks-page.is-drop-target { outline: 2px solid var(--teal); outline-offset: -2px; }
 
+/* ---- Page reorder ----
+ *
+ * A grip, not a draggable page. The page's PHOTOS are already drag sources for
+ * the swap/move gesture, and making the page itself draggable swallows those
+ * drags before they start — so the drag handle is 24 pixels of dots and the
+ * rest of the page keeps behaving as it did.
+ *
+ * Same reasoning as .drag-handle for the touch lists, arrived at from the
+ * opposite direction: there it scopes touch-action, here it scopes draggable. */
+.ks-page-grip {
+  flex: none;
+  width: 24px;
+  cursor: grab;
+  color: var(--slate);
+  opacity: 0.5;
+  font-size: 0.95rem;
+  line-height: 1;
+  user-select: none;
+}
+.ks-page-grip:hover { opacity: 1; color: var(--teal-dark); }
+.ks-page-grip:active { cursor: grabbing; }
+.ks-page-label { flex: 1; min-width: 0; }
+.ks-page.is-dragging { opacity: 0.45; }
+
+/* A dashed outline for the PAGE drop target, against the solid one the slot
+   drop uses above — the two gestures land on overlapping elements and have
+   very different consequences, so they must not look identical mid-drag. */
+.ks-page.is-page-target {
+  outline: 2px dashed var(--teal);
+  outline-offset: -2px;
+}
+
+/* The whole grid, while the reorder is in flight and the reload has not
+   happened yet. Nothing else should be draggable in that window. */
+.ks-book.is-busy { opacity: 0.6; pointer-events: none; }
+
+/* ---- Book tab: the action row and the version picker ---- */
+
+/* Create and Export, side by side. Both are full-width buttons by default
+   (.btn-primary is width:100%), which is what makes them share the row evenly
+   without either needing a width of its own. */
+.book-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.book-actions > * { flex: 1; }
+
+.version-bar { display: grid; gap: 10px; }
+.version-picker {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+.version-select { flex: 1; min-width: 0; }
+.version-summary { margin: 0; }
+.version-actions { flex-wrap: wrap; gap: 8px; }
+.version-actions .btn-secondary,
+.version-actions .btn-danger { width: auto; }
+
+/* The title/cover accordion wraps a .card, and two nested borders with two
+   sets of padding around one form reads as a box in a box. The inner one
+   drops both. */
+.card.is-flush {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
 /* ============ Snapshot page (brief §2.3) ============
  *
  * A fixed hero photo + fact list + notes, the same template shape every

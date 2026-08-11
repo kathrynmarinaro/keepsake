@@ -276,7 +276,21 @@ function render_page(array $page, ?array $choice): string
     <section class="card ks-page" data-page-id="<?= (int) $page['id'] ?>"
               data-page-number="<?= (int) $page['page_number'] ?>" data-page-type="<?= h($type) ?>">
       <div class="row-between ks-page-head">
-        <strong>Page <?= (int) $page['page_number'] ?></strong>
+        <?php /* The grip is what is draggable, not the page — the page's
+                 PHOTOS are already drag sources for the swap/move gesture, and
+                 a page that is itself draggable swallows those drags before
+                 they start. Scoping it to the grip keeps the two gestures from
+                 contending for the same pointer.
+
+                 HTML5 drag-and-drop, matching the photo drag beside it. That
+                 makes page reordering desktop-only, as the photo drag already
+                 is — iOS fires no drag events for touch. This screen is
+                 primarily a desktop one (brief §5.2), and the alternative is a
+                 second, pointer-based drag implementation running alongside
+                 the first. */ ?>
+        <span class="ks-page-grip" draggable="true" title="Drag to move this page"
+              aria-hidden="true" data-page-drag="<?= (int) $page['id'] ?>">⠿</span>
+        <strong class="ks-page-label">Page <?= (int) $page['page_number'] ?></strong>
         <div class="row ks-page-actions">
           <span class="pill<?= $type === 'photos' ? '' : ' is-plain' ?>"><?= h($type) ?></span>
           <button type="button" class="btn-ghost" data-act="reflow" data-page="<?= (int) $page['page_number'] ?>">
@@ -316,8 +330,21 @@ function render_page(array $page, ?array $choice): string
   <!-- Brief §4.6, final step before export: title/subtitle/cover. A
        property of the YEAR, not of any one layout version, so it's shown
        regardless of which version is open below. -->
-  <div class="card" data-role="title-card" data-year-project="<?= (int) $project['id'] ?>">
-    <strong>Book title &amp; cover</strong>
+  <?php /* An accordion, closed by default. The title, the subtitle, the cover
+           photo and its crop are four controls you touch once per book and
+           then never again — and they sat above the version list and the page
+           grid, which are what you actually came to this tab for. Collapsed,
+           they are one row; the summary carries the book's name so it still
+           says what is inside without being opened.
+
+           <details>, not a JS toggle: it remembers nothing between loads,
+           which is right (it should always come back closed), and it works
+           before any module has run. */ ?>
+  <details class="accordion" data-role="title-accordion">
+    <summary class="accordion-head">Title &amp; cover</summary>
+    <div class="accordion-body">
+  <div class="card is-flush" data-role="title-card" data-year-project="<?= (int) $project['id'] ?>">
+
     <p class="hint">Tap the title or the subtitle to change it. Both are optional — clear the title and the book goes back to being called <?= h($projectName) ?>.</p>
     <ul class="list" id="subtitle-list">
       <li class="list-row" data-id="<?= (int) $project['id'] ?>">
@@ -435,39 +462,35 @@ function render_page(array $page, ?array $choice): string
       </div>
     </div>
   </div>
-
-  <!-- Phase 7 (brief §5.5): the one action the exit criterion asks for.
-       Always reads year_projects.active_book_layout_id — see
-       lib/pdfexport.php's header for why that's never "the newest version".
-       A plain GET link, not a JS-driven fetch(): the browser's own download
-       handling is simpler and more robust than reimplementing it, and GET
-       requests don't need api.js's CSRF header (require_same_origin() is a
-       no-op for GET). No cover photo picked yet doesn't block this — the
-       export itself fails soft on that (see lib/pdfexport.php). -->
-  <div class="card row-between" data-role="export-bar">
-    <div>
-      <strong>Export PDF</strong>
-      <div class="hint">
-        <?php if ($project['active_book_layout_id'] !== null): ?>
-          Print-ready PDF of the active layout — the cover, then every generated page.
-        <?php else: ?>
-          Generate a layout and mark one active ("Use this one") before exporting.
-        <?php endif; ?>
-      </div>
     </div>
+  </details>
+
+  <?php /* The two things this tab does, side by side, in the order you do
+           them. They were two full-width cards stacked one above the other,
+           each with a paragraph of explanation, which is a lot of screen for
+           two buttons.
+
+           Export ALWAYS reads year_projects.active_book_layout_id — see
+           lib/pdfexport.php's header for why that is never "the newest
+           version" — and so it is disabled until there is one. A disabled
+           button rather than a hidden one: the point is that exporting is the
+           step AFTER generating, and a button that appears out of nowhere
+           does not teach that.
+
+           A plain GET link, not a fetch(): the browser's own download
+           handling is more robust than reimplementing it, and GET needs no
+           CSRF header (require_same_origin() is a no-op for GET). No cover
+           photo picked does not block it — the export fails soft on that. */ ?>
+  <div class="card book-actions" data-role="generate-bar" data-year-project="<?= (int) $project['id'] ?>">
+    <button class="btn-primary" type="button" data-act="generate">
+      <?= $layouts === array() ? 'Create layout' : 'Create new layout' ?>
+    </button>
     <?php if ($project['active_book_layout_id'] !== null): ?>
-      <a class="btn-primary" href="api/export.php?id=<?= $projectId ?>">Export PDF</a>
+      <a class="btn-secondary" href="api/export.php?id=<?= $projectId ?>">Export PDF</a>
     <?php else: ?>
-      <button class="btn-primary" type="button" disabled>Export PDF</button>
+      <button class="btn-secondary" type="button" disabled
+              title="Generate a layout first">Export PDF</button>
     <?php endif; ?>
-  </div>
-
-  <div class="card row-between" data-role="generate-bar" data-year-project="<?= (int) $project['id'] ?>">
-    <div>
-      <strong>Create book layout</strong>
-      <div class="hint">Arranges everything reviewed for <?= h($projectName) ?> into pages.</div>
-    </div>
-    <button class="btn-primary" type="button" data-act="generate">Create</button>
   </div>
 
   <?php if ($layouts === array()): ?>
@@ -480,45 +503,64 @@ function render_page(array $page, ?array $choice): string
     </div>
   <?php else: ?>
 
-    <h2 class="cat-head">Versions <span class="cat-count"><?= count($layouts) ?></span></h2>
-    <div class="stack">
-      <?php foreach ($layouts as $layout):
-          $id       = (int) $layout['id'];
-          $isActive = $project['active_book_layout_id'] !== null && (int) $project['active_book_layout_id'] === $id;
-          $isOpen   = $selected !== null && (int) $selected['id'] === $id;
+    <?php /* A dropdown, not a list of cards.
+             Every generated version stays forever — nothing is overwritten,
+             which is the point — so after a few tries at getting the book
+             right the list was the tallest thing on the screen, and all but
+             one row of it was history. The <select> shows the one you are
+             looking at; the rest are one tap away.
+
+             A real <form method="get">, so switching version is a navigation
+             with its own URL and no JavaScript is required. layout.js
+             upgrades it to submit on change; without the module you get a
+             "Show" button, which still works. */ ?>
+    <div class="card version-bar">
+      <form method="get" action="project.php" class="version-picker">
+        <input type="hidden" name="id" value="<?= $projectId ?>">
+        <input type="hidden" name="tab" value="book">
+        <label class="field version-select">
+          <span>Version</span>
+          <select name="layout" data-role="version-select">
+            <?php foreach ($layouts as $layout):
+                $id       = (int) $layout['id'];
+                $isActive = $project['active_book_layout_id'] !== null && (int) $project['active_book_layout_id'] === $id;
+            ?>
+              <option value="<?= $id ?>"<?= ($selected !== null && (int) $selected['id'] === $id) ? ' selected' : '' ?>>
+                Version <?= (int) $layout['version'] ?><?= $isActive ? ' (active)' : '' ?>
+                — <?= (int) $layout['page_count'] ?> pages, <?= h(page_fmt_date((string) $layout['created_at'])) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <button class="btn-secondary version-go" type="submit">Show</button>
+      </form>
+
+      <?php if ($selected !== null):
+          $selectedId     = (int) $selected['id'];
+          $selectedActive = $project['active_book_layout_id'] !== null
+              && (int) $project['active_book_layout_id'] === $selectedId;
       ?>
-        <div class="card version-row<?= $isOpen ? ' is-open' : '' ?>">
-          <div class="row-between">
-            <div>
-              <strong>Version <?= (int) $layout['version'] ?></strong>
-              <?php if ($isActive): ?><span class="pill">active</span><?php endif; ?>
-              <div class="hint">
-                <?= (int) $layout['page_count'] ?> pages ·
-                <?= (int) $layout['photo_pages'] ?> photo,
-                <?= (int) $layout['text_pages'] ?> text,
-                <?= (int) $layout['snapshot_pages'] ?> snapshot ·
-                <?= (int) $layout['slot_count'] ?> filled slots ·
-                <?= h(page_fmt_date((string) $layout['created_at'])) ?>
-              </div>
-            </div>
-            <div class="row version-actions">
-              <?php if (!$isActive): ?>
-                <button class="btn-secondary" type="button" data-act="activate" data-layout="<?= $id ?>">Use this one</button>
-              <?php endif; ?>
-              <a class="link-btn" href="<?= h(project_url($projectId, 'book', array('layout' => $id))) ?>">
-                <?= $isOpen ? 'Viewing' : 'View pages' ?>
-              </a>
-              <?php if (!$isActive): ?>
-                <?php /* Only ever offered for a version that is NOT active — the
-                         endpoint refuses the active one too, but a button you
-                         cannot use is worse than one that is not there. */ ?>
-                <button class="btn-danger" type="button" data-act="delete-layout"
-                        data-layout="<?= $id ?>" data-version="<?= (int) $layout['version'] ?>">Delete</button>
-              <?php endif; ?>
-            </div>
-          </div>
+        <div class="hint version-summary">
+          <?= (int) $selected['photo_pages'] ?> photo,
+          <?= (int) $selected['text_pages'] ?> text,
+          <?= (int) $selected['snapshot_pages'] ?> snapshot ·
+          <?= (int) $selected['slot_count'] ?> filled slots
         </div>
-      <?php endforeach; ?>
+
+        <?php /* The two actions that belong to the version you are looking at.
+                 Delete is never offered for the active one — the endpoint
+                 refuses it too, but a button you cannot use is worse than one
+                 that is not there. */ ?>
+        <div class="row version-actions">
+          <?php if (!$selectedActive): ?>
+            <button class="btn-secondary" type="button" data-act="activate" data-layout="<?= $selectedId ?>">Use this one</button>
+            <button class="btn-danger" type="button" data-act="delete-layout"
+                    data-layout="<?= $selectedId ?>" data-version="<?= (int) $selected['version'] ?>">Delete</button>
+          <?php else: ?>
+            <span class="pill">active — this is what exports</span>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
     </div>
 
     <?php if ($selected !== null): ?>
@@ -535,12 +577,14 @@ function render_page(array $page, ?array $choice): string
         </div>
       <?php else: ?>
         <p class="hint">
-          Drag a photo onto another photo to swap them. Drag a photo onto a
-          different page's background to move it there. Text cards aren't
-          drag targets. Tap <span aria-hidden="true">⤢</span> on a photo to
-          adjust how it's cropped on this page. “Reflow from here”
-          regenerates every page from that one to the end of the book — the
-          pages before it are never touched.
+          Drag <span aria-hidden="true">⠿</span> to move a whole page, with
+          everything on it, somewhere else in the book. Drag a photo onto
+          another photo to swap them, or onto a different page's background to
+          move it there. Text cards aren't drag targets. Tap
+          <span aria-hidden="true">⤢</span> on a photo to adjust how it's
+          cropped on this page. “Reflow from here” regenerates every page from
+          that one to the end of the book — including any you moved by hand
+          after it. The pages before it are never touched.
         </p>
         <?php
           /* Template choice is a property of the SEQUENCE, not of one page —
