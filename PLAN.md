@@ -2068,3 +2068,26 @@ enum), `photo_update()` in lib/repo.php already writes it, `review.js` already
 toggles it from the Content tab, and `layout_load_year_content()` already
 excludes it. The work is a control on the Book tab plus the reflow decision
 above.
+
+**3. Show the hero photo on a snapshot's detail page.** "Add a preview of the
+image for the snapshot on its detail page."
+
+Today the detail form proves it worked by printing `Hero photo: #37` — an id,
+which tells you a photo is attached and nothing about which one. The point of
+picking a hero by hand is deciding whether it is the right picture, and that
+decision cannot be made against a number.
+
+Both halves need a thumbnail path the form does not currently have:
+
+- *After picking*, `review.js`'s `pickHero()` already holds the whole photo row
+  the picker resolved to, `thumb_url` included, so it only has to set an `<img>`
+  src instead of writing text into `[data-role="hero-chosen"]`. Free.
+- *On first render*, the form is built from `snapshots_for_year()`, which is a
+  plain `SELECT * FROM snapshots` — the id is all it has. It needs the same
+  `LEFT JOIN photos hero ON hero.id = s.hero_photo_id` that
+  `book_layout_pages_with_content()` already does at lib/repo.php:2063, so the
+  view can render the thumbnail on load rather than only after a fresh pick.
+
+Worth doing at the same time: a way to REMOVE the hero once set. There is
+currently no path back to no-photo short of editing the hidden input, and a
+preview is exactly where you notice you picked the wrong one.
