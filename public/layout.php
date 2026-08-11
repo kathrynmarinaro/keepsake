@@ -60,6 +60,9 @@ require_once __DIR__ . '/../lib/repo.php';
 require_once __DIR__ . '/../lib/grouping.php';
 require_once __DIR__ . '/../lib/layout.php';
 require_once __DIR__ . '/../lib/layout_render.php';
+/* For pdf_export_geometry() — the cover preview is sized from the same trim,
+ * bleed and safety numbers the PDF uses, so the two cannot disagree. */
+require_once __DIR__ . '/../lib/pdfexport.php';
 
 require_login_page();
 
@@ -402,15 +405,73 @@ function render_page(array $page, ?array $choice): string
       </li>
     </ul>
 
+    <?php
+      /* THE COVER AS IT WILL PRINT, not a thumbnail of the photo.
+       *
+       * Kathryn asked for this after an export whose cover was wrong in four
+       * ways at once — it was the only page in the book she could not look at
+       * before paying to print it. It is a square, the photo fills it and
+       * bleeds off every edge, and the title band sits where the PDF puts it,
+       * using cover_band_metrics() so the two cannot drift.
+       *
+       * The bleed is drawn as a dashed edge rather than hidden: the photo
+       * genuinely does run past the trim, and what is outside that line is
+       * what the printer cuts off. Better to see it than to be surprised by
+       * it on paper. */
+      $coverCrop = ($project !== null && $project['cover_crop_x'] !== null)
+          ? layout_crop_css(array(
+              'x' => (float) $project['cover_crop_x'], 'y' => (float) $project['cover_crop_y'],
+              'w' => (float) $project['cover_crop_w'], 'h' => (float) $project['cover_crop_h'],
+            ))
+          : null;
+
+      $coverGeo  = pdf_export_geometry();
+      $safeFrac  = (float) $coverGeo['content_margin_mm'] / (float) $coverGeo['page_height_mm'];
+      $subtitle  = trim((string) ($project['subtitle'] ?? ''));
+      $band      = cover_band_metrics($subtitle !== '', $safeFrac);
+      $bleedFrac = (float) $coverGeo['bleed_in'] / (float) $coverGeo['page_width_in'];
+    ?>
     <div class="ks-cover-row">
-      <?php if ($coverPhoto !== null): ?>
-        <img class="ks-cover-thumb" src="<?= h((string) ($coverPhoto['thumb_path'] ?: $coverPhoto['original_path'])) ?>" alt="">
-      <?php else: ?>
-        <div class="ks-cover-thumb ks-cover-empty" aria-hidden="true"></div>
-      <?php endif; ?>
+      <div class="ks-cover-preview<?= $coverPhoto === null ? ' is-empty' : '' ?>"
+           data-role="cover-preview"
+           data-year-project="<?= (int) $project['id'] ?>"
+           data-photo-id="<?= $coverPhoto !== null ? (int) $coverPhoto['id'] : '' ?>"
+           data-original="<?= $coverPhoto !== null ? h((string) $coverPhoto['original_path']) : '' ?>"
+           data-crop="<?= $coverCrop !== null ? h((string) json_encode(array(
+               'x' => (float) $project['cover_crop_x'], 'y' => (float) $project['cover_crop_y'],
+               'w' => (float) $project['cover_crop_w'], 'h' => (float) $project['cover_crop_h'],
+           ))) : '' ?>">
+        <?php if ($coverPhoto !== null): ?>
+          <?php $coverSrc = (string) ($coverPhoto['original_path'] ?: $coverPhoto['thumb_path']); ?>
+          <div class="ks-cover-art" data-role="cover-art"
+               style="background-image:url('<?= h($coverSrc) ?>');<?= $coverCrop !== null
+                   ? 'background-size:' . h($coverCrop['size']) . ';background-position:' . h($coverCrop['position']) . ';'
+                   : '' ?>"></div>
+        <?php endif; ?>
+
+        <div class="ks-cover-band" style="left:<?= round($band['inset'] * 100, 3) ?>%;
+             right:<?= round($band['inset'] * 100, 3) ?>%;
+             top:<?= round($band['top'] * 100, 3) ?>%;
+             height:<?= round($band['height'] * 100, 3) ?>%;">
+          <span class="ks-cover-year"><?= h((string) $project['year']) ?></span>
+          <?php if ($subtitle !== ''): ?>
+            <span class="ks-cover-sub" data-role="cover-sub"><?= h($subtitle) ?></span>
+          <?php endif; ?>
+        </div>
+
+        <div class="ks-cover-trim" aria-hidden="true"
+             style="inset:<?= round($bleedFrac * 100, 3) ?>%;"></div>
+      </div>
+
       <div>
         <p class="hint" data-role="cover-status"><?= $coverPhoto !== null ? 'Cover photo set.' : 'No cover photo chosen yet.' ?></p>
-        <button type="button" class="btn-ghost" data-act="pick-cover"><?= $coverPhoto !== null ? 'Change cover photo' : 'Choose cover photo' ?></button>
+        <p class="hint">The dashed line is where the printer trims. Anything outside it is cut off.</p>
+        <div class="row">
+          <button type="button" class="btn-ghost" data-act="pick-cover"><?= $coverPhoto !== null ? 'Change cover photo' : 'Choose cover photo' ?></button>
+          <?php if ($coverPhoto !== null): ?>
+            <button type="button" class="btn-ghost" data-act="crop-cover">Adjust framing</button>
+          <?php endif; ?>
+        </div>
       </div>
     </div>
   </div>

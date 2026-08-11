@@ -229,6 +229,32 @@ function pdf_photo_html(array $photo, string $imgStyle, string $placeholderStyle
 /* ------------------------------------------------------------- pages */
 
 /**
+ * How the cover photo is framed: Kathryn's crop if she has set one, otherwise
+ * centred on the page's shape.
+ *
+ * The cover always fills its frame, so a photo that is not the page's shape
+ * always loses something. NULL columns mean "you choose"; once she has framed
+ * it by hand on the layout screen, that is the frame, and it is not recomputed
+ * behind her.
+ */
+function pdf_cover_crop_rect(array $project, array $coverPhoto, float $pageAspect): array
+{
+    if (($project['cover_crop_x'] ?? null) !== null && ($project['cover_crop_w'] ?? null) !== null) {
+        return array(
+            'x' => (float) $project['cover_crop_x'], 'y' => (float) $project['cover_crop_y'],
+            'w' => (float) $project['cover_crop_w'], 'h' => (float) $project['cover_crop_h'],
+        );
+    }
+
+    $w = (int) ($coverPhoto['width'] ?? 0);
+    $h = (int) ($coverPhoto['height'] ?? 0);
+
+    return ($w > 0 && $h > 0)
+        ? layout_auto_crop_rect($w, $h, $pageAspect)
+        : array('x' => 0.0, 'y' => 0.0, 'w' => 1.0, 'h' => 1.0);
+}
+
+/**
  * The cover: one photo bleeding to the true page edge, with the year and
  * subtitle in a band across the foot.
  *
@@ -264,11 +290,7 @@ function pdf_draw_cover_page(\Mpdf\Mpdf $mpdf, array $geo, array $project, ?arra
         /* Cropped to the PAGE's shape, not the photo's — this is the one place
          * in the book where filling the frame outranks showing the whole
          * picture, because a cover with white edges is not a cover. */
-        $w = (int) ($coverPhoto['width'] ?? 0);
-        $h = (int) ($coverPhoto['height'] ?? 0);
-        $rect = ($w > 0 && $h > 0)
-            ? layout_auto_crop_rect($w, $h, $pageMm / $tallMm)
-            : array('x' => 0.0, 'y' => 0.0, 'w' => 1.0, 'h' => 1.0);
+        $rect = pdf_cover_crop_rect($project, $coverPhoto, $pageMm / $tallMm);
 
         list($maxW, $maxH) = pdf_print_pixel_budget($pageMm, $tallMm);
         $prepared = imageproc_prepare_cached($photoAbs, $rect, $maxW, $maxH);
@@ -287,8 +309,9 @@ function pdf_draw_cover_page(\Mpdf\Mpdf $mpdf, array $geo, array $project, ?arra
      * take a letter off. Its height is set here rather than left to the text,
      * because a fixed-position box in mPDF does not grow and silently clipping
      * a subtitle would be worse than a band with room to spare. */
-    $bandHMm = $subtitle !== '' ? 34.0 : 26.0;
-    $bandYMm = $tallMm - $safeMm - $bandHMm;
+    $band    = cover_band_metrics($subtitle !== '', $safeMm / $tallMm);
+    $bandHMm = $band['height'] * $tallMm;
+    $bandYMm = $band['top'] * $tallMm;
 
     $html = '<div style="background:#ffffff;width:100%;height:100%;text-align:center;'
         . 'font-family:sans-serif;">'

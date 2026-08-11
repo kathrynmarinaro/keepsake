@@ -1027,6 +1027,39 @@ function book_page_slots(int $pageId): array
     )->fetchAll();
 }
 
+/**
+ * Set or clear the cover photo's crop. Null restores the centred default.
+ *
+ * Same normalized 0..1 convention and the same clamping as
+ * book_page_slot_set_crop(), because it is the same crop tool on the other end
+ * (crop.js) and a caller should not have to remember which kind of crop this
+ * one is.
+ */
+function year_project_set_cover_crop(int $yearProjectId, ?array $rect): bool
+{
+    if (year_project_get($yearProjectId) === null) {
+        return false;
+    }
+
+    if ($rect === null) {
+        q('UPDATE year_projects SET cover_crop_x = NULL, cover_crop_y = NULL,
+                                    cover_crop_w = NULL, cover_crop_h = NULL
+            WHERE id = ?', array($yearProjectId));
+        return true;
+    }
+
+    $clamp = static fn($v): float => max(0.0, min(1.0, (float) $v));
+    $x = $clamp($rect['x'] ?? 0);
+    $y = $clamp($rect['y'] ?? 0);
+    $w = max(0.02, min(1.0 - $x, $clamp($rect['w'] ?? 1)));
+    $h = max(0.02, min(1.0 - $y, $clamp($rect['h'] ?? 1)));
+
+    q('UPDATE year_projects SET cover_crop_x = ?, cover_crop_y = ?,
+                                cover_crop_w = ?, cover_crop_h = ?
+        WHERE id = ?', array($x, $y, $w, $h, $yearProjectId));
+    return true;
+}
+
 /** One book_page_photos (filled slot) row, or null. */
 function book_page_slot_get(int $id): ?array
 {

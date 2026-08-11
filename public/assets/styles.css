@@ -1697,17 +1697,71 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
 }
 .ks-snapshot-notes { font-size: 0.85rem; color: var(--ink); }
 
-/* ============ Cover-photo picker (brief §4.6, "Book title & cover" card) ============ */
-.ks-cover-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
-.ks-cover-thumb {
-  width: 72px;
-  height: 72px;
+/* ============ The cover, as it will print (brief §4.6 + Round 6) ============
+ *
+ * Not a thumbnail of the cover photo — the cover PAGE: a square the photo
+ * bleeds off on every side, with the title band where lib/pdfexport.php puts
+ * it. Kathryn asked for this after an export whose cover was wrong in four
+ * ways at once; it was the only page in the book she could not look at before
+ * printing it.
+ *
+ * Every position here comes from PHP, computed by the same cover_band_metrics()
+ * and pdf_export_geometry() the PDF uses. Nothing about the band's size or
+ * placement is written in this file, because a second copy of those numbers is
+ * a second thing to keep in step. */
+.ks-cover-row { display: flex; align-items: flex-start; gap: 16px; margin-top: 12px; flex-wrap: wrap; }
+
+.ks-cover-preview {
+  position: relative;
+  width: 220px;
+  aspect-ratio: 1 / 1;
   flex: none;
-  border-radius: var(--radius);
-  object-fit: cover;
+  overflow: hidden;
+  border-radius: 2px;
   background: var(--teal-tint);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
 }
-.ks-cover-empty { border: 1px dashed var(--border); }
+.ks-cover-preview.is-empty { border: 1px dashed var(--border); background: var(--surface); }
+
+/* Fills the whole square including the bleed, which is what the print does. A
+   crop override arrives as background-size/position from layout_crop_css();
+   with none set, `cover` reproduces the centred default the exporter falls
+   back to. */
+.ks-cover-art {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: 50% 50%;
+  background-repeat: no-repeat;
+}
+
+.ks-cover-band {
+  position: absolute;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  text-align: center;
+  overflow: hidden;
+}
+/* Sized against the preview's own width so the type keeps its proportion to
+   the page rather than to the screen — 8.6% of a square page is the 30pt the
+   PDF sets on an 8.75in cover. */
+.ks-cover-year { font-size: 8.6cqw; font-weight: 700; line-height: 1.05; color: #111; }
+.ks-cover-sub  { font-size: 4cqw; line-height: 1.15; color: #333; }
+.ks-cover-preview { container-type: inline-size; }
+
+/* Where the printer cuts. Everything outside it is bleed and will be lost —
+   shown rather than hidden, because that is the thing worth knowing while
+   framing a cover. */
+.ks-cover-trim {
+  position: absolute;
+  border: 1px dashed rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25) inset;
+  pointer-events: none;
+}
 
 /* The title row's value — plain text, not tap-to-edit like the subtitle row
    right below it (brief §4.6: the title always defaults to the year and

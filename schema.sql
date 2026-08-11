@@ -88,6 +88,24 @@ CREATE TABLE IF NOT EXISTS year_projects (
   -- database to police. NULL until Kathryn picks one.
   cover_photo_id  INT UNSIGNED NULL,
 
+
+  -- Kathryn's crop of the COVER photo, normalized 0..1 like every other crop
+  -- in this app (crop.js, book_page_photos.crop_x/y/w/h).
+  --
+  -- NULL, the default, means "centre-crop to the page shape". The cover is the
+  -- one place in the book that fills its frame rather than showing the whole
+  -- photo — a cover with white edges is not a cover — so SOMETHING is always
+  -- cropped off a photo that is not square, and this is how she says what.
+  --
+  -- On year_projects rather than on a slot because the cover is not a page:
+  -- it has no book_pages row, is not part of a layout version, and survives
+  -- regenerating the book. Putting it here means choosing a cover and framing
+  -- it are the same kind of decision, kept in the same place, and neither is
+  -- lost by a reflow.
+  cover_crop_x     DECIMAL(6,5) NULL,
+  cover_crop_y     DECIMAL(6,5) NULL,
+  cover_crop_w     DECIMAL(6,5) NULL,
+  cover_crop_h     DECIMAL(6,5) NULL,
   -- The book layout Kathryn is actively reviewing/exporting, when more than
   -- one exists for this year (brief §4.5: layout generation "can be re-run
   -- multiple times ... to preview/compare"). Same non-FK reasoning as

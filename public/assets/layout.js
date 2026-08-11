@@ -7,6 +7,14 @@
  *
  *   1. Generate a new version / activate a version — Phase 5, unchanged.
  *      Both reload on success, same as before.
+ *   2b. The cover preview and its framing — Round 6. The card shows the cover
+ *      PAGE rather than a thumbnail of the photo: a square the photo bleeds
+ *      off on every side, the title band where the PDF puts it, and a dashed
+ *      line marking the printer's trim. "Adjust framing" opens the same
+ *      cropper the pages use, locked to the page's proportion, and saves to
+ *      year_projects.cover_crop_* — a different place from a slot crop because
+ *      the cover is not a page and survives regenerating the book.
+ *
  *   2. Subtitle tap-to-edit and cover-photo pick — brief §4.6, Phase 6. The
  *      subtitle wiring is the literal same pattern review.js already uses
  *      (same endpoint, same inline-edit.js call) — not re-derived here.
@@ -152,6 +160,11 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  if (action === 'crop-cover') {
+    await cropCover(button);
+    return;
+  }
+
   if (action === 'pick-cover') {
     await pickCover(button);
   }
@@ -211,21 +224,62 @@ async function pickCover(button) {
   }
   button.disabled = false;
 
-  const thumb = card.querySelector('.ks-cover-thumb');
-  thumb.classList.remove('ks-cover-empty');
-  thumb.removeAttribute('aria-hidden');
-  if (thumb.tagName !== 'IMG') {
-    const img = document.createElement('img');
-    img.className = 'ks-cover-thumb';
-    img.alt = '';
-    thumb.replaceWith(img);
-    img.src = photo.thumb_url || '';
-  } else {
-    thumb.src = photo.thumb_url || '';
+  /* A new cover photo has no crop, so the preview goes back to the centred
+     default — and RELOADS rather than being patched, because a photo swap also
+     decides whether the "Adjust framing" button exists at all. Patching that by
+     hand is how a control ends up pointing at the previous photo. */
+  window.location.reload();
+}
+
+/* ------------------------------------------------------------ cover crop --- */
+
+/* Framing the cover, which is a different question from cropping a photo on a
+   page: the cover FILLS its frame, so something is always cut off a photo that
+   is not square, and the only question is what. Locked to the page's own
+   proportion — read off the preview, which is the page's shape — so what she
+   frames is exactly what prints. */
+async function cropCover(button) {
+  const card    = button.closest('[data-role="title-card"]');
+  const preview = card.querySelector('[data-role="cover-preview"]');
+  const art     = card.querySelector('[data-role="cover-art"]');
+  if (!preview || !art) { return; }
+
+  const box = preview.getBoundingClientRect();
+
+  /* Reopens on whatever framing is already saved, so a small adjustment starts
+     where she left off instead of jumping back to centred. */
+  let initial = null;
+  if (preview.dataset.crop) {
+    try { initial = JSON.parse(preview.dataset.crop); } catch { /* malformed — treat as none */ }
   }
-  card.querySelector('[data-role="cover-status"]').textContent = 'Cover photo set.';
-  button.textContent = 'Change cover photo';
-  showSnackbar('Cover photo set.');
+
+  const rect = await openCropper(preview.dataset.original, {
+    lockAspect: box.width / box.height,
+    initial,
+  });
+  /* crop.js resolves null for both "cancelled" and "applied unchanged" — see
+     the note at adjustCrop() below. Neither means "clear the framing". */
+  if (rect === null) { return; }
+
+  button.disabled = true;
+  try {
+    const res = await apiPost('api/year-projects-cover-crop.php', {
+      year_project_id: Number(preview.dataset.yearProject),
+      rect,
+    });
+    /* Drawn from the response rather than from the rect that was sent: the
+       server clamps, and the preview should show what was actually stored. */
+    if (res.css) {
+      art.style.backgroundSize = res.css.size;
+      art.style.backgroundPosition = res.css.position;
+    }
+    preview.dataset.crop = JSON.stringify(rect);
+    showSnackbar('Cover framing saved.');
+  } catch (err) {
+    showSnackbar(describe(err), { isError: true });
+  } finally {
+    button.disabled = false;
+  }
 }
 
 /* -------------------------------------------------------------- crop ----- */

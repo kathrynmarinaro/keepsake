@@ -92,3 +92,31 @@ function layout_crop_css(array $rect): array
         'position' => round($posX, 2) . '% ' . round($posY, 2) . '%',
     );
 }
+
+/**
+ * Where the cover's title band sits, as FRACTIONS of the page.
+ *
+ * Lives here rather than in lib/pdfexport.php because two renderers need it:
+ * the PDF converts these to millimetres, and public/layout.php's on-screen
+ * cover preview turns the same numbers into percentages. Kathryn asked for that
+ * preview precisely so she can see how the title falls on the photo before
+ * exporting, which is only worth anything if the two agree — and they can only
+ * be relied on to agree if neither is allowed its own copy of the numbers.
+ *
+ * The band is taller when there is a subtitle because there are two lines to
+ * hold, and it is inset by the safety margin on three sides so a printer's trim
+ * can never take a letter off.
+ *
+ * @param float $safeFrac page margin (bleed + safety) as a fraction of the page
+ * @return array{inset:float,height:float,top:float}
+ */
+function cover_band_metrics(bool $hasSubtitle, float $safeFrac): array
+{
+    $height = $hasSubtitle ? 0.153 : 0.117;
+
+    return array(
+        'inset'  => $safeFrac,
+        'height' => $height,
+        'top'    => 1.0 - $safeFrac - $height,
+    );
+}

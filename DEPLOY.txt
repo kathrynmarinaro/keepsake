@@ -138,3 +138,15 @@ public_html/keepsake/ :
       rewrite a page's caption by hand, every page keeps showing the line
       built from its photos' own captions, so nothing changes on a book
       you have already made.
+
+  [ ] Cover crop. Adds four nullable columns so the cover photo can be
+      framed by hand and previewed on the layout screen — run once:
+
+          ALTER TABLE year_projects
+            ADD COLUMN cover_crop_x DECIMAL(6,5) NULL,
+            ADD COLUMN cover_crop_y DECIMAL(6,5) NULL,
+            ADD COLUMN cover_crop_w DECIMAL(6,5) NULL,
+            ADD COLUMN cover_crop_h DECIMAL(6,5) NULL;
+
+      Same "duplicate column" note again. Until you adjust a cover crop,
+      the cover is centred exactly as it is now.

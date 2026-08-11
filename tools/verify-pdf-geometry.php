@@ -293,6 +293,37 @@ if ($mpdf->drawn !== array()) {
         $art['file'] !== UPLOAD_DIR . '/original/cover-fixture.jpg');
 }
 
+/* A stored crop must win over the centred default, and clearing it must give
+ * the default back. This is the whole point of the framing control: once she
+ * has decided what the cover shows, nothing recomputes it behind her. */
+$centred = pdf_cover_crop_rect(
+    array('cover_crop_x' => null, 'cover_crop_w' => null),
+    array('width' => 3024, 'height' => 4032),
+    1.0
+);
+$checks++;
+check('with no crop set, a tall photo is centred on the square',
+    abs($centred['w'] - 1.0) < 1e-9 && $centred['h'] < 1.0
+    && abs($centred['y'] - (1.0 - $centred['h']) / 2.0) < 1e-9);
+
+$hers = pdf_cover_crop_rect(
+    array('cover_crop_x' => 0.05, 'cover_crop_y' => 0.0, 'cover_crop_w' => 0.6, 'cover_crop_h' => 0.6),
+    array('width' => 3024, 'height' => 4032),
+    1.0
+);
+check('her framing is used exactly as stored',
+    abs($hers['x'] - 0.05) < 1e-9 && abs($hers['w'] - 0.6) < 1e-9);
+
+/* The band's geometry is shared with the preview, so it is worth pinning that
+ * a subtitle makes it taller and that it always clears the safety margin. */
+$withSub = cover_band_metrics(true, 0.0714);
+$noSub   = cover_band_metrics(false, 0.0714);
+$checks++;
+check('a subtitle makes the title band taller', $withSub['height'] > $noSub['height']);
+check('the band stops short of the page edge by the safety margin',
+    abs(($withSub['top'] + $withSub['height']) - (1.0 - 0.0714)) < 1e-9);
+check('...and is inset by the same margin on the sides', abs($withSub['inset'] - 0.0714) < 1e-9);
+
 @unlink(UPLOAD_DIR . '/original/cover-fixture.jpg');
 @unlink($realCover);
 imageproc_prune_export_cache(0);
