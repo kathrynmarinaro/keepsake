@@ -2079,16 +2079,40 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
  * page". The pill in the page's toolbar, outside this block, stays. */
 .ks-snapshot {
   display: flex;
-  /* CENTRED ON THE PAGE, both panels on one centre line — what
-     pdf_draw_snapshot_page() draws. They were top-aligned, which was right
-     while the hero filled the column and wrong once it became a 3:4
-     rectangle: the page then sat in its top two-thirds with a band of white
-     under it. */
+  /* CENTRED ON THE PAGE — what pdf_draw_snapshot_page() draws. It was pinned
+     to the top, which was right while the hero filled the column and wrong
+     once it became a 3:4 rectangle: the page then sat in its top two-thirds
+     with a band of white under it. */
   align-items: center;
-  gap: 4%;
   height: 100%;
 }
-.ks-snapshot-hero-cell { flex: 0 0 45%; min-width: 0; }
+
+/* THE TWO COLUMNS ARE A CSS TABLE, and that is not laziness — it is the one
+   construction in CSS with the behaviour the printed page has:
+
+     short text  -> centred against the hero (vertical-align:middle in a row
+                    whose height the hero sets);
+     long text   -> starts on the hero's top edge and runs on down (the row
+                    grows, and the hero cell is vertical-align:top).
+
+   "If the text is longer than the image, I'd like the text to be top aligned
+   with the image." Flexbox cannot express it: align-items:center centres both
+   independently, so a long text sits ABOVE the hero's top edge instead of on
+   it. The PDF gets the same two behaviours out of the same mechanism — a cell
+   with the hero's height and vertical-align:middle — so the two stay in step.
+
+   table-layout:fixed is what makes the percentage widths below authoritative
+   rather than advisory. */
+.ks-snapshot-grid {
+  display: table;
+  table-layout: fixed;
+  width: 100%;
+}
+.ks-snapshot-hero-cell {
+  display: table-cell;
+  width: 45%;
+  vertical-align: top;
+}
 .ks-snapshot-hero {
   display: block;
   width: 100%;
@@ -2108,14 +2132,16 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
   background: var(--bg);
 }
 .ks-snapshot-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: table-cell;
+  /* The gutter. A table row has no `gap`, so it is padding on the side that
+     has text on it rather than a third column. */
+  padding-left: 4%;
+  vertical-align: middle;
 }
 .ks-snapshot-title {
-  margin: 0;
+  /* The body used to be a flex column with a 2px gap; as a table cell it is
+     ordinary flow, so the one gap that mattered is a margin now. */
+  margin: 0 0 2px;
   font-size: 0.98rem;
   font-weight: 700;
   line-height: 1.2;

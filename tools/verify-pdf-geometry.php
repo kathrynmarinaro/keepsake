@@ -451,7 +451,7 @@ imageproc_prune_export_cache(0);
 
 /* ================================================== the snapshot page ===== */
 
-echo "\nSnapshot page — two-up, full height...\n";
+echo "\nSnapshot page — two-up, one block, centred...\n";
 
 /* WHY THIS IS HERE. The snapshot page used to be an HTML table in document
  * flow, and mPDF will not hold a height for one: on an 8.75in square page a
@@ -515,28 +515,30 @@ if (count($snapMpdf->placed) === 2) {
     check('...with equal slack above and below it',
         abs(($heroBox['y'] - $expectY) - (($expectY + $expectH) - ($heroBox['y'] + $heroBox['h']))) < 0.01);
 
-    /* The TEXT panel still gets the full height: it is what the sections flow
-       down, and a short one simply leaves white space under itself. */
-    check('the text panel is full height',
-        abs($textBox['h'] - $expectH) < 0.01,
-        sprintf('%.2fmm, expected %.2fmm', $textBox['h'], $expectH));
+    /* THE TWO PANELS START ON ONE LINE, always — they are one block, and the
+       block is what gets centred. With this short a snapshot the block is the
+       hero, so this is also the centred case above. */
+    check('the text panel starts on the hero\'s top edge',
+        abs($textBox['y'] - $heroBox['y']) < 0.01,
+        sprintf('text y %.2f, hero y %.2f', $textBox['y'], $heroBox['y']));
+
+    /* And it keeps everything between there and the foot of the content box,
+       which is what a longer snapshot grows down into. */
+    check('the text panel runs to the foot of the content box',
+        abs(($textBox['y'] + $textBox['h']) - ($expectY + $expectH)) < 0.01,
+        sprintf('ends at %.2f, box ends at %.2f', $textBox['y'] + $textBox['h'], $expectY + $expectH));
+
+    /* The CELL inside it is the hero's height, and that is what centres a short
+       text against the photo rather than against the panel. */
+    check('the text is centred in a cell the hero\'s height',
+        str_contains($textBox['html'], 'height:' . round($heroBox['h'], 2) . 'mm')
+        && str_contains($textBox['html'], 'vertical-align:middle'));
 
     check('the hero does not run past the page',
         $heroBox['y'] + $heroBox['h'] <= $originMm + $tallMm + 0.01);
 
-    /* Side by side is about x: the two panels no longer share a top edge,
-       because the text panel is full height and centres its content inside
-       itself while the hero is a shorter box centred in the same column. What
-       must hold is that they overlap vertically and never overlap across. */
     check('the two panels are side by side, not stacked',
-        $textBox['x'] > $heroBox['x'] + $heroBox['w'] - 0.01
-        && $textBox['y'] < $heroBox['y'] + $heroBox['h']
-        && $heroBox['y'] < $textBox['y'] + $textBox['h']);
-
-    /* Both halves centre on the same line, which is what makes them look like
-       one composition rather than two panels that happen to be adjacent. */
-    check('and share a centre line',
-        abs(($heroBox['y'] + $heroBox['h'] / 2) - ($textBox['y'] + $textBox['h'] / 2)) < 0.01);
+        $textBox['x'] > $heroBox['x'] + $heroBox['w'] - 0.01);
 
     /* 45/55 of the space left after the gutter. */
     $contentW = $boxMm - (2 * $insetMm);
@@ -573,6 +575,110 @@ $heroMpdf = new RecordingMpdf();
 pdf_draw_snapshot_page($heroMpdf, $withHero, $geo);
 check('a hero that cannot be resolved still leaves the page whole',
     count($heroMpdf->placed) + count($heroMpdf->drawn) === 2);
+
+/* ---------------------------------------------------------------------------
+ * The block rule, on pdf_snapshot_layout() directly — no mPDF, no drawing,
+ * just the arithmetic that decides where the pair sits. This is the half of
+ * "centred when it fits, top-aligned with the image when it doesn't" that can
+ * be checked exactly; the cell above is the other half.
+ * ------------------------------------------------------------------------ */
+
+echo "\n...and the block rule that positions the pair\n";
+
+$flat   = pdf_snapshot_layout($geo, 0.0);
+$heroHt = $flat['hero_h'];
+$boxTop = $flat['box_y'];
+$boxBot = $flat['box_y'] + $flat['box_h'];
+
+/* SHORT: the block is the photo, so the photo is centred on the page. */
+$short = pdf_snapshot_layout($geo, $heroHt / 2);
+check('a short text leaves the hero centred on the page',
+    abs(($short['hero_y'] - $boxTop) - ($boxBot - ($short['hero_y'] + $short['hero_h']))) < 0.01,
+    sprintf('%.2f above, %.2f below', $short['hero_y'] - $boxTop, $boxBot - ($short['hero_y'] + $short['hero_h'])));
+check('...and does not move it as it grows, right up to the hero\'s height',
+    abs(pdf_snapshot_layout($geo, $heroHt)['hero_y'] - $short['hero_y']) < 0.01);
+
+/* LONG: the block is the text. Tops align — the thing that was asked for —
+   and it is the BLOCK that is centred, so the text still fits. */
+$longH = $heroHt * 1.5;
+$long  = pdf_snapshot_layout($geo, $longH);
+
+check('a long text is top-aligned with the hero',
+    abs($long['text_y'] - $long['hero_y']) < 0.01,
+    sprintf('text y %.2f, hero y %.2f', $long['text_y'], $long['hero_y']));
+check('...and the pair, not the photo, is what is centred',
+    abs(($long['hero_y'] - $boxTop) - ($boxBot - ($long['text_y'] + $longH))) < 0.01,
+    sprintf('%.2f above, %.2f below', $long['hero_y'] - $boxTop, $boxBot - ($long['text_y'] + $longH)));
+check('...so the text still ends inside the content box',
+    $long['text_y'] + $longH <= $boxBot + 0.01,
+    sprintf('ends at %.2f, box ends at %.2f', $long['text_y'] + $longH, $boxBot));
+
+/* THE CASE THAT MADE THIS NECESSARY. Leaving the hero centred and hanging the
+   text off its top edge is the obvious implementation and it overflows: the
+   nine-section snapshot in the page lab ran 19mm past the trim. Same numbers,
+   the other way round. */
+$naiveTop = $flat['hero_y'];
+check('the naive version — hero centred, text hung off it — would have overflowed',
+    $naiveTop + $longH > $boxBot,
+    sprintf('would end at %.2f, box ends at %.2f', $naiveTop + $longH, $boxBot));
+
+/* And the two rules meet without a step at the crossover. */
+$justUnder = pdf_snapshot_layout($geo, $heroHt - 0.01);
+$justOver  = pdf_snapshot_layout($geo, $heroHt + 0.01);
+check('the two cases meet without a jump',
+    abs($justUnder['hero_y'] - $justOver['hero_y']) < 0.02,
+    sprintf('%.3f vs %.3f', $justUnder['hero_y'], $justOver['hero_y']));
+
+/* A text taller than the whole page is clamped rather than pushed off the top. */
+check('a text taller than the page starts at the top of it, not above it',
+    abs(pdf_snapshot_layout($geo, $flat['box_h'] * 3)['text_y'] - $boxTop) < 0.01);
+
+/* ---------------------------------------------------------------------------
+ * The printed spacing, read back out of a real PDF.
+ *
+ * mPDF's WriteFixedPosHTML DROPS margin and padding on block elements, which
+ * is not documented anywhere obvious and cost this page its whole vertical
+ * rhythm: the 6mm under the date and the 4.5mm between sections were being
+ * thrown away in print while the page lab — a browser, which honours them —
+ * showed them. Table cell padding survives. This is the guard.
+ * ------------------------------------------------------------------------ */
+
+echo "\n...and the spacing that survives into the PDF\n";
+
+$sm = new \Mpdf\Mpdf(array(
+    'format'       => array($geo['page_width_mm'], $geo['page_height_mm']),
+    'margin_left'  => $geo['content_margin_mm'], 'margin_right'  => $geo['content_margin_mm'],
+    'margin_top'   => $geo['content_margin_mm'], 'margin_bottom' => $geo['content_margin_mm'],
+    'tempDir'      => '/tmp/keepsake-geometry-mpdf',
+));
+$sm->AddPage();
+pdf_draw_snapshot_page($sm, $snapPage, $geo);
+
+$lines = array();
+foreach (explode("\n", (string) gzuncompress_all($sm->Output('', 'S'))) as $line) {
+    if (preg_match('/BT\s+([\d.]+)\s+([\d.]+)\s+Td\s+\((.*)\)\s*Tj/', $line, $m) === 1) {
+        $lines[] = (float) $geo['page_height_mm'] - ((float) $m[2] * 25.4 / 72);
+    }
+}
+sort($lines);
+
+/* title, date, Age, 8, Height, 3'9" */
+check('the snapshot page printed all six lines', count($lines) === 6, count($lines) . ' lines');
+
+if (count($lines) === 6) {
+    $headingToBody = $lines[3] - $lines[2];   // no gap between a heading and its body
+    $dateToSection = $lines[2] - $lines[1];   // the 6mm gap under the date
+    $betweenTwo    = $lines[4] - $lines[3];   // the 4.5mm between sections
+
+    check('the gap under the date survived into print',
+        $dateToSection > $headingToBody + 5.0,
+        sprintf('%.2fmm vs a plain %.2fmm line', $dateToSection, $headingToBody));
+    check('and so did the gap between two sections',
+        $betweenTwo > $headingToBody + 4.0,
+        sprintf('%.2fmm vs a plain %.2fmm line', $betweenTwo, $headingToBody));
+    check('a heading still sits tight against its own body copy',
+        $headingToBody < 6.0, sprintf('%.2fmm', $headingToBody));
+}
 
 /* ============================================== hanging quotation marks === */
 

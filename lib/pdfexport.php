@@ -729,7 +729,19 @@ function pdf_render_text_page_html(array $page): string
  * NO TYPE LABEL — "I don't want the type of content shown on the page". The
  * pill in the preview's page toolbar is screen chrome and stays.
  */
-function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
+/**
+ * Every rectangle on a snapshot page, given how tall the text turned out.
+ *
+ * PURE, and separate from the drawing, because three things have to agree
+ * about where these panels sit: the exporter below, the on-screen preview in
+ * lib/views/book.php, and tools/page-lab.php. Two of them can now ask rather
+ * than re-derive, and the arithmetic is testable without an mPDF.
+ *
+ * $textHmm is the measured height of the text column — see
+ * pdf_measure_html_height(). Pass 0.0 and you get the hero-centred page, which
+ * is the right answer whenever the text is shorter than the hero anyway.
+ */
+function pdf_snapshot_layout(array $geo, float $textHmm = 0.0): array
 {
     /* Measured from the TRIM edge, like the composition solver — see
      * pdf_draw_photos_page()'s note on why the safety margin must not be
@@ -764,25 +776,112 @@ function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
      *
      * COMPOSE_CANON['P'] is that ratio, and it is the number lib/compose.php
      * already uses for every portrait slot the layout engine solves — imported
-     * rather than restated, so there is one portrait in this app.
-     *
-     * The panel is top-aligned in its column: the text column starts at the top
-     * too, and two panels that start on the same line read as a pair even when
-     * one is shorter. */
+     * rather than restated, so there is one portrait in this app. */
     $heroH = min($boxH, $heroW / COMPOSE_CANON['P']);
 
-    /* VERTICALLY CENTRED ON THE PAGE, both panels, on one centre line.
+    /* THE TWO PANELS ARE ONE BLOCK, AND THE BLOCK IS WHAT GETS CENTRED.
      *
-     * They were pinned to the top of the content box, which was right while the
-     * hero filled the column and wrong the moment it became a 3:4 rectangle:
-     * a birthday page then sat in the top two-thirds with a band of white under
-     * it. Centring is what a page with room on it should do with the room.
+     * The block is as tall as whichever panel is taller, and both panels start
+     * at its top. That single rule covers both of the things asked for, and
+     * the two cases meet without a seam:
      *
-     * The hero has a known height, so it is placed outright. The TEXT panel
-     * keeps the full box — a page with a lot of sections needs all of it — and
-     * centres its own content inside that box instead, so the two share a
-     * centre line whichever is taller. */
-    $heroY = $boxY + max(0.0, ($boxH - $heroH) / 2.0);
+     *   text shorter than the hero — the block IS the hero, so the hero is
+     *     centred on the page and the text centres against it (the cell below
+     *     does that half). This is the page as it was signed off.
+     *
+     *   text longer than the hero — the block is the text, so "the text is top
+     *     aligned with the image", and the pair is still centred on the page.
+     *
+     * The alternative was to leave the hero centred and hang the text off its
+     * top edge, which is simpler and wrong: it throws away the top third of
+     * the page and a nine-section snapshot then runs off the bottom. Measured
+     * in the page lab before this was written — it overflowed the trim by
+     * 19mm. */
+    $blockH = max($heroH, min($textHmm, $boxH));
+    $blockY = $boxY + max(0.0, ($boxH - $blockH) / 2.0);
+
+    return array(
+        'box_x'  => $boxX,  'box_y'  => $boxY,  'box_w' => $boxW, 'box_h' => $boxH,
+        'gutter' => $gutterMm,
+        'hero_x' => $boxX,  'hero_y' => $blockY, 'hero_w' => $heroW, 'hero_h' => $heroH,
+        'text_x' => $textX, 'text_y' => $blockY, 'text_w' => $textW,
+        /* What is left between the block's top and the foot of the content
+           box. The cell inside is the HERO's height, so a short text centres
+           against the photo; a long one grows the table down into this. */
+        'text_h'      => $boxH - ($blockY - $boxY),
+        'text_cell_h' => $heroH,
+    );
+}
+
+/**
+ * How tall a block of the exporter's own HTML comes out at a given width, in
+ * millimetres.
+ *
+ * WHY THIS EXISTS. pdf_snapshot_layout() needs to know whether the text is
+ * taller than the hero before it can place either of them, and mPDF will not
+ * tell you how big something is until it has drawn it. So this draws it — on a
+ * throwaway page 3 metres long, where nothing can paginate — and reads the
+ * flow position off the end. Same engine, same fonts, same width as the real
+ * panel, so the answer is the real answer rather than a character-count
+ * estimate that drifts the first time a heading wraps.
+ *
+ * Cached on the html and the width: a book has a handful of snapshot pages,
+ * and the lab draws each of its cases twice.
+ *
+ * Returns 0.0 when mPDF is not installed, which the caller reads as "assume it
+ * fits" — the pre-measurement page, and a sane thing for a checkout with no
+ * vendor/ to fall back to.
+ */
+function pdf_measure_html_height(string $html, float $widthMm): float
+{
+    static $cache = array();
+
+    $key = md5($html) . '|' . round($widthMm, 2);
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    pdf_require_library();
+    if (!class_exists(\Mpdf\Mpdf::class)) {
+        return $cache[$key] = 0.0;
+    }
+
+    try {
+        $probe = new \Mpdf\Mpdf(array(
+            'format'        => array($widthMm, 3000.0),
+            'margin_left'   => 0, 'margin_right'  => 0,
+            'margin_top'    => 0, 'margin_bottom' => 0,
+            'margin_header' => 0, 'margin_footer' => 0,
+            'tempDir'       => sys_get_temp_dir() . '/keepsake-mpdf',
+        ));
+        $probe->AddPage();
+        $probe->WriteHTML($html);
+        $height = (float) $probe->y;
+    } catch (\Throwable $e) {
+        /* Fail soft, like everything else here: a page that cannot be measured
+           is drawn the old way rather than not drawn. */
+        return $cache[$key] = 0.0;
+    }
+
+    return $cache[$key] = max(0.0, $height);
+}
+
+function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
+{
+    /* Measured first, placed second — the block cannot be positioned until it
+       is known which panel is the tall one. What gets measured is the same
+       wrapper that gets drawn, with the cell height set to nothing so the
+       table collapses to its content: measuring a different construction from
+       the one you draw is how you end up centring against a number that was
+       never true. */
+    $probe    = pdf_snapshot_layout($geo, 0.0);
+    $textHtml = pdf_render_snapshot_text_html($page, 0.0);
+    $box      = pdf_snapshot_layout($geo, pdf_measure_html_height($textHtml, $probe['text_w']));
+
+    $heroW = $box['hero_w'];
+    $heroH = $box['hero_h'];
+    $heroY = $box['hero_y'];
+    $boxX  = $box['hero_x'];
 
     /* ---- the hero column ---- */
 
@@ -813,11 +912,16 @@ function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
         );
     }
 
-    /* ---- the text column ---- */
-
+    /* ---- the text column ----
+     *
+     * Starts on the block's top edge, which is the hero's top edge, and is
+     * given a CELL the hero's height: shorter content centres in it, longer
+     * content grows the table downward past the foot of the photo. Between
+     * that and pdf_snapshot_layout()'s block, "centred when it fits,
+     * top-aligned with the image when it doesn't" needs no branch anywhere. */
     $mpdf->WriteFixedPosHTML(
-        pdf_render_snapshot_text_html($page, $boxH),
-        $textX, $boxY, $textW, $boxH
+        pdf_render_snapshot_text_html($page, $box['text_cell_h']),
+        $box['text_x'], $box['text_y'], $box['text_w'], $box['text_h']
     );
 }
 
@@ -827,21 +931,40 @@ function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
  * Split out from the drawing above so the page lab can render it, and so the
  * on-screen preview in lib/views/book.php has one thing to mirror rather than
  * a sequence of mPDF calls.
+ *
+ * THE STACK IS A TABLE AND THE GAPS ARE CELL PADDING, which looks like a 1998
+ * web page and is not a stylistic choice. mPDF's WriteFixedPosHTML — how every
+ * panel on a coordinate-drawn page gets there — SILENTLY DROPS margin and
+ * padding on block elements. The gaps this page is supposed to have (2mm under
+ * the title, 6mm under the date, 4.5mm between sections) were all being thrown
+ * away in print, so every line sat on the same 4.7mm rhythm and the date ran
+ * into the first heading. It looked right in the page lab because a browser
+ * honours the margins mPDF was discarding.
+ *
+ * Cell padding survives, measured out of a real PDF. So the gaps are cell
+ * padding, and the last row has none — a trailing gap would offset the
+ * centring by half of itself.
  */
 function pdf_render_snapshot_text_html(array $page, ?float $heightMm = null): string
 {
     $title    = trim((string) ($page['snapshot_title'] ?? ''));
     $sections = $page['snapshot_sections'] ?? array();
 
-    $html = '<div style="font-family:sans-serif;">';
+    /* Each entry is array(html, gap-under-it-in-mm). Collected first so the
+       last one can have its gap taken off. */
+    $rows = array();
 
     if ($title !== '') {
-        $html .= '<div style="font-size:19pt;font-weight:bold;line-height:1.2;margin-bottom:2mm;">'
-            . pdf_esc($title) . '</div>';
+        $rows[] = array(
+            '<div style="font-size:19pt;font-weight:bold;line-height:1.2;">' . pdf_esc($title) . '</div>',
+            2.0,
+        );
     }
 
-    $html .= '<div style="font-size:10pt;color:#666;margin-bottom:6mm;">'
-        . pdf_fmt_date((string) $page['snapshot_date']) . '</div>';
+    $rows[] = array(
+        '<div style="font-size:10pt;color:#666;">' . pdf_fmt_date((string) $page['snapshot_date']) . '</div>',
+        6.0,
+    );
 
     foreach ($sections as $section) {
         $heading = trim((string) ($section['heading'] ?? ''));
@@ -850,32 +973,48 @@ function pdf_render_snapshot_text_html(array $page, ?float $heightMm = null): st
             continue;
         }
 
-        $html .= '<div style="margin-bottom:4.5mm;">';
+        $cell = '';
         if ($heading !== '') {
             /* Bold, as asked. The body copy underneath keeps the weight and
                size it always had — "the titles should be bold and the body
                copy is good as-is". */
-            $html .= '<div style="font-size:12pt;font-weight:bold;line-height:1.35;">'
+            $cell .= '<div style="font-size:12pt;font-weight:bold;line-height:1.35;">'
                 . pdf_esc($heading) . '</div>';
         }
         if ($text !== '') {
-            $html .= '<div style="font-size:11pt;line-height:1.5;color:#333;">'
+            $cell .= '<div style="font-size:11pt;line-height:1.5;color:#333;">'
                 . nl2br(pdf_esc(pdf_clip_text($text))) . '</div>';
         }
-        $html .= '</div>';
+
+        $rows[] = array($cell, 4.5);
     }
 
-    $html .= '</div>';
+    $rows[count($rows) - 1][1] = 0.0;
+
+    $html = '<table style="width:100%;border-spacing:0;border-collapse:collapse;font-family:sans-serif;">';
+    foreach ($rows as $row) {
+        $html .= '<tr><td style="padding:0 0 ' . round($row[1], 2) . 'mm 0;">' . $row[0] . '</td></tr>';
+    }
+    $html .= '</table>';
 
     if ($heightMm === null) {
         return $html;
     }
 
-    /* Centred in the panel it was given, on the same centre line as the hero.
-     * The full-height cell with vertical-align:middle is how mPDF centres —
-     * the same construction pdf_render_text_card_html() uses, and verified the
-     * same way, out of a real PDF's text positions. */
-    return '<table style="width:100%;height:' . round($heightMm, 2) . 'mm;">'
+    /* $heightMm is the HERO's height, and the cell is a minimum rather than a
+     * cap: content shorter than it centres against the hero, content taller
+     * than it grows the table downward and starts on the hero's top edge. That
+     * is the second half of "centred when it fits, top-aligned with the image
+     * when it doesn't" — pdf_snapshot_layout() is the first. Same construction
+     * pdf_render_text_card_html() uses, verified the same way, out of a real
+     * PDF's text positions.
+     *
+     * border-spacing and border-collapse are here because mPDF's default table
+     * spacing put the first line 0.5mm below the hero's top edge — invisible on
+     * its own, and exactly the kind of not-quite-aligned that the eye reads as
+     * sloppy when there is a photograph beside it to compare against. */
+    return '<table style="width:100%;height:' . round($heightMm, 2) . 'mm;'
+        . 'border-spacing:0;border-collapse:collapse;margin:0;">'
         . '<tr><td style="vertical-align:middle;height:' . round($heightMm, 2) . 'mm;padding:0;">'
         . $html
         . '</td></tr></table>';

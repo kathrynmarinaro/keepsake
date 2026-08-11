@@ -1928,3 +1928,61 @@ hit exactly this wall for exactly this reason years of commits ago; this is the
 same answer, and `verify-pdf-geometry.php` now measures both panels the same
 way it measures photo rectangles.
 
+
+### Round 9, later: the pair is one block
+
+> "If the text is longer than the image, I'd like the text to be top aligned
+> with the image."
+
+The page had both panels centred independently, which is right until the text
+is the taller of the two — then it starts above the photo's top edge and ends
+below its bottom, and the two halves stop reading as a pair.
+
+The rule now is that **the hero and the text are one block, the block is as
+tall as whichever panel is taller, and it is the block that gets centred on the
+page.** Both panels start at its top. That covers both cases without a branch
+and without a seam between them:
+
+- text shorter than the hero — the block is the hero, so the hero sits centred
+  exactly where it did before and the text centres against it;
+- text longer — the block is the text, so the tops line up as asked, and the
+  pair is still centred.
+
+The obvious cheaper implementation is to leave the hero centred and hang the
+text off its top edge. It was written that way first, and the page lab caught
+it: a nine-section snapshot ran **19mm past the trim**, because hanging off a
+centred hero throws away the top third of the page. `verify-pdf-geometry.php`
+asserts the overflow the naive version would have produced, so the shortcut
+cannot be reintroduced by someone who finds the block arithmetic fussy.
+
+**This needs the text's height before either panel can be placed, and mPDF will
+not tell you how big something is until it has drawn it.** So
+`pdf_measure_html_height()` draws it — the same wrapper that gets drawn for
+real, on a throwaway page three metres long where nothing can paginate — and
+reads the flow position off the end. Same engine, same fonts, same width, so
+the answer is the real answer rather than a characters-per-line estimate that
+drifts the first time a heading wraps. It is cached, it is skipped when mPDF
+is not installed, and the rectangles it feeds live in one pure function
+(`pdf_snapshot_layout()`) that the exporter, the page lab and the tests all
+read instead of keeping three copies of the arithmetic.
+
+Measuring it turned up a bug that had already shipped:
+
+**mPDF's `WriteFixedPosHTML` silently drops `margin` and `padding` on block
+elements.** Every gap on the snapshot page — 2mm under the title, 6mm under the
+date, 4.5mm between sections — was being thrown away in print, so every line
+sat on the same 4.7mm rhythm and the date ran into the first heading. The page
+lab did not show it because a browser honours the margins mPDF was discarding;
+the numbers only came out when the measured height and the drawn height
+disagreed by 40%. Table **cell padding** survives, so the text column is a
+one-column table now and the gaps are cell padding, with none under the last
+row — a trailing gap would offset the centring by half of itself. The test
+reads the printed baselines back out of a real PDF and checks the gaps are
+still there, because this is exactly the class of bug that looks fine in every
+preview.
+
+The on-screen preview mirrors it with a CSS table (`.ks-snapshot-grid`) rather
+than flexbox, for the same reason the PDF needs a cell: `align-items: center`
+centres the two columns independently, so a long text sits above the photo's
+top edge instead of on it. A row with `vertical-align: top` on the hero and
+`vertical-align: middle` on the text is the one construction that does both.

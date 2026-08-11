@@ -157,6 +157,25 @@ $snapshotCases = array(
             array('Favorite class', 'Art, but only the painting part'),
         )
     ),
+    /* THE CASE THE ALIGNMENT RULE EXISTS FOR. Everything above is shorter than
+       the hero and therefore centred against it; this one is taller, so its
+       first line has to land on the hero's top edge and the rest run on down
+       past the bottom of the photo. If this page ever comes back centred, the
+       rule has been lost. */
+    'Longer than the hero — the text hangs from its top edge' => lab_snapshot(
+        'Second grade, start to finish',
+        array(
+            array('Grade', '2nd'),
+            array('School', 'Forest North Elementary'),
+            array('Teacher', 'Ms. Devore'),
+            array('Favorite color', 'Turquoise, then green, then turquoise again'),
+            array('Dream job', 'Marine biologist'),
+            array('Favorite class', 'Art, but only the painting part'),
+            array('Best friend', 'Nora, who lives four houses down and has a trampoline'),
+            array('What she read', 'Every book in the house about sharks, twice'),
+            array('The hard part', 'Long division, which she describes as "a scam"'),
+        )
+    ),
     'A grown-up birthday — different headings entirely' => lab_snapshot(
         "Kathryn's 40th Birthday",
         array(
@@ -260,36 +279,35 @@ $geo = pdf_export_geometry();
  */
 function lab_snapshot_page(array $page, array $geo, ?string $heroUri): string
 {
-    $trimWMm = (float) $geo['trim_width_in'] * 25.4;
-    $trimHMm = (float) $geo['trim_height_in'] * 25.4;
-    $bleedMm = (float) $geo['bleed_in'] * 25.4;
-    $insetMm = $trimWMm * 0.075;
+    /* THE RECTANGLES ARE THE EXPORTER'S OWN, asked for rather than re-derived.
+       This function used to keep its own copy of the inset, the 45/55 split and
+       the centring arithmetic, which is exactly how a lab starts telling you
+       about a page that is not the page — so the maths moved into
+       pdf_snapshot_layout() and both callers read it from there.
 
-    $boxX = $bleedMm + $insetMm;
-    $boxY = $bleedMm + $insetMm;
-    $boxW = $trimWMm - (2 * $insetMm);
-    $boxH = $trimHMm - (2 * $insetMm);
-
-    $gutterMm = 8.0;
-    $heroW    = ($boxW - $gutterMm) * 0.45;
-    $textW    = ($boxW - $gutterMm) * 0.55;
-    $textX    = $boxX + $heroW + $gutterMm;
-
-    /* The book's portrait ratio, from the same constant the exporter reads,
-       and centred on the page the way pdf_draw_snapshot_page() centres it. */
-    $heroH = min($boxH, $heroW / COMPOSE_CANON['P']);
-    $heroY = $boxY + max(0.0, ($boxH - $heroH) / 2.0);
+       Including the measurement: how tall the text comes out decides whether
+       the block is the photo or the text, and the answer has to be mPDF's, not
+       the browser's, or the lab would draw a different page from the PDF for
+       the one case the alignment rule exists for. */
+    $probe    = pdf_snapshot_layout($geo, 0.0);
+    $textHtml = pdf_render_snapshot_text_html($page, 0.0);
+    $box      = pdf_snapshot_layout($geo, pdf_measure_html_height($textHtml, $probe['text_w']));
 
     $hero = $page['snapshot_hero_photo_id'] !== null && $heroUri !== null
         ? '<img src="' . $heroUri . '" style="width:100%;height:100%;object-fit:cover;">'
         : '<div style="border:0.5mm dashed #bbb;width:100%;height:100%;"></div>';
 
+    /* The centring inside the text panel is left entirely to the exporter's own
+       wrapper — a table the hero's height with a vertical-align:middle cell,
+       which a browser and mPDF agree on: shorter content centres in it, longer
+       content grows it downward from its top edge. This used to do its own flex
+       centring, which could only ever show one of those two behaviours. */
     return sprintf(
         '<div style="position:absolute;left:%.2fmm;top:%.2fmm;width:%.2fmm;height:%.2fmm;">%s</div>'
-        . '<div style="position:absolute;left:%.2fmm;top:%.2fmm;width:%.2fmm;height:%.2fmm;'
-        . 'display:flex;align-items:center;overflow:hidden;"><div style="width:100%%;">%s</div></div>',
-        $boxX, $heroY, $heroW, $heroH, $hero,
-        $textX, $boxY, $textW, $boxH, pdf_render_snapshot_text_html($page)
+        . '<div style="position:absolute;left:%.2fmm;top:%.2fmm;width:%.2fmm;height:%.2fmm;">%s</div>',
+        $box['hero_x'], $box['hero_y'], $box['hero_w'], $box['hero_h'], $hero,
+        $box['text_x'], $box['text_y'], $box['text_w'], $box['text_h'],
+        pdf_render_snapshot_text_html($page, $box['text_cell_h'])
     );
 }
 
@@ -317,7 +335,15 @@ $html = '';
 foreach ($snapshotCases as $label => $page) {
     $html .= lab_page($label, lab_snapshot_page($page, $geo, $heroUri), $geo, true);
 }
-$sections[] = array('Snapshot pages', 'Two-up: hero one side, title and sections the other. Section headings bold, body copy as it was.', $html);
+$sections[] = array(
+    'Snapshot pages',
+    'Two-up: hero one side, title and sections the other. Section headings bold, body copy as it was. '
+    . 'The pair is one block: when the text is shorter than the photo it centres against it, and when it is '
+    . 'longer it starts on the photo\'s top edge and runs down past it. Which of those happens depends on how '
+    . 'tall the text is, and that is measured by mPDF rather than by this browser — so on a long page the block '
+    . 'may sit a little higher here than the words alone would suggest. The PDF is the one being placed.',
+    $html
+);
 
 $html = '';
 foreach ($quoteCases as $label => $page) {
