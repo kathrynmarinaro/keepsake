@@ -2031,3 +2031,40 @@ STARTS and not how wide it is, so it is measured differentially: set the same
 page twice, once with a long quote and once with a short one, and the short one
 must start further right. Left-aligned, the two are identical to the hundredth
 of a point.
+
+## Backlog — asked for, not built
+
+Logged from real use, in Kathryn's words, with the shape of the work noted so
+whoever picks one up is not starting from a one-line wish. Nothing here is
+started; nothing here has a hook left in the code for it.
+
+**1. Edit text from the book layout.** "On the book layout, allow me to edit
+the text (click and it opens the detail page for the quote/anecdote/etc)."
+
+Today a text slot on the Book tab is inert — to fix a typo in a quote you go to
+the Content tab, find it, and open it there. The detail modal that would open
+already exists and is already reachable from Content (`entry-modal.js`, opened
+by `review.js` from a `.list-row`), so this is mostly a matter of making the
+slot a click target and handing the modal a type and an id. Two things to be
+careful of: the slot lives inside a page that is drag-reorderable, so a click
+has to be distinguished from the start of a drag; and the modal already
+dispatches `keepsake:entry-saved`, which the Book tab would need to listen for
+so an edited quote re-renders in place rather than going stale until reload.
+
+**2. Drop a photo out of the book from the layout.** "On the book layouts,
+allow me to 'X' out a photo and remove it from the book (i.e. it switches its
+tag to be 'skipped' and removes it from the page)."
+
+Note what this is NOT: not a delete, and not a change to the layout by hand.
+It sets the photo's own flag, which takes it out of the pool the layout engine
+draws from. The page it was on therefore has a hole in it until the layout is
+regenerated — so the honest version of this either reflows the affected page
+immediately (the reflow-from-here machinery exists) or says plainly that it
+will take effect on the next layout. Deciding which is the actual design
+question here, and it should be decided before any of it is written.
+
+No migration: the flag is `photos.skip_for_book` (a TINYINT, not a status
+enum), `photo_update()` in lib/repo.php already writes it, `review.js` already
+toggles it from the Content tab, and `layout_load_year_content()` already
+excludes it. The work is a control on the Book tab plus the reflow decision
+above.
