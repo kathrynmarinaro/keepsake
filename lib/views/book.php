@@ -80,8 +80,11 @@ function page_fmt_date(string $ymd): string
  * screen chrome for telling pages apart while reordering them, and it is
  * outside the drawn page.
  *
- * Mirrors pdf_render_snapshot_page_html() in lib/pdfexport.php field for
- * field, so the printed page matches what was reviewed here.
+ * Mirrors pdf_draw_snapshot_page() in lib/pdfexport.php: two panels, both the
+ * full height of the content box, 45/55 with a gutter. The PDF draws that page
+ * by coordinate because mPDF will not hold a table's height — which is what
+ * left it occupying the top 40% of the sheet until tools/page-lab.php made it
+ * visible. Here the same shape comes from flexbox and a fixed aspect ratio.
  */
 function render_snapshot_page(array $page): string
 {

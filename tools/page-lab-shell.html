@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keepsake — page lab</title>
+<!--
+  The shell for tools/page-lab.php. Everything inside a .page box is emitted by
+  lib/pdfexport.php and must NOT be styled from here — the whole point is to
+  look at what the exporter actually produces. The CSS below only draws the
+  furniture: the page rectangle, the trim line, and the labels around it.
+-->
+<style>
+  :root {
+    --ink: #2b3033;
+    --muted: #6b7378;
+    --line: #d8dcde;
+    --bg: #eceef0;
+    --teal: #41b7ab;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 28px 20px 60px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  header.lab-head {
+    max-width: 1400px;
+    margin: 0 auto 26px;
+    border-bottom: 2px solid var(--teal);
+    padding-bottom: 12px;
+  }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; font-weight: 600; }
+  .lab-meta { margin: 0; font-size: 0.82rem; color: var(--muted); }
+
+  .caveat {
+    max-width: 1400px;
+    margin: 0 auto 30px;
+    padding: 12px 14px;
+    background: #fff;
+    border-left: 3px solid var(--teal);
+    font-size: 0.86rem;
+    color: var(--muted);
+  }
+  .caveat strong { color: var(--ink); }
+
+  main { max-width: 1400px; margin: 0 auto; }
+
+  section { margin-bottom: 44px; }
+  h2 {
+    margin: 0 0 4px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .note { margin: 0 0 18px; font-size: 0.88rem; color: var(--muted); max-width: 70ch; }
+
+  .cases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 26px;
+    align-items: flex-start;
+  }
+
+  .page-case { margin: 0; }
+  .page-case figcaption {
+    margin-bottom: 7px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted);
+    max-width: 8.75in;
+  }
+
+  /* The page itself. Sized in mm from pdf_export_geometry(), so it is the real
+     shape at whatever scale the zoom below puts it. */
+  .page {
+    position: relative;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+    overflow: hidden;
+
+    /* mPDF's default. Stated once here rather than on every element the
+       exporter emits, so a page that forgets its own font-family looks the
+       way the PDF will rather than inheriting this document's. */
+    font-family: sans-serif;
+    color: #000;
+
+    /* Shrunk to fit a screen. transform, not a width change: scaling the box
+       would re-flow the type at a different size and the proportions are the
+       thing being judged. */
+    transform: scale(0.42);
+    transform-origin: top left;
+    margin-right: -57%;
+    margin-bottom: -58%;
+  }
+
+  /* Where the printer cuts. Everything outside it is bleed and will be lost. */
+  .page-trim {
+    position: absolute;
+    border: 1px dashed rgba(0, 0, 0, 0.18);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  @media (min-width: 2200px) {
+    .page { transform: scale(0.6); margin-right: -40%; margin-bottom: -41%; }
+  }
+</style>
+</head>
+<body>
+
+<header class="lab-head">
+  <h1>Page lab — snapshot, quote and anecdote pages</h1>
+  <p class="lab-meta"><!--META--></p>
+</header>
+
+<p class="caveat">
+  <strong>Every page below is the exact HTML the PDF exporter emits</strong>,
+  dropped into a box the real size of a page with the real content margin — so
+  where things sit and how much room they take is what will print. The dashed
+  line is the trim: anything outside it gets cut off.
+  <br><br>
+  <strong>mPDF is not a browser, though.</strong> Font metrics, table column
+  widths and line breaking differ a little, so treat this as composition and
+  proportion rather than typography to the millimetre. The page shape and the
+  margins are exact; the type will be close.
+</p>
+
+<main>
+<!--BODY-->
+</main>
+
+</body>
+</html>

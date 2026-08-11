@@ -1896,3 +1896,35 @@ dragging the anecdote along.
 (`sections.js`) is one module used by the add form and the edit modal, over
 markup PHP renders identically in both — so a snapshot's rows are in the page
 before any module runs, and the form still submits them with JS off.
+
+**tools/page-lab.php, and what it caught immediately.** The two existing labs
+prototype PHOTO pages and need a CSV export of a real library plus a folder of
+thumbnails. The pages this round added are text with at most one hero, so a
+third lab needs no export, no database and no arguments — it runs before an
+upload, which is the point of it.
+
+It renders the exporter's own output rather than a mockup: text pages go
+through `pdf_render_page_html()` whole, and snapshot pages — which are
+coordinate-drawn — get the same two rectangles computed from the same `$geo`,
+with `pdf_render_snapshot_text_html()` filling one of them. A mockup that
+drifts from the renderer is worse than no mockup.
+
+Two things came out of looking at it, neither of which any test would have
+found:
+
+The first version of the lab drew quote pages by calling the standalone
+renderer directly, skipping `pdf_render_text_page_html()`'s wrapper — so it
+showed quotes at the top of a page they will never sit at the top of. A lab
+that renders a different page from the exporter is the one failure mode that
+makes it worse than useless.
+
+And the real one: **the snapshot page was an HTML table in document flow, and
+mPDF will not hold a height for one.** A birthday with three sections occupied
+the top 40% of an 8.75in square page and left the rest blank — it read as a
+page that had failed to finish. It is now coordinate-drawn like a photos page
+(`pdf_draw_snapshot_page`), two panels at the full height of the content box,
+45/55 with a gutter, the hero cropped to its column. `pdf_draw_photos_page()`
+hit exactly this wall for exactly this reason years of commits ago; this is the
+same answer, and `verify-pdf-geometry.php` now measures both panels the same
+way it measures photo rectangles.
+

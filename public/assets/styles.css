@@ -2070,17 +2070,22 @@ h2 { font-size: 1.1rem; font-weight: 600; margin: 26px 0 10px; color: var(--head
  * page". The pill in the page's toolbar, outside this block, stays. */
 .ks-snapshot {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: stretch;
+  gap: 4%;
+  /* BOTH PANELS RUN THE FULL HEIGHT of the page, because that is what
+     pdf_draw_snapshot_page() draws — it places two rectangles of the content
+     box's full height rather than letting a table be as tall as its contents.
+     The preview stacked them top-aligned and as tall as they needed, which
+     drew a page the exporter was never going to print. */
+  height: 100%;
 }
 .ks-snapshot-hero-cell { flex: 0 0 45%; min-width: 0; }
 .ks-snapshot-hero {
   display: block;
   width: 100%;
-  /* PORTRAIT. The printed cell is a column down one side of the page, so a
-     hero cropped landscape here would flatter an arrangement the PDF does not
-     produce. 4:5 is the shape the column actually has. */
-  aspect-ratio: 4 / 5;
+  /* Full height of the column, cropped to fill — the exporter crops the hero
+     to this rectangle for the same reason. */
+  height: 100%;
   object-fit: cover;
   border-radius: 2px;
 }

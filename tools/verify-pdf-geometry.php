@@ -435,6 +435,97 @@ check('...and is inset by the same margin on the sides', abs($withSub['inset'] -
 @unlink($realCover);
 imageproc_prune_export_cache(0);
 
+/* ================================================== the snapshot page ===== */
+
+echo "\nSnapshot page — two-up, full height...\n";
+
+/* WHY THIS IS HERE. The snapshot page used to be an HTML table in document
+ * flow, and mPDF will not hold a height for one: on an 8.75in square page a
+ * birthday with three sections filled the top 40% and left the rest blank.
+ * tools/page-lab.php is what made that visible; this is what stops it coming
+ * back. It is now coordinate-drawn like a photos page, so its rectangles can
+ * be measured the same way. */
+
+$snapPage = array(
+    'page_type'              => 'snapshot',
+    'snapshot_title'         => "Emma's 8th Birthday",
+    'snapshot_date'          => '2025-04-15',
+    'snapshot_hero_photo_id' => null,   // no file on disk: placement, not imageproc
+    'snapshot_hero_original' => null,
+    'snapshot_sections'      => array(
+        array('heading' => 'Age', 'body' => '8'),
+        array('heading' => 'Height', 'body' => "3'9\""),
+    ),
+);
+
+$snapMpdf = new RecordingMpdf();
+pdf_draw_snapshot_page($snapMpdf, $snapPage, $geo);
+
+/* With no hero file the empty box and the text column are both WriteFixedPosHTML,
+   so there are two placements and no images. */
+check('the page draws two panels', count($snapMpdf->placed) === 2, count($snapMpdf->placed) . ' placed');
+
+if (count($snapMpdf->placed) === 2) {
+    list($heroBox, $textBox) = $snapMpdf->placed;
+
+    $insetMm = $boxMm * 0.075;
+    $expectX = $originMm + $insetMm;
+    $expectY = $originMm + $insetMm;
+    $expectH = $tallMm - (2 * $insetMm);
+
+    check('the hero starts at the page inset',
+        abs($heroBox['x'] - $expectX) < 0.01 && abs($heroBox['y'] - $expectY) < 0.01,
+        sprintf('hero at %.2f,%.2f expected %.2f,%.2f', $heroBox['x'], $heroBox['y'], $expectX, $expectY));
+
+    /* THE POINT OF THE WHOLE CHANGE: both panels are the full height of the
+       content box, not the height of their own contents. */
+    check('the hero panel is full height',
+        abs($heroBox['h'] - $expectH) < 0.01,
+        sprintf('%.2fmm, expected %.2fmm', $heroBox['h'], $expectH));
+    check('the text panel is full height too',
+        abs($textBox['h'] - $expectH) < 0.01,
+        sprintf('%.2fmm, expected %.2fmm', $textBox['h'], $expectH));
+
+    check('the two panels are side by side, not stacked',
+        $textBox['x'] > $heroBox['x'] + $heroBox['w'] - 0.01
+        && abs($textBox['y'] - $heroBox['y']) < 0.01);
+
+    /* 45/55 of the space left after the gutter. */
+    $contentW = $boxMm - (2 * $insetMm);
+    check('the split is 45/55 with a gutter between',
+        abs($heroBox['w'] - ($contentW - 8.0) * 0.45) < 0.01
+        && abs($textBox['w'] - ($contentW - 8.0) * 0.55) < 0.01);
+
+    /* Nothing may cross the trim. */
+    $rightEdge = $textBox['x'] + $textBox['w'];
+    $lowEdge   = $heroBox['y'] + $heroBox['h'];
+    check('nothing reaches the trim edge',
+        $heroBox['x'] >= $originMm - 0.01
+        && $rightEdge <= $originMm + $boxMm + 0.01
+        && $lowEdge <= $originMm + $tallMm + 0.01);
+
+    /* And it clears the printer's safety margin, as a consequence of the
+       inset rather than by being measured from it. */
+    check('and clears the safety margin',
+        $heroBox['x'] >= $safeMm - 0.01 && $rightEdge <= $originMm + $boxMm - ($safeMm - $originMm) + 0.01);
+
+    /* The text half carries the title and the headings, and NOT a type label. */
+    check('the text panel carries the title', str_contains($textBox['html'], '8th Birthday'));
+    check('with bold section headings', str_contains($textBox['html'], 'font-weight:bold'));
+    check('and no type label on the page',
+        !str_contains($textBox['html'], '>Birthday<') && !str_contains($textBox['html'], 'School year'));
+}
+
+/* A hero that DOES resolve is drawn as an image filling the same rectangle. */
+$withHero = $snapPage;
+$withHero['snapshot_hero_photo_id'] = 1;
+$withHero['snapshot_hero_original'] = 'uploads/original/does-not-exist.jpg';
+
+$heroMpdf = new RecordingMpdf();
+pdf_draw_snapshot_page($heroMpdf, $withHero, $geo);
+check('a hero that cannot be resolved still leaves the page whole',
+    count($heroMpdf->placed) + count($heroMpdf->drawn) === 2);
+
 printf("\n%d page drawings checked\n", $checks);
 if ($failures > 0) {
     printf("FAILED (%d)\n", $failures);

@@ -682,40 +682,113 @@ function pdf_render_text_page_html(array $page): string
 }
 
 /**
- * page_type='snapshot': the hero photo on one side, the title and sections on
- * the other. Two-up portrait, as Kathryn asked for.
+ * page_type='snapshot': the hero photo down one side, the title and sections
+ * down the other. Two-up portrait, as Kathryn asked for.
  *
- * NO TYPE LABEL. This used to open the text column with a "Birthday" / "School
- * year" pill — "I don't want the type of content shown on the page". The pill
- * in the PREVIEW's page toolbar stays; it is screen chrome, outside the page.
+ * DRAWN BY COORDINATE, like a photos page, and NOT as a table in document
+ * flow — which is what it was, and what the page lab caught. mPDF's table
+ * engine will not hold a height, so the two columns were as tall as their
+ * content and no taller: on an 8.75in square page a birthday with three
+ * sections occupied the top 40% and the rest was blank. It read as a page that
+ * had failed to finish rather than a page with room on it.
  *
- * IT USED TO READ NINE FIXED COLUMNS. A snapshot is now a title, a hero photo,
- * a date and any number of heading-and-body sections (schema.sql), which is
- * what lets one page be "Emma's 8th Birthday" and the next "Kathryn's 40th"
- * with entirely different things worth writing down.
+ * By coordinate, the hero fills the full height of its column and the text
+ * sits beside it, so the page is a spread of two panels rather than a
+ * paragraph floating at the top. pdf_draw_photos_page() above hit exactly this
+ * wall for exactly this reason; this is the same answer.
  *
- * Field for field the same as render_snapshot_page() in lib/views/book.php, so
- * the printed page matches what was reviewed on screen.
+ * THE HERO IS CROPPED TO ITS COLUMN, using the same imageproc_prepare_cached()
+ * path a photo slot uses — the column is a fixed portrait rectangle, so a
+ * landscape hero has to lose its sides to fill it. That is the one place this
+ * app crops a photo to fit a shape rather than shaping the box to the photo,
+ * and it is deliberate: "one side will be the hero image", a side being a
+ * fixed thing.
+ *
+ * NO TYPE LABEL — "I don't want the type of content shown on the page". The
+ * pill in the preview's page toolbar is screen chrome and stays.
  */
-function pdf_render_snapshot_page_html(array $page): string
+function pdf_draw_snapshot_page(\Mpdf\Mpdf $mpdf, array $page, array $geo): void
 {
-    $title    = trim((string) ($page['snapshot_title'] ?? ''));
-    $sections = $page['snapshot_sections'] ?? array();
+    /* Measured from the TRIM edge, like the composition solver — see
+     * pdf_draw_photos_page()'s note on why the safety margin must not be
+     * charged twice. */
+    $originMm = (float) $geo['bleed_in'] * 25.4;
+    $trimWMm  = (float) $geo['trim_width_in'] * 25.4;
+    $trimHMm  = (float) $geo['trim_height_in'] * 25.4;
+
+    /* The same 7.5% margin the photo solver leaves (COMPOSE_FILL), so a
+     * snapshot page sits on the same visual margin as the page before it. */
+    $insetMm = $trimWMm * 0.075;
+
+    $boxX = $originMm + $insetMm;
+    $boxY = $originMm + $insetMm;
+    $boxW = $trimWMm - (2 * $insetMm);
+    $boxH = $trimHMm - (2 * $insetMm);
+
+    /* 45/55, the split this page has always had, with a gutter taken out of
+     * the middle rather than off either panel. */
+    $gutterMm = 8.0;
+    $heroW    = ($boxW - $gutterMm) * 0.45;
+    $textW    = ($boxW - $gutterMm) * 0.55;
+    $textX    = $boxX + $heroW + $gutterMm;
+
+    /* ---- the hero column ---- */
 
     $heroAbs = null;
     if ($page['snapshot_hero_photo_id'] !== null) {
         $heroAbs = pdf_resolve_photo_file(array('original_path' => $page['snapshot_hero_original']));
     }
-    $heroCell = $heroAbs !== null
-        ? '<img src="' . pdf_esc($heroAbs) . '" style="width:100%;">'
-        : '<div style="width:100%;height:80mm;border:0.5mm dashed #bbb;"></div>';
 
-    $body = '';
+    if ($heroAbs !== null) {
+        list($maxW, $maxH) = pdf_print_pixel_budget($heroW, $boxH);
+        $prepared = imageproc_prepare_cached(
+            $heroAbs,
+            /* Centre-crop to the column. A hand crop for the hero would be a
+               new stored rectangle and a new control to set it; the cover
+               already has one and nothing has asked for a second. */
+            array('x' => 0.0, 'y' => 0.0, 'w' => 1.0, 'h' => 1.0),
+            $maxW,
+            $maxH
+        );
+        $mpdf->Image($prepared ?? $heroAbs, $boxX, $boxY, $heroW, $boxH, '', '', true, false);
+    } else {
+        /* Visible rather than blank, the same call pdf_draw_photos_page()
+           makes for a photo missing from disk: a proof should show you that
+           there is no hero, not quietly print a narrower page. */
+        $mpdf->WriteFixedPosHTML(
+            '<div style="border:0.5mm dashed #bbb;height:100%;"></div>',
+            $boxX, $boxY, $heroW, $boxH
+        );
+    }
+
+    /* ---- the text column ---- */
+
+    $mpdf->WriteFixedPosHTML(
+        pdf_render_snapshot_text_html($page),
+        $textX, $boxY, $textW, $boxH
+    );
+}
+
+/**
+ * The text half of a snapshot page: title, date, then the sections.
+ *
+ * Split out from the drawing above so the page lab can render it, and so the
+ * on-screen preview in lib/views/book.php has one thing to mirror rather than
+ * a sequence of mPDF calls.
+ */
+function pdf_render_snapshot_text_html(array $page): string
+{
+    $title    = trim((string) ($page['snapshot_title'] ?? ''));
+    $sections = $page['snapshot_sections'] ?? array();
+
+    $html = '<div style="font-family:sans-serif;">';
+
     if ($title !== '') {
-        $body .= '<div style="font-size:19pt;font-weight:bold;line-height:1.2;margin-bottom:2mm;">'
+        $html .= '<div style="font-size:19pt;font-weight:bold;line-height:1.2;margin-bottom:2mm;">'
             . pdf_esc($title) . '</div>';
     }
-    $body .= '<div style="font-size:10pt;color:#666;margin-bottom:5mm;">'
+
+    $html .= '<div style="font-size:10pt;color:#666;margin-bottom:6mm;">'
         . pdf_fmt_date((string) $page['snapshot_date']) . '</div>';
 
     foreach ($sections as $section) {
@@ -725,28 +798,22 @@ function pdf_render_snapshot_page_html(array $page): string
             continue;
         }
 
-        $body .= '<div style="margin-bottom:4mm;">';
+        $html .= '<div style="margin-bottom:4.5mm;">';
         if ($heading !== '') {
-            /* Bold, as asked. The body copy underneath is left at the weight
-               and size it always had — "the titles should be bold and the body
+            /* Bold, as asked. The body copy underneath keeps the weight and
+               size it always had — "the titles should be bold and the body
                copy is good as-is". */
-            $body .= '<div style="font-size:12pt;font-weight:bold;line-height:1.35;">'
+            $html .= '<div style="font-size:12pt;font-weight:bold;line-height:1.35;">'
                 . pdf_esc($heading) . '</div>';
         }
         if ($text !== '') {
-            $body .= '<div style="font-size:11pt;line-height:1.5;color:#333;">'
+            $html .= '<div style="font-size:11pt;line-height:1.5;color:#333;">'
                 . nl2br(pdf_esc(pdf_clip_text($text))) . '</div>';
         }
-        $body .= '</div>';
+        $html .= '</div>';
     }
 
-    return '<table style="width:100%;">'
-        . '<tr>'
-        . '<td style="width:45%;vertical-align:top;">' . $heroCell . '</td>'
-        . '<td style="width:55%;vertical-align:top;padding-left:7mm;font-family:sans-serif;">'
-        . $body
-        . '</td>'
-        . '</tr></table>';
+    return $html . '</div>';
 }
 
 /**
@@ -756,9 +823,10 @@ function pdf_render_snapshot_page_html(array $page): string
  */
 function pdf_render_page_html(array $page): string
 {
-    return $page['page_type'] === 'snapshot'
-        ? pdf_render_snapshot_page_html($page)
-        : pdf_render_text_page_html($page);
+    /* Snapshots are no longer here: they are coordinate-drawn by
+     * pdf_draw_snapshot_page(), for the same reason photos pages are. This
+     * function is now only the text pages. */
+    return pdf_render_text_page_html($page);
 }
 
 /* ------------------------------------------------------------- orchestration */
@@ -883,6 +951,11 @@ function pdf_export_build(int $yearProjectId): array
                 $choices[(int) $page['id']] ?? null,
                 book_page_caption($page, $page['slots'])
             );
+        } elseif ($page['page_type'] === 'snapshot') {
+            /* Also coordinate-drawn — see pdf_draw_snapshot_page(). It paints
+               onto the CURRENT page, so it belongs on this side of the branch
+               with the photos rather than in the WriteHTML path below. */
+            pdf_draw_snapshot_page($mpdf, $page, $geo);
         } else {
             $mpdf->WriteHTML(pdf_wrap_page(pdf_render_page_html($page), false));
         }
