@@ -317,10 +317,32 @@ async function pickHero(button) {
 
   const form = button.closest('form');
   form.querySelector('[name="hero_photo_id"]').value = photo.id;
+
+  /* The picker resolves to the whole photo row, thumb_url included, so showing
+     the picture costs one assignment. It used to write `Hero photo: #37` into
+     this element and throw the rest away. */
   const chosenEl = form.querySelector('[data-role="hero-chosen"]');
-  chosenEl.textContent = `Hero photo: #${photo.id}`;
+  const img = chosenEl.querySelector('.hero-preview-img');
+  if (img) { img.src = photo.thumb_url ?? photo.original_path ?? ''; }
   chosenEl.hidden = false;
   button.textContent = 'Change hero photo';
+}
+
+/* There was no way back to no-photo once one was picked, short of editing the
+   hidden input by hand — and a preview is exactly where you notice you chose
+   the wrong one. Clearing is local to the form; it saves with everything else
+   when Save is tapped, so a mis-tap costs a Cancel and not a photo. */
+function clearHero(button) {
+  const form = button.closest('form');
+  form.querySelector('[name="hero_photo_id"]').value = '';
+
+  const chosenEl = form.querySelector('[data-role="hero-chosen"]');
+  chosenEl.hidden = true;
+  const img = chosenEl.querySelector('.hero-preview-img');
+  if (img) { img.removeAttribute('src'); }
+
+  const pick = form.querySelector('[data-act="pick-hero"]');
+  if (pick) { pick.textContent = 'Choose hero photo (optional)'; }
 }
 
 /* ------------------------------------------------------------ event groups */
@@ -498,6 +520,10 @@ document.addEventListener('click', (event) => {
     case 'pick-hero':
       event.preventDefault();
       pickHero(el);
+      break;
+    case 'clear-hero':
+      event.preventDefault();
+      clearHero(el);
       break;
     case 'delete-group':
       event.preventDefault();

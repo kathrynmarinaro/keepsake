@@ -232,7 +232,13 @@ function render_snapshot_body(array $s): string
        summary and from a grid cell, and a body that depends on its caller
        having computed the right locals first is the bug that came out of
        splitting it off. */
-    $heroLabel = $s['hero_photo_id'] ? ('Hero photo: #' . (int) $s['hero_photo_id']) : '';
+    $hasHero = (bool) $s['hero_photo_id'];
+    /* thumb_path falls back to the original the same way every other thumbnail
+       in this file does, so a photo whose thumbnail never generated is still
+       visible here rather than leaving a broken frame. */
+    $heroThumb = $hasHero
+        ? (string) (($s['hero_thumb_path'] ?? '') ?: ($s['hero_original_path'] ?? ''))
+        : '';
 
     /* Rendered server-side rather than built by sections.js on load, so the
        saved sections are in the page before any module runs — and so the form
@@ -283,8 +289,18 @@ function render_snapshot_body(array $s): string
         <div class="field">
           <span>Hero photo</span>
           <input type="hidden" name="hero_photo_id" value="<?= h((string) ($s['hero_photo_id'] ?? '')) ?>">
-          <button type="button" class="btn-ghost" data-act="pick-hero"><?= $s['hero_photo_id'] ? 'Change hero photo' : 'Choose hero photo (optional)' ?></button>
-          <p class="hint" data-role="hero-chosen"<?= $heroLabel === '' ? ' hidden' : '' ?>><?= h($heroLabel) ?></p>
+          <?php /* THE PICTURE, not `Hero photo: #37`. An id says a photo is
+                   attached and nothing about which one, and choosing a hero by
+                   hand is a decision about whether it is the right picture.
+                   The <img> is always in the markup so review.js only has to
+                   set a src — it is the wrapper that is hidden when there is
+                   no photo, which keeps "picked one" and "removed it" as one
+                   line of JS each rather than DOM building. */ ?>
+          <div class="hero-preview" data-role="hero-chosen"<?= $hasHero ? '' : ' hidden' ?>>
+            <img class="hero-preview-img" src="<?= h($heroThumb) ?>" alt="">
+            <button type="button" class="btn-ghost hero-preview-clear" data-act="clear-hero">Remove</button>
+          </div>
+          <button type="button" class="btn-ghost" data-act="pick-hero"><?= $hasHero ? 'Change hero photo' : 'Choose hero photo (optional)' ?></button>
         </div>
 
         <p class="field-err" data-role="error"></p>
@@ -443,8 +459,6 @@ function render_entry_snapshot(array $s): string
     ob_start();
     $id = (int) $s['id'];
     $isBirthday = $s['type'] === 'birthday';
-    $heroLabel = $s['hero_photo_id'] ? ('Hero photo: #' . (int) $s['hero_photo_id']) : '';
-
     /* The collapsed line: the title if it has one, else the first couple of
        sections. It used to be built from whichever two fixed columns this
        template had; a snapshot's sections are its own now, so the summary

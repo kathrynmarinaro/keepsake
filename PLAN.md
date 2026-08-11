@@ -2069,8 +2069,9 @@ toggles it from the Content tab, and `layout_load_year_content()` already
 excludes it. The work is a control on the Book tab plus the reflow decision
 above.
 
-**3. Show the hero photo on a snapshot's detail page.** "Add a preview of the
-image for the snapshot on its detail page."
+**3. Show the hero photo on a snapshot's detail page.** ~~"Add a preview of the
+image for the snapshot on its detail page."~~ **BUILT** — see below; kept here
+because the reasoning is the record of why it needed a query change.
 
 Today the detail form proves it worked by printing `Hero photo: #37` — an id,
 which tells you a photo is attached and nothing about which one. The point of
@@ -2091,3 +2092,16 @@ Both halves need a thumbnail path the form does not currently have:
 Worth doing at the same time: a way to REMOVE the hero once set. There is
 currently no path back to no-photo short of editing the hidden input, and a
 preview is exactly where you notice you picked the wrong one.
+
+*Built.* `snapshots_for_year()` is no longer `SELECT *` — it left-joins the
+photos table for `hero_thumb_path`/`hero_original_path`, so the form can draw
+the photo on load and not only after a fresh pick. `pickHero()` sets the `<img>`
+src from the row the picker already resolved to. The `<img>` is always in the
+markup and it is the wrapper that hides, which keeps "picked one" and "removed
+it" at one line of JS each. A Remove control went in at the same time: there was
+no path back to no-photo short of editing the hidden input, and clearing is
+local to the form, so it saves with everything else and a mis-tap costs a Cancel
+rather than a photo. The fixture in `verify-screens.php` now gives one snapshot
+a hero — without that, every snapshot in the suite was heroless and the preview
+markup was never exercised, which is how a form that only ever printed an id
+passed a green suite for four rounds.

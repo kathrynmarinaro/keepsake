@@ -2486,3 +2486,34 @@ body.has-entry-modal { overflow: hidden; }
   resize: vertical;
 }
 .section-body:focus, .section-heading:focus { outline: 2px solid var(--teal); outline-offset: -1px; }
+
+/* ============ The snapshot's hero photo, on its detail form ============
+ *
+ * The form used to prove the pick had worked by printing `Hero photo: #37`.
+ * An id says a photo is attached and nothing about WHICH one, and picking a
+ * hero by hand is a decision about whether it is the right picture — so the
+ * picture is what the form shows.
+ *
+ * Capped by height rather than width so a portrait and a landscape hero take
+ * the same amount of the form: a 3:4 photo at width:100% would push the Save
+ * button off the bottom of the panel on a phone. `contain` for the same reason
+ * the picker uses it — this is a photo you are checking, not decorating with.
+ */
+.hero-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 8px;
+}
+.hero-preview-img {
+  display: block;
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  background: var(--teal-tint);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+/* Not a full-width button: it sits beside the photo it removes, and it must
+   never be the biggest tap target in a form whose main job is Save. */
+.hero-preview-clear { width: auto; flex: 0 0 auto; }

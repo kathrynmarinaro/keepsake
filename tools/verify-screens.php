@@ -201,6 +201,20 @@ foreach (array($yearId, $tripId) as $pid) {
     ));
 }
 
+/* GIVE ONE SNAPSHOT A HERO PHOTO, so the detail form has a preview to draw.
+   Without this every snapshot in the fixture is heroless and the preview markup
+   is never exercised — which is how a form that only ever printed an id got
+   through a green suite in the first place. */
+$heroPhotoId = (int) q(
+    'SELECT id FROM photos WHERE year_project_id = ? ORDER BY id LIMIT 1',
+    array($yearId)
+)->fetchColumn();
+$heroSnapId = (int) q(
+    'SELECT id FROM snapshots WHERE year_project_id = ? ORDER BY id LIMIT 1',
+    array($yearId)
+)->fetchColumn();
+snapshot_update($heroSnapId, array('hero_photo_id' => $heroPhotoId));
+
 /* A group, so the Groups view has something to draw. */
 event_group_create(array(
     'year_project_id' => $yearId,
@@ -380,6 +394,19 @@ foreach (array('all', 'photo', 'snapshot', 'quote', 'anecdote') as $t) {
 $out = render_in_child('content', 'year', array('view' => 'grid', 'type' => 'all'));
 check('the grid holds a photo cell', str_contains($out['html'], 'photo-cell-details'));
 check('the grid holds text cells', str_contains($out['html'], 'text-cell-details'));
+
+/* THE HERO PREVIEW. The form used to print `Hero photo: #37` — an id, which
+   says a photo is attached and nothing about which one. It must now show the
+   picture ON LOAD, which is the half that needed a join: the client already had
+   the photo row after a fresh pick, but snapshots_for_year() was a plain
+   SELECT * and had only the id. */
+$out = render_in_child('content', 'year', array('view' => 'timeline', 'type' => 'snapshot'));
+check('the snapshot form shows its hero photo, not its id',
+    str_contains($out['html'], 'hero-preview-img') && str_contains($out['html'], 'thumb/fixture.jpg'));
+check('...and no longer prints the id as text',
+    !str_contains($out['html'], 'Hero photo: #'));
+check('...with a way to take it off again',
+    str_contains($out['html'], 'data-act="clear-hero"'));
 
 /* And the timeline is still the timeline — the fix must not have turned every
    view into a grid. */

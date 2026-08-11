@@ -844,11 +844,28 @@ function snapshot_get(int $id): ?array
     return $row ?: null;
 }
 
-/** All snapshots for a year, chronological — Phase 3's timeline/grid view. */
+/**
+ * All snapshots for a year, chronological — Phase 3's timeline/grid view.
+ *
+ * JOINED TO THE HERO PHOTO, because the detail form has to SHOW the picked
+ * photo and not just say `Hero photo: #37`. An id tells you a photo is attached
+ * and nothing about which one, and the whole point of picking a hero by hand is
+ * deciding whether it is the right picture.
+ *
+ * A LEFT join: `hero_photo_id` is nullable and a snapshot with no photo is
+ * ordinary, not an error. The same join book_layout_pages_with_content() makes
+ * further down, for the same reason.
+ */
 function snapshots_for_year(int $yearProjectId): array
 {
     return q(
-        'SELECT * FROM snapshots WHERE year_project_id = ? ORDER BY entry_date, id',
+        'SELECT s.*,
+                hero.thumb_path    AS hero_thumb_path,
+                hero.original_path AS hero_original_path
+           FROM snapshots s
+           LEFT JOIN photos hero ON hero.id = s.hero_photo_id
+          WHERE s.year_project_id = ?
+          ORDER BY s.entry_date, s.id',
         array($yearProjectId)
     )->fetchAll();
 }
