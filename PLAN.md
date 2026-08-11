@@ -2105,3 +2105,39 @@ rather than a photo. The fixture in `verify-screens.php` now gives one snapshot
 a hero — without that, every snapshot in the suite was heroless and the preview
 markup was never exercised, which is how a form that only ever printed an id
 passed a green suite for four rounds.
+
+**4. Re-roll one page's arrangement, in place.** "On the book layout, I want a
+'refresh' button to let me try a different arrangement for one specific page. I
+find myself wanting to switch between these two layouts (for PPP) but I can't
+without redoing the whole book. I want to refresh it in the layout I'm working
+in."
+
+Reported against two real pages: the same three photos drawn as one big plus two
+stacked, versus three equal across. Both are legitimate; today choosing between
+them means generating a whole new layout version and accepting whatever it does
+to every other page.
+
+**The thing that makes this more than a button: a page's arrangement is not
+stored anywhere.** `book_pages` holds the page number, the type, the snapshot id
+and a caption override — and nothing about how its photos are placed. The
+template is re-chosen at render time by `compose_candidates()` from the slots'
+shapes plus a `$lastUsed` rotation, so the same page re-renders the same way by
+recomputation rather than by memory. Press refresh and it would revert the
+moment the page was drawn again.
+
+So the work is a column before it is a control: somewhere on `book_pages` to
+record "this page uses THIS template", which the renderer and the exporter both
+honour when set and ignore when null. Null keeps today's behaviour exactly —
+the rotation picks — so existing layouts are untouched and the migration is one
+`ALTER TABLE`.
+
+Then the button is small: cycle to the next candidate `compose_candidates()`
+offers for that page's occupants, store its name, re-render the one page. Worth
+deciding at the same time whether refresh CYCLES (predictable, and you can get
+back to where you were) or picks at random — cycling is almost certainly right
+for a page with two or three candidates, which is the common case.
+
+One consequence to be deliberate about: a stored template is a hand edit, and
+`book-layouts-reflow.php` currently rebuilds pages from scratch. Reflowing past
+a page that has been refreshed should either preserve the choice or say plainly
+that it will not.
