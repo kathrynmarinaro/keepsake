@@ -2346,3 +2346,32 @@ function cannot see the view's top-level `$projectId`. It reads a
 for it.
 
 That empties the queue.
+
+### Round 11: the cover exports as its own file
+
+> "I need the cover to export as a separate PDF file."
+
+`pdf_export_build()` takes a part — `all`, `cover`, `interior` — and the Book
+tab offers all three. `all` stays the default and stays first in the row,
+because it is the right thing for a PROOF: the whole book in order, to read
+before paying for it. The other two are what a printer wants. Lulu and Mixam
+both take the cover and the book block as separate uploads, and a single file
+with the cover as page one gets the cover bound in as the first interior page.
+
+The part is in the filename — `…-cover.pdf`, `…-interior.pdf` — because these
+two land in a Downloads folder one after the other and are then fed to an upload
+form, and two files called the same thing is how the cover gets uploaded as the
+interior.
+
+An unknown part is refused rather than falling back to `all`: handing back a
+whole book to something that asked for a cover is a mistake that only becomes
+obvious after it has been printed.
+
+**The test earned its place immediately.** An interior-only build skipped the
+cover's `AddPage()` and then skipped the between-pages one too, so nothing ever
+opened a page and mPDF drew into nowhere — `Output()` returned a buffer starting
+`q 223.88` rather than `%PDF-`. Every page-count assertion passed anyway, because
+the raw buffer still contains plausible page objects further down. What caught it
+was reading the first bytes. This file's own header had warned about exactly this
+("Image() is not something that asks" for a page); the warning is now beside the
+line that has to get it right.

@@ -1,5 +1,5 @@
 <?php
-/* GET /api/export.php?year=YYYY
+/* GET /api/export.php?id=N[&part=cover|interior|all]
  *
  * The one action brief §5.5/PLAN.md's exit criterion asks for: "a full
  * year's book exports without manual intervention." Reads the year's
@@ -48,8 +48,20 @@ if ($project === null) {
     json_error('no_year_project', 404, 'No such project.');
 }
 
+/* ?part=cover | interior | all (the default).
+ *
+ * A printer wants the cover and the book block as SEPARATE files — see
+ * lib/pdfexport.php's PDF_EXPORT_PART_* constants. An unknown value is not
+ * silently treated as "all": that would hand back a whole book to something
+ * that asked for a cover, and the difference is only obvious after it is
+ * printed. */
+$part = isset($_GET['part']) ? (string) $_GET['part'] : PDF_EXPORT_PART_ALL;
+if (!in_array($part, array(PDF_EXPORT_PART_ALL, PDF_EXPORT_PART_COVER, PDF_EXPORT_PART_INTERIOR), true)) {
+    json_error('bad_request', 400, 'Unknown export part: ' . $part);
+}
+
 try {
-    $export = pdf_export_build((int) $project['id']);
+    $export = pdf_export_build((int) $project['id'], $part);
 } catch (Throwable $e) {
     if ($e->getMessage() === 'pdf_library_missing') {
         json_error(

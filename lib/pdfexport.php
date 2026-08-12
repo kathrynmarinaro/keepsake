@@ -150,6 +150,22 @@ function pdf_require_library(): void
     }
 }
 
+/**
+ * WHICH PART OF THE BOOK A BUILD PRODUCES.
+ *
+ * A printer wants two files, not one: the cover is printed on different stock,
+ * at a different size once the spine and wrap are added, and goes through a
+ * different machine. Handing Lulu or Mixam a single PDF with the cover as page
+ * one gets the cover bound into the book block as its first interior page.
+ *
+ * ALL is what the app has always produced and stays the default, because it is
+ * the right thing for a PROOF — the whole book in one file, in order, to read
+ * before paying for it.
+ */
+const PDF_EXPORT_PART_ALL      = 'all';
+const PDF_EXPORT_PART_COVER    = 'cover';
+const PDF_EXPORT_PART_INTERIOR = 'interior';
+
 /** See this file's header. Generous on purpose — never hit by real content. */
 const PDF_EXPORT_MAX_TEXT_CHARS = 4000;
 
@@ -1098,10 +1114,14 @@ function pdf_export_resolve_layout(int $yearProjectId): array
  * browser) and tools/verify-export.php (writes it to a scratch file to
  * inspect) call the exact same code path.
  *
- * @return array{bytes:string, filename:string, page_count:int}
+ * @return array{bytes:string, filename:string, part:string, page_count:int}
  */
-function pdf_export_build(int $yearProjectId): array
+function pdf_export_build(int $yearProjectId, string $part = PDF_EXPORT_PART_ALL): array
 {
+    if (!in_array($part, array(PDF_EXPORT_PART_ALL, PDF_EXPORT_PART_COVER, PDF_EXPORT_PART_INTERIOR), true)) {
+        throw new InvalidArgumentException('bad export part: ' . $part);
+    }
+
     /* Said plainly and early, because the alternative is a "Class not found"
      * fatal from deep inside this function that reads like an application bug
      * rather than a missing upload. vendor/ is not in git and has to be put on
@@ -1144,10 +1164,23 @@ function pdf_export_build(int $yearProjectId): array
      * something that asks: called first, it draws into nowhere and the page is
      * silently short. WriteHTML used to open the document by accident, which is
      * why this was never needed before the cover became a drawn page. */
-    $mpdf->AddPage();
+    if ($part !== PDF_EXPORT_PART_INTERIOR) {
+        $mpdf->AddPage();
+        pdf_draw_cover_page($mpdf, $geo, $project, $coverPhoto);
+    }
 
-    pdf_draw_cover_page($mpdf, $geo, $project, $coverPhoto);
+    /* Nothing interior to draw when the cover is the whole file. */
+    if ($part === PDF_EXPORT_PART_COVER) {
+        $pages = array();
+    }
 
+    /* The first interior page. For a whole-book build this is the page AFTER the
+       cover; for an interior-only build it is the first page of the document,
+       and it is not optional — mPDF has no page until something asks for one,
+       and Image() is not something that asks. Without it the drawing goes
+       nowhere and Output() hands back a buffer that begins "q 223.88" instead
+       of "%PDF-". Which is exactly what it did, until the test read the first
+       bytes rather than trusting the page count. */
     if ($pages !== array()) {
         $mpdf->AddPage();
     }
@@ -1205,16 +1238,28 @@ function pdf_export_build(int $yearProjectId): array
     $slug = trim(substr(trim((string) $slug, '-'), 0, 60), '-');
     $year = (string) $project['year'];
 
+    /* The part is IN THE FILENAME, and it matters more than it looks: these two
+       files go to a printer's upload form one after the other, and two
+       downloads called the same thing is how the cover gets uploaded as the
+       interior. */
+    $suffix = array(
+        PDF_EXPORT_PART_ALL      => '',
+        PDF_EXPORT_PART_COVER    => '-cover',
+        PDF_EXPORT_PART_INTERIOR => '-interior',
+    );
+
     $filename = 'Keepsake-' . $year
         . ($slug !== '' && $slug !== $year ? '-' . $slug : '')
+        . $suffix[$part]
         . '.pdf';
 
     return array(
         'bytes'       => $bytes,
         'filename'    => $filename,
-        // cover + every book_pages row. No interior title page — see the
-        // AddPage() sequence above.
-        'page_count'  => 1 + count($pages),
+        'part'        => $part,
+        /* The cover is one page and the interior is every book_pages row. No
+           interior title page — see the AddPage() sequence above. */
+        'page_count'  => ($part === PDF_EXPORT_PART_INTERIOR ? 0 : 1) + count($pages),
     );
 }
 

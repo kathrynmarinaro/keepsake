@@ -441,6 +441,64 @@ year_project_update_title($yp, 'Our Big Year!');
 $named = pdf_export_build($yp);
 check('a renamed book downloads under its name too',
     $named['filename'] === 'Keepsake-2024-Our-Big-Year.pdf');
+/* ------------------------------------------- cover and interior as two files */
+
+/* WHY THIS IS SPLIT AT ALL. Lulu and Mixam both take the cover and the book
+   block as SEPARATE uploads; hand either of them one PDF with the cover as page
+   one and the cover is bound in as the first interior page. "all" stays the
+   default because it is the right thing for a proof — the whole book in order,
+   to read before paying for it. */
+
+$whole    = pdf_export_build($yp, PDF_EXPORT_PART_ALL);
+$cover    = pdf_export_build($yp, PDF_EXPORT_PART_COVER);
+$interior = pdf_export_build($yp, PDF_EXPORT_PART_INTERIOR);
+
+/* READ THE FIRST BYTES, not just the page count. An interior-only build with
+   no AddPage() before it draws produces a buffer that starts "q 223.88" and
+   still contains plausible-looking page objects further down — so the count
+   check passed while the file was not a PDF at all. */
+check('all three parts produce a PDF',
+    str_starts_with($cover['bytes'], '%PDF-') && str_starts_with($interior['bytes'], '%PDF-'));
+
+check('the cover is exactly one page', $cover['page_count'] === 1, (string) $cover['page_count']);
+check('the interior is every page except the cover',
+    $interior['page_count'] === $whole['page_count'] - 1,
+    $interior['page_count'] . ' vs ' . $whole['page_count'] . ' whole');
+check('...so the two parts add up to the whole book',
+    $cover['page_count'] + $interior['page_count'] === $whole['page_count']);
+
+/* The page COUNT is a promise about the file, so read it back out of the PDF
+   rather than trusting the number the builder returned about itself. */
+$countPages = static function (string $pdf): int {
+    return preg_match_all('/\/Type\s*\/Page[^s]/', $pdf);
+};
+check('the cover file really contains one page', $countPages($cover['bytes']) === 1,
+    (string) $countPages($cover['bytes']));
+check('...and the interior file really contains the rest',
+    $countPages($interior['bytes']) === $interior['page_count'],
+    $countPages($interior['bytes']) . ' pages in the file, ' . $interior['page_count'] . ' promised');
+
+/* THE FILENAMES MUST DIFFER. These two land in a Downloads folder one after
+   the other and are then uploaded to a printer's form; two files with the same
+   name is how the cover gets uploaded as the interior. */
+check('each part downloads under its own name',
+    $cover['filename'] !== $interior['filename']
+    && $cover['filename'] !== $whole['filename']
+    && str_contains($cover['filename'], '-cover')
+    && str_contains($interior['filename'], '-interior'),
+    $whole['filename'] . ' / ' . $cover['filename'] . ' / ' . $interior['filename']);
+
+/* An unknown part is refused rather than quietly treated as the whole book —
+   the difference between a cover and a whole book is only obvious after it has
+   been printed. */
+$rejected = false;
+try {
+    pdf_export_build($yp, 'front-matter');
+} catch (InvalidArgumentException $e) {
+    $rejected = true;
+}
+check('an unknown part is refused, not guessed at', $rejected);
+
 /* That the COVER carries the name is checked in tools/verify-pdf-geometry.php,
  * against the drawing call — the text in a finished PDF is compressed and
  * subsetted, so looking for it in these bytes would prove nothing either way. */
