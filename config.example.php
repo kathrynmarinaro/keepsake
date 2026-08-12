@@ -347,32 +347,35 @@ return array(
         'spine_width_in' => 0.35,
         'spine_bleed_in' => 0.8,
 
-        /* A FLOOR under the clearance between the type and the folds, not a
-         * setting you normally touch. spine_type_height below is what decides
-         * the margin in the ordinary case; this only steps in if that is set
-         * high enough to push the letters onto the fold. At the default 0.80
-         * the clearance works out at 0.035in, so this never binds. */
-        'spine_safe_in'  => 0.02,
+        /* How far to keep type off the spine's long edges, where the fold
+         * lands. The spine is a third of an inch wide, so this is the
+         * difference between a title that reads and one that runs into the
+         * hinge. */
+        'spine_safe_in'  => 0.04,
 
-        /* HOW TALL THE LETTERS ARE ACROSS THE SPINE — the skinny side — as a
-         * fraction of its width. This is the number that decides the type size,
-         * and everything else on the spine follows from it.
+        /* HOW MUCH OF THE SPINE'S LENGTH THE WORDS FILL, as a fraction of the
+         * visible spine — 0.80 leaves a tenth of the spine clear at the head
+         * and a tenth at the foot. The type size is solved BACKWARDS from this
+         * rather than being a number of points: a spine looks wrong when the
+         * words are the wrong PROPORTION of it, and the proportion is the thing
+         * that should stay fixed while the name changes.
          *
-         * 0.80 means the ink, from the top of an h to the bottom of a p, fills
-         * four fifths of the spine's width and leaves a tenth clear on each
-         * long edge. On a 0.35in spine that is 0.28in of type with 0.035in of
-         * margin either side, which comes out around 20pt.
-         *
-         * Raise it and the type crowds the folds; drop it for a quieter spine.
-         * spine_safe_in below is a floor under the clearance, so a careless
-         * value here cannot put the letters on the fold. */
-        'spine_type_height' => 0.80,
+         * It is a target, not a promise. A short name would need type taller
+         * than the spine is wide to fill 80% of its length, and there the width
+         * wins — the words come out shorter and centred, which is what a short
+         * title on a wide-ish spine should look like anyway. */
+        'spine_fill'     => 0.80,
 
-        /* THE MOST OF THE SPINE'S LENGTH the words may take. Not a target —
-         * nothing is stretched to reach it — only the point at which a long
-         * book name is shrunk so it does not run off the ends. 0.90 leaves a
-         * twentieth of the spine clear at the head and the foot. */
-        'spine_max_length' => 0.90,
+        /* HOW TALL THE LETTERS ARE, as a fraction of the spine's whole width —
+         * the ink from the top of an h to the bottom of a p. 0.55 means the
+         * type takes a bit over half the spine and leaves the rest as margin.
+         *
+         * This is the "make it smaller" dial. Type sized only by what FITS
+         * comes out as tall as the safe band allows, which is legal and looks
+         * wrong: it crowds both folds and reads as a label rather than a book.
+         * Raise it towards 0.7 for a bolder spine, drop it towards 0.45 for a
+         * quieter one. It is capped by spine_safe_in regardless. */
+        'spine_type_height' => 0.55,
 
         /* Bleed, in inches, added to EACH of the four edges — the exported
          * PDF page is trim + 2×bleed on both dimensions (8.75in x 8.75in at

@@ -580,80 +580,67 @@ $dupe = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
 check('...and does not print the same words twice',
     $dupe['spine']['text'] === 'Our Big Year', $dupe['spine']['text']);
 
-/* THE PROPORTION IS THE SPEC, AND IT IS THE SKINNY SIDE. "80% horizontally,
-   the skinny side, not the long side" — the ink from the top of an h to the
-   bottom of a p fills 80% of the spine's WIDTH, leaving a tenth clear on each
-   long edge. The type size follows from that; nothing else sets it. */
-$geoSpine = pdf_export_geometry();
-$spineWIn = $geoSpine['spine_page_w_mm'] / 25.4;
-$inkOf    = static function (array $built): float {
-    return $built['spine']['size_pt'] / 72 * (PDF_SPINE_ASC + PDF_SPINE_DESC);
-};
-
-year_project_update_title($yp, 'Our Big Year');
-year_project_update_subtitle($yp, 'the one with the puffin');
-$ordinary = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
-
-check('the type fills 80% of the spine ACROSS, the skinny side',
-    abs(($inkOf($ordinary) / $spineWIn) - 0.80) < 0.005,
-    sprintf('%.1f%% of the %.3fin width at %.1fpt',
-        $inkOf($ordinary) / $spineWIn * 100, $spineWIn, $ordinary['spine']['size_pt']));
-check('...leaving a tenth of the spine clear on each long edge',
-    abs((($spineWIn - $inkOf($ordinary)) / 2) - ($spineWIn * 0.10)) < 0.002,
-    sprintf('%.4fin clear, wanted %.4fin', ($spineWIn - $inkOf($ordinary)) / 2, $spineWIn * 0.10));
-
-/* A SHORT NAME IS THE SAME SIZE. The width rule does not care how many letters
-   there are — which is the point of sizing across rather than along. A spine
-   reading "2025" should have type the same height as one reading a sentence. */
-year_project_update_title($yp, '2025');
-year_project_update_subtitle($yp, '');
-$short = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
-check('a short name gets the same type size, not bigger',
-    abs($short['spine']['size_pt'] - $ordinary['spine']['size_pt']) < 0.01,
-    $short['spine']['size_pt'] . 'pt vs ' . $ordinary['spine']['size_pt'] . 'pt');
-
-/* THE LENGTH CAN ONLY SHRINK IT. A name too long to fit between the ends at
-   that size is reduced — the alternative is a title trimmed mid-word at the
-   head and the foot. */
+/* THE PROPORTION IS THE SPEC. "The space it takes up should be 80%, with 10%
+   above and below" — so the type size is solved backwards from that, and a long
+   name lands ON the target rather than merely under some maximum. */
 year_project_update_title($yp, 'A Really Very Long Book Name That Keeps Going And Going');
 year_project_update_subtitle($yp, 'and a subtitle that refuses to stop');
 $long = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
 
-check('a name too long for the spine is shrunk to fit its length',
-    $long['spine']['capped_by'] === 'length'
-    && $long['spine']['size_pt'] < $ordinary['spine']['size_pt'],
-    sprintf('%.1fpt, %.2fin long', $long['spine']['size_pt'], $long['spine']['width_mm'] / 25.4));
-check('...and then it does fit', 
-    $long['spine']['width_mm'] / 25.4 <= (8.5 * $geoSpine['spine_max_length']) + 0.01,
-    sprintf('%.2fin of %.2fin allowed', $long['spine']['width_mm'] / 25.4, 8.5 * $geoSpine['spine_max_length']));
-check('...and is still big enough to read', $long['spine']['size_pt'] >= 5.0);
+check('a long name is sized to fill exactly the target proportion',
+    abs($long['spine']['fill'] - 0.80) < 0.005,
+    sprintf('%.1f%% of the spine at %.1fpt', $long['spine']['fill'] * 100, $long['spine']['size_pt']));
+check('...which is what "80%, 10% above and below" means',
+    $long['spine']['capped_by'] === 'fill', $long['spine']['capped_by']);
+check('...and it is still big enough to read', $long['spine']['size_pt'] >= 5.0);
 
-/* THE INK FITS BETWEEN THE FOLDS, measured from the ASCENDER line to the
+/* THE SPINE'S WIDTH WINS WHEN THEY DISAGREE. A short name would need type
+   taller than the spine is wide to fill 80% of its length; letting the fill
+   drive there would run the letters into both folds. */
+year_project_update_title($yp, '2025');
+year_project_update_subtitle($yp, '');
+$short = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
+check('a short name is capped by how tall type may be, not stretched to fill it',
+    in_array($short['spine']['capped_by'], array('type-height', 'spine-width'), true)
+    && $short['spine']['fill'] < 0.80,
+    $short['spine']['capped_by'] . ' at ' . round($short['spine']['fill'] * 100) . '%');
+
+/* AND THE INK FITS BETWEEN THE FOLDS, measured from the ASCENDER line to the
    descender line. Not cap height: an h rises higher than an E (0.760em against
    0.729em in this face), so sizing on caps hangs every ascender past the band
    on one side while the descenders stay inside it on the other — which is both
    a fold risk and why the line looked off-centre. */
-$bandIn = $spineWIn - (2 * ($geoSpine['spine_safe_mm'] / 25.4));
-foreach (array('ordinary' => $ordinary, 'long' => $long, 'short' => $short) as $label => $built) {
-    check("the {$label} name's ink stays clear of the folds",
-        $inkOf($built) <= $bandIn + 0.0005,
-        sprintf('%.3fin of ink, %.3fin available', $inkOf($built), $bandIn));
+$geoSpine = pdf_export_geometry();
+$bandIn   = ($geoSpine['spine_page_w_mm'] - (2 * $geoSpine['spine_safe_mm'])) / 25.4;
+foreach (array('long' => $long, 'short' => $short) as $label => $built) {
+    $inkIn = $built['spine']['size_pt'] / 72 * (PDF_SPINE_ASC + PDF_SPINE_DESC);
+    check("the {$label} name's ink fits across the spine, descenders included",
+        $inkIn <= $bandIn + 0.0005,
+        sprintf('%.3fin of ink in a %.3fin band', $inkIn, $bandIn));
 }
 
 /* AND IT IS CENTRED ACROSS THE SPINE. The baseline is offset from the middle by
    half the difference between what rises and what hangs, so the INK is centred
-   rather than the baseline — measured as the clearance left on each long edge,
-   which must match. */
-foreach (array('ordinary' => $ordinary, 'long' => $long) as $label => $built) {
+   rather than the baseline — measured here as the clearance left on each long
+   edge, which must match. */
+foreach (array('long' => $long, 'short' => $short) as $label => $built) {
     $sizePt   = $built['spine']['size_pt'];
-    $centreIn = $spineWIn / 2;
+    $centreIn = $geoSpine['spine_page_w_mm'] / 25.4 / 2;
+    /* Where the baseline sits, in inches from the same edge the page is
+       measured from — mirroring pdf_draw_spine_page()'s own arithmetic. */
     $baseIn   = $centreIn + ($sizePt / 72 * (PDF_SPINE_ASC - PDF_SPINE_DESC) / 2);
-    $topGap   = $spineWIn - ($baseIn + ($sizePt / 72 * PDF_SPINE_DESC));
+    $topGap   = ($geoSpine['spine_page_w_mm'] / 25.4) - ($baseIn + ($sizePt / 72 * PDF_SPINE_DESC));
     $botGap   = $baseIn - ($sizePt / 72 * PDF_SPINE_ASC);
     check("the {$label} name sits centred across the spine, not high or low",
         abs($topGap - $botGap) < 0.002,
         sprintf('%.4fin one side, %.4fin the other', $topGap, $botGap));
 }
+
+/* SMALLER THAN THE BAND ALLOWS, on purpose. Type as tall as the band is legal
+   and looks like a label rather than a book. */
+check('the type is held below the full height of the band',
+    $short['spine']['size_pt'] / 72 * (PDF_SPINE_ASC + PDF_SPINE_DESC) <= $bandIn * 0.95,
+    sprintf('%.3fin of ink in a %.3fin band', $short['spine']['size_pt'] / 72 * (PDF_SPINE_ASC + PDF_SPINE_DESC), $bandIn));
 
 /* TITLE BOLD, SUBTITLE REGULAR. Two runs, so the PDF must select two fonts —
    one string could only ever be one of them. */

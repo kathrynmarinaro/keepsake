@@ -2550,3 +2550,18 @@ And the version listing's per-type breakdown stopped adding up, because it
 counted photo, text and snapshot pages and there was now a fourth kind. It
 counts blanks too — visible in the summary line, which is where the count of
 free spaces is most useful anyway.
+
+### Round 12, reverted: back to the smaller spine
+
+> "I don't like that update. I'm going to use the previous version instead."
+
+The 80%-across sizing is reverted. `spine_type_height` goes back to 0.55 — the
+13.9pt spine — because that is the version she is running, and a repo that
+disagrees with the deployed app is how the next delta quietly reinstates a
+change that was rejected.
+
+Kept from that round: the ascender-line centring, which was a genuine bug fix
+and is not what she objected to.
+
+The 80% reading is recorded above rather than deleted, because the arithmetic
+in it is right and someone may want it again — it is one config value away.
