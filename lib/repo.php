@@ -1454,6 +1454,11 @@ function book_layouts_for_year(int $yearProjectId): array
                   WHERE bp.book_layout_id = bl.id AND bp.page_type = 'text') AS text_pages,
                 (SELECT COUNT(*) FROM book_pages bp
                   WHERE bp.book_layout_id = bl.id AND bp.page_type = 'snapshot') AS snapshot_pages,
+                /* Counted like any other page type, because it IS one — and
+                   because without it the breakdown stops adding up to
+                   page_count the moment a book is padded to a signature. */
+                (SELECT COUNT(*) FROM book_pages bp
+                  WHERE bp.book_layout_id = bl.id AND bp.page_type = 'blank') AS blank_pages,
                 (SELECT COUNT(*) FROM book_page_photos bpp
                    JOIN book_pages bp2 ON bp2.id = bpp.book_page_id
                   WHERE bp2.book_layout_id = bl.id) AS slot_count
@@ -1484,7 +1489,7 @@ function book_layout_delete(int $id): void
  */
 function book_page_create(int $layoutId, int $pageNumber, string $pageType, ?int $snapshotId = null): int
 {
-    if (!in_array($pageType, array('photos', 'text', 'snapshot'), true)) {
+    if (!in_array($pageType, array('photos', 'text', 'snapshot', 'blank'), true)) {
         throw new InvalidArgumentException('bad page_type: ' . $pageType);
     }
 

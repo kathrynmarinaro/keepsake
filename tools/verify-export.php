@@ -499,6 +499,41 @@ try {
 }
 check('an unknown part is refused, not guessed at', $rejected);
 
+/* --------------------------------------------------- blanks are real pages -- */
+
+/* A blank page has to REACH THE PDF. It exists so the interior is a whole
+   number of signatures, and a signature the printer cannot count is no use —
+   so the check is that the file contains as many page objects as the book has
+   rows, blanks included.
+
+   The first version of this drew nothing and then `continue`d, which skipped
+   the AddPage() at the foot of the export loop: the next page was drawn on top
+   of the blank, and the book came out short. */
+$blankPid = year_project_create(2098, null, 'signatures');
+for ($i = 0; $i < 5; $i++) {
+    photo_create(array(
+        'year_project_id' => $blankPid,
+        'original_path'   => "blank-src-{$i}.jpg",
+        'thumb_path'      => "blank-src-{$i}-t.jpg",
+        'captured_at'     => sprintf('2025-02-%02d 09:00:00', $i + 1),
+        'width'           => 1200, 'height' => 800,
+    ));
+}
+$blankGen  = layout_generate($blankPid);
+$blankRows = book_pages_for_layout($blankGen['layout_id']);
+$blankCount = 0;
+foreach ($blankRows as $row) { if ($row['page_type'] === 'blank') { $blankCount++; } }
+
+check('the fixture book actually has blank pages to check', $blankCount > 0, (string) $blankCount);
+
+$blankPdf = pdf_export_build($blankPid, PDF_EXPORT_PART_INTERIOR);
+check('every page of the book reaches the PDF, blanks included',
+    preg_match_all('/\/Type\s*\/Page[^s]/', $blankPdf['bytes']) === count($blankRows),
+    preg_match_all('/\/Type\s*\/Page[^s]/', $blankPdf['bytes']) . ' in the file, '
+    . count($blankRows) . ' rows in the book');
+check('...and the interior is a whole number of signatures',
+    count($blankRows) % (int) cfg('layout.page_multiple', 4) === 0);
+
 /* ------------------------------------------------------------ the spine ---- */
 
 /* MEASURED AGAINST THE PRINTER'S OWN TEMPLATE. Mixam's 8.5x8.5 hardcover pack

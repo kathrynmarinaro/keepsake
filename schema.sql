@@ -637,7 +637,16 @@ CREATE TABLE IF NOT EXISTS book_pages (
   --              separate schema shape, so Phase 5/6/7 read "what's on this
   --              page" the same way regardless of type.
   -- 'snapshot' — brief §2.3's fixed full-page template; see snapshot_id.
-  page_type        ENUM('photos','text','snapshot') NOT NULL,
+  -- 'blank' is a REAL PAGE with nothing on it, and it is not a mistake or an
+  -- empty row left behind: a printer binds interior pages in signatures, so the
+  -- count has to be a multiple of four. Rather than let the printer pad the book
+  -- silently at the end, the layout pads itself and SHOWS the blanks, so the
+  -- spaces you could still fill are visible while you are working — "so I can
+  -- see if I need to add more images or quotes to fill in the spots".
+  --
+  -- They carry no slots and no snapshot, and they print as genuinely empty
+  -- pages, which is what the signature needs.
+  page_type        ENUM('photos','text','snapshot','blank') NOT NULL,
 
   -- Set only for page_type = 'snapshot'. CASCADE: if the snapshot itself is
   -- later deleted, this generated page is meaningless and goes with it —

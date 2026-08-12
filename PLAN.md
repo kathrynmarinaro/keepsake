@@ -2511,3 +2511,42 @@ Worth noting the two rounds cost: the size that comes out — 20.2pt — is almo
 exactly the 20.1pt of the very first version, which she said was too large. It
 was not too large. It was off-centre, because it was measured from the cap
 height, and the eye read the asymmetry as size.
+
+### Round 13: books come out in signatures
+
+> "Internal pages need to be in increments of 4 for printing. When I create a
+> layout, I want it to add blank pages to get to an increment of 4 so I can see
+> if I need to add more images or quotes to fill in the spots."
+
+A printer binds interior pages in folded signatures, so the count has to be a
+multiple of four. The printer will pad the book to suit whatever you send — the
+only question is whether you find out before or after paying for it. So the
+layout pads itself, with real `book_pages` rows of a new type, `blank`, and the
+Book tab draws them. A blank on screen is an invitation; a blank the printer
+inserted is a surprise.
+
+They are real pages in every sense. They print — an empty page is exactly what
+the signature needs — they are counted in the version summary beside the photo,
+text and snapshot pages, and `layout_generate()` reports them separately so the
+snackbar can say "28 pages, 3 blanks to fill".
+
+Nothing is padded onto an empty book: four blanks is not a more useful answer
+than none for a project with nothing in it yet.
+
+**Three things this turned up, none of them in the feature itself.**
+
+The export loop draws a page and then calls `AddPage()` for the next one. The
+blank branch was written as `continue`, which skipped that call — so the page
+after every blank was drawn ON TOP of it and the book came out short. An empty
+branch, not a continue. The test counts page objects in the finished PDF against
+rows in the book, which is what caught it.
+
+`layout_pad_to_signature()` first read its setting with `cfg()` directly, and
+`tools/verify-approved-book.php` runs without a `cfg()` at all. Everything else
+in lib/layout.php goes through `layout_tuning()`, which merges config over
+defaults AND guards for that; the padding does now too.
+
+And the version listing's per-type breakdown stopped adding up, because it
+counted photo, text and snapshot pages and there was now a fourth kind. It
+counts blanks too — visible in the summary line, which is where the count of
+free spaces is most useful anyway.

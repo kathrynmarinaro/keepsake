@@ -136,7 +136,13 @@ document.addEventListener('click', async (event) => {
         const result = await apiPost('api/book-layouts-create.php', {
           year_project_id: Number(bar.dataset.yearProject),
         });
-        showSnackbar('Version ' + result.version + ' — ' + result.pages + ' pages');
+        /* The blanks are worth saying out loud. They are the spaces still
+           free in the book, and the whole reason they are drawn rather than
+           left to the printer is so they can be filled. */
+        showSnackbar(
+          'Version ' + result.version + ' — ' + result.pages + ' pages'
+          + (result.blanks ? ', ' + result.blanks + ' blank' + (result.blanks === 1 ? '' : 's') + ' to fill' : '')
+        );
       } else {
         await apiPost('api/book-layouts-activate.php', {
           layout_id: Number(button.dataset.layout),

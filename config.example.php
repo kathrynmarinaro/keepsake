@@ -127,6 +127,15 @@ return array(
      */
     'layout' => array(
 
+        /* PRINTING BINDS IN SIGNATURES, so the interior page count has to be a
+         * multiple of this — four, for every printer worth using. A layout pads
+         * itself out to the next multiple with 'blank' pages rather than
+         * letting the printer add them silently at the end, so the spaces still
+         * free in the book are visible while there is time to fill them.
+         *
+         * Set it to 1 to turn the padding off entirely. */
+        'page_multiple' => 4,
+
         /* ---- sub-grouping within an event group (brief §4.3) ----
          * A gap of more than this many hours between two consecutive photos
          * starts a new page-group inside the same event, so "a beach

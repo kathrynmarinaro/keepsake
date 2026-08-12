@@ -141,6 +141,10 @@ function layout_tuning(): array
         // layout_merge_lone_subgroups(), and config.example.php for the
         // reasoning behind a day-ish default.
         'lone_merge_gap_hours'   => 24.0,
+        // A printer binds interior pages in folded signatures, so the count has
+        // to be a multiple of this — see layout_pad_to_signature(). 1 turns the
+        // padding off.
+        'page_multiple'          => 4,
         // REMOVED in Round 5: 'orphan_page_penalty' and 'singles_penalty'.
         // Both were scoring nudges against page sizes the bounds above now
         // forbid outright — stranding exactly one photo is structurally
@@ -1968,6 +1972,57 @@ function layout_cycle_arrangement(int $pageId): ?string
 }
 
 /**
+ * Pad a layout out to a whole number of printing signatures.
+ *
+ * A printer binds interior pages in folded signatures, so the page count has to
+ * be a multiple of four — every book in the world does this, which is why so
+ * many end with two or three empty leaves. The printer will pad the book to
+ * suit whatever you send; the question is only whether you find out.
+ *
+ * So the layout pads ITSELF, with real 'blank' pages, and the Book tab draws
+ * them. "I want it to add blank pages to get to an increment of 4 so I can see
+ * if I need to add more images or quotes to fill in the spots." A blank on
+ * screen is an invitation; a blank the printer inserted after you have paid is
+ * a surprise.
+ *
+ * Nothing is padded onto an EMPTY book. A layout with no pages at all is a
+ * project with nothing in it yet, and four blank pages is not a more useful
+ * answer than none.
+ *
+ * @return int how many blanks were added
+ */
+function layout_pad_to_signature(int $layoutId, int $multiple = 0): int
+{
+    /* Through layout_tuning() rather than cfg() directly, like every other
+       setting this file reads — it merges config over the defaults AND guards
+       for a cfg() that is not defined, which is how tools/verify-approved-book.php
+       runs. Calling cfg() here fataled that test immediately. */
+    $tuning   = layout_tuning();
+    $multiple = $multiple > 0 ? $multiple : (int) $tuning['page_multiple'];
+    if ($multiple < 2) {
+        return 0;
+    }
+
+    $pages = book_pages_for_layout($layoutId);
+    $count = count($pages);
+    if ($count === 0) {
+        return 0;
+    }
+
+    $short = ($multiple - ($count % $multiple)) % $multiple;
+    if ($short === 0) {
+        return 0;
+    }
+
+    $next = $count + 1;
+    for ($i = 0; $i < $short; $i++) {
+        book_page_create($layoutId, $next + $i, 'blank');
+    }
+
+    return $short;
+}
+
+/**
  * Re-settle a layout's arrangements after its photos have been moved around.
  *
  * WHY THIS EXISTS RATHER THAN THE PAGE SIMPLY STAYING PUT. The first version of
@@ -2016,6 +2071,10 @@ function layout_generate(int $yearProjectId): array
     $layoutId = book_layout_create($yearProjectId);
     $written  = layout_write_pages($layoutId, $pages, 1);
 
+    /* PAD TO A WHOLE SIGNATURE FIRST, so the blanks are numbered on the end of
+       the book rather than inserted into it later. */
+    $blanks = layout_pad_to_signature($layoutId);
+
     /* FREEZE THE ARRANGEMENT. From here the layout is a thing Kathryn reworks
        by hand, and a page's template must not change under her when she swaps
        two photos — see schema.sql on book_pages.template_name. */
@@ -2031,7 +2090,11 @@ function layout_generate(int $yearProjectId): array
     return array(
         'layout_id' => $layoutId,
         'version'   => $layout === null ? 0 : (int) $layout['version'],
-        'pages'     => $written,
+        'blanks'    => $blanks,
+        /* The book's real length, blanks included — it is the number the
+           printer charges for and the number the Book tab shows. $written alone
+           would say 26 for a 28-page book. */
+        'pages'     => $written + $blanks,
     );
 }
 

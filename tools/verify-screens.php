@@ -257,6 +257,11 @@ if ($quoteForPage) {
     book_page_slot_create($textPageId, 1, array('quote_id' => (int) $quoteForPage));
 }
 
+/* A BLANK PAGE, so the Book tab draws one. A layout pads itself to a whole
+   signature and the blanks are meant to be SEEN — a page type that renders as
+   nothing at all would look like a bug rather than an invitation. */
+book_page_create($layoutId, 4, 'blank');
+
 year_project_set_active_layout($yearId, $layoutId);
 
     return array(
@@ -499,6 +504,12 @@ check('every photo on a page offers a way out of the book',
     substr_count($book['html'], 'data-act="drop-photo"') === substr_count($book['html'], 'data-act="adjust-crop"'),
     substr_count($book['html'], 'data-act="drop-photo"') . ' drop vs '
     . substr_count($book['html'], 'data-act="adjust-crop"') . ' crop controls');
+
+/* The blank page draws as an invitation rather than as nothing. */
+check('a blank page is drawn, not left as an empty gap',
+    str_contains($book['html'], 'ks-blank'));
+check('...and says what it is for',
+    stripos($book['html'], 'Blank page') !== false);
 
 check('a text card links to its own entry',
     (bool) preg_match('/<a class="ks-slot ks-slot-text[^"]*"\s+href="[^"]*#entry-(quote|anecdote)-\d+"/', $book['html']),

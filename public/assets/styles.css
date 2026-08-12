@@ -2561,3 +2561,36 @@ a.ks-slot-text {
   cursor: pointer;
 }
 a.ks-slot-text:hover { outline: 2px solid var(--teal); outline-offset: -2px; }
+
+/* ============ A blank page in the book ============
+ *
+ * Drawn to be NOTICED, unlike every other page on this screen, which is drawn
+ * to look like what prints. A blank exists because the printer binds in fours;
+ * showing it is what turns "the printer will pad this" into "there are three
+ * spaces left, and I have three more photos I liked". It prints as a genuinely
+ * empty page — nothing here goes into the PDF.
+ */
+.ks-blank {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* A dashed edge inset from the page, so it reads as an empty slot rather than
+     as a page with a border printed on it. */
+  outline: 2px dashed var(--border);
+  outline-offset: -10px;
+  background: repeating-linear-gradient(
+    45deg,
+    transparent, transparent 10px,
+    var(--teal-tint) 10px, var(--teal-tint) 20px
+  );
+}
+.ks-blank-mark {
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--slate);
+  opacity: 0.5;
+}
+.ks-blank .hint { max-width: 70%; text-align: center; }

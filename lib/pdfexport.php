@@ -1499,6 +1499,16 @@ function pdf_export_build(int $yearProjectId, string $part = PDF_EXPORT_PART_ALL
                 $choices[(int) $page['id']] ?? null,
                 book_page_caption($page, $page['slots'])
             );
+        } elseif ($page['page_type'] === 'blank') {
+            /* NOTHING AT ALL, deliberately. A blank page in a book is genuinely
+               blank — no number, no mark, no "this page intentionally left
+               blank". It exists so the interior is a whole number of
+               signatures, which is what the binder folds.
+ 
+               An EMPTY BRANCH, not a `continue`: the AddPage() that starts the
+               next page is at the foot of this loop, and skipping it would draw
+               page N+1 on top of this one. Written as a continue first, which
+               is exactly what it did. */
         } elseif ($page['page_type'] === 'snapshot') {
             /* Also coordinate-drawn — see pdf_draw_snapshot_page(). It paints
                onto the CURRENT page, so it belongs on this side of the branch

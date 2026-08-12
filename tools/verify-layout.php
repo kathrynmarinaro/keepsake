@@ -844,7 +844,15 @@ check('both versions are listed for the year', count(book_layouts_for_year($yp))
 
 $summary = book_layouts_for_year($yp)[0];
 check('the listing carries a page count', (int) $summary['page_count'] === $v2['pages']);
-check('...and a per-type breakdown that adds up', (int) $summary['photo_pages'] + (int) $summary['text_pages'] + (int) $summary['snapshot_pages'] === (int) $summary['page_count']);
+/* EVERY page type, blanks included. Leaving blanks out is how a breakdown
+   silently stops adding up the moment a book is padded to a signature. */
+check('...and a per-type breakdown that adds up',
+    (int) $summary['photo_pages'] + (int) $summary['text_pages']
+    + (int) $summary['snapshot_pages'] + (int) $summary['blank_pages']
+    === (int) $summary['page_count'],
+    sprintf('%d photo + %d text + %d snapshot + %d blank vs %d total',
+        $summary['photo_pages'], $summary['text_pages'], $summary['snapshot_pages'],
+        $summary['blank_pages'], $summary['page_count']));
 
 /* A page's whole content, minus the row ids that necessarily differ between
    two versions: type, snapshot, and every occupant in slot order. Comparing
@@ -1011,6 +1019,84 @@ if ($guardPage !== null) {
 } else {
     check('the fixture has a multi-photo page to check the guards against', false);
 }
+
+/* ------------------------------------------------- signatures and blanks -- */
+
+echo "\nlayout_generate(): the book comes out a whole number of signatures...\n";
+
+/* WHY. A printer binds interior pages in folded signatures, so the count has to
+   be a multiple of four. The printer will pad the book to suit whatever you
+   send; the question is only whether you find out before or after paying. So
+   the layout pads itself, with real pages the Book tab draws — "so I can see if
+   I need to add more images or quotes to fill in the spots". */
+
+$multiple = (int) cfg('layout.page_multiple', 4);
+$padCases = array();
+
+foreach (array(1, 2, 3, 5, 9) as $n) {
+    $padPid = year_project_create(2100 + $n, null, 'signature ' . $n);
+    for ($i = 0; $i < $n; $i++) {
+        photo_create(array(
+            'year_project_id' => $padPid,
+            'original_path'   => "sig{$n}-{$i}.jpg",
+            'thumb_path'      => "sig{$n}-{$i}-t.jpg",
+            /* Days apart, so the grouper does not pack them onto one page and
+               every case really does produce a different page count. */
+            'captured_at'     => sprintf('2025-03-%02d 10:00:00', $i + 1),
+            'width'           => 1200, 'height' => 800,
+        ));
+    }
+
+    $gen   = layout_generate($padPid);
+    $rows  = book_pages_for_layout($gen['layout_id']);
+    $blank = 0;
+    foreach ($rows as $row) { if ($row['page_type'] === 'blank') { $blank++; } }
+
+    $padCases[$n] = array('total' => count($rows), 'blank' => $blank, 'reported' => $gen);
+
+    check("{$n} photo(s): the book is a whole number of signatures",
+        count($rows) % $multiple === 0,
+        count($rows) . ' pages, ' . $blank . ' of them blank');
+}
+
+/* The blanks go on the END, and they are the only pages with nothing on them. */
+$lastCase = $padCases[5];
+$rows     = book_pages_for_layout($lastCase['reported']['layout_id']);
+$seenBlank = false;
+$contentAfterBlank = false;
+foreach ($rows as $row) {
+    if ($row['page_type'] === 'blank') { $seenBlank = true; continue; }
+    if ($seenBlank) { $contentAfterBlank = true; }
+}
+check('the blanks are at the end of the book, not scattered through it',
+    !$contentAfterBlank);
+
+check('a blank page carries nothing at all',
+    (static function (array $rows): bool {
+        foreach ($rows as $row) {
+            if ($row['page_type'] === 'blank'
+                && ($row['slots'] !== array() || $row['snapshot_id'] !== null)) {
+                return false;
+            }
+        }
+        return true;
+    })($rows));
+
+/* generate() reports the book's REAL length. $written alone would say 26 for a
+   28-page book, which is the number you would then quote to a printer. */
+check('the reported page count includes the blanks',
+    $lastCase['reported']['pages'] === $lastCase['total'],
+    $lastCase['reported']['pages'] . ' reported, ' . $lastCase['total'] . ' rows');
+check('...and the blanks are reported separately, so they can be counted',
+    $lastCase['reported']['blanks'] === $lastCase['blank']);
+
+/* AN EMPTY BOOK IS NOT PADDED. Four blank pages is not a more useful answer
+   than none for a project with nothing in it yet. */
+$emptyPid = year_project_create(2199, null, 'nothing at all');
+$emptyGen = layout_generate($emptyPid);
+check('a book with no content is left empty rather than padded to four blanks',
+    $emptyGen['pages'] === 0 && $emptyGen['blanks'] === 0,
+    $emptyGen['pages'] . ' pages, ' . $emptyGen['blanks'] . ' blank');
 
 /* ------------------------------------------ taking a photo out of the book */
 
@@ -1182,7 +1268,11 @@ $lonelyRun = layout_generate($lonely);
 // Still the right answer after Round 5, and worth keeping for exactly that
 // reason: layout_merge_lone_subgroups() looks for a neighbour to pair this
 // photo with, finds a year that contains nothing else, and leaves it alone.
-check('an event group with a single photo produces a single page', $lonelyRun['pages'] === 1);
+/* ONE CONTENT PAGE, plus whatever blanks the signature needs — the padding is
+   counted separately because it is not a layout decision. */
+check('an event group with a single photo produces a single page',
+    $lonelyRun['pages'] - $lonelyRun['blanks'] === 1,
+    $lonelyRun['pages'] . ' pages of which ' . $lonelyRun['blanks'] . ' blank');
 
 check(
     'generating 2021 did not touch 2024 (year isolation)',

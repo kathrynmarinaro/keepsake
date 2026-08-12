@@ -399,7 +399,16 @@ function render_page(array $page, ?array $choice): string
         </div>
       </div>
 
-      <?php if ($type === 'snapshot'): ?>
+      <?php if ($type === 'blank'): ?>
+        <?php /* A REAL PAGE WITH NOTHING ON IT, and the one page type that is
+                 drawn to be noticed rather than to look like the book. It is
+                 here because a printer binds in fours; it is drawn because a
+                 space you can see is a space you can decide to fill. */ ?>
+        <div class="ks-blank">
+          <span class="ks-blank-mark" aria-hidden="true">+</span>
+          <p class="hint">Blank page — room for a photo, a quote or a snapshot</p>
+        </div>
+      <?php elseif ($type === 'snapshot'): ?>
         <?= render_snapshot_page($page) ?>
       <?php elseif ($type === 'text'): ?>
         <?php foreach ($page['slots'] as $slot) { echo render_text_slot($slot, true); } ?>
@@ -647,7 +656,12 @@ function render_page(array $page, ?array $choice): string
         <div class="hint version-summary">
           <?= (int) $selected['photo_pages'] ?> photo,
           <?= (int) $selected['text_pages'] ?> text,
-          <?= (int) $selected['snapshot_pages'] ?> snapshot ·
+          <?= (int) $selected['snapshot_pages'] ?> snapshot<?php
+            /* The blanks are the spaces still free in the book, so they are
+               worth counting out loud rather than hiding inside the total. */
+            if ((int) $selected['blank_pages'] > 0): ?>,
+            <strong><?= (int) $selected['blank_pages'] ?> blank</strong><?php
+            endif; ?> ·
           <?= (int) $selected['slot_count'] ?> filled slots
         </div>
 
