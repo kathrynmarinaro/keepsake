@@ -499,6 +499,92 @@ try {
 }
 check('an unknown part is refused, not guessed at', $rejected);
 
+/* ------------------------------------------------------------ the spine ---- */
+
+/* MEASURED AGAINST THE PRINTER'S OWN TEMPLATE. Mixam's 8.5x8.5 hardcover pack
+   ships a spine page of 0.35in x 10.10in — 8.50 of visible spine with 0.80 of
+   wrap above and below — and says "Spine 0.35" X 8.50"" on it. Those numbers
+   are the spec; this checks the file we produce against them rather than
+   against what the code happens to compute. */
+
+$spine = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
+
+check('the spine is a PDF', str_starts_with($spine['bytes'], '%PDF-'));
+check('...of exactly one page', $spine['page_count'] === 1);
+check('...named so it cannot be confused with the cover',
+    str_contains($spine['filename'], '-spine'));
+
+/* The page size, read out of the file. */
+$spineBoxes = array();
+if (preg_match_all('/\/MediaBox\s*\[([^\]]+)\]/', $spine['bytes'], $mb)) {
+    foreach (array_unique($mb[1]) as $box) {
+        $n = preg_split('/\s+/', trim($box));
+        $spineBoxes[] = array(round(((float) $n[2] - (float) $n[0]) / 72, 3),
+                              round(((float) $n[3] - (float) $n[1]) / 72, 3));
+    }
+}
+check('the spine page is one size', count($spineBoxes) === 1, (string) count($spineBoxes));
+if (count($spineBoxes) === 1) {
+    check('...0.35in wide, as the printer\'s template says',
+        abs($spineBoxes[0][0] - 0.35) < 0.005, $spineBoxes[0][0] . 'in');
+    check('...and 10.10in tall — 8.50 visible plus 0.80 of wrap each end',
+        abs($spineBoxes[0][1] - 10.10) < 0.005, $spineBoxes[0][1] . 'in');
+}
+
+/* The line itself: title and subtitle, joined, on ONE line. */
+year_project_update_title($yp, 'Our Big Year');
+year_project_update_subtitle($yp, 'the one with the puffin');
+$named = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
+check('the spine carries the title and the subtitle in one line',
+    $named['spine']['text'] === 'Our Big Year – the one with the puffin',
+    $named['spine']['text']);
+
+/* A subtitle that only repeats the name is not a spine. */
+year_project_update_subtitle($yp, 'Our Big Year');
+$dupe = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
+check('...and does not print the same words twice',
+    $dupe['spine']['text'] === 'Our Big Year', $dupe['spine']['text']);
+
+/* IT MUST FIT. A long name on a short spine is ordinary; letting it overflow
+   means a title trimmed off mid-word at both ends of the finished book. */
+year_project_update_title($yp, 'A Really Very Long Book Name That Keeps Going On And On Past Any Sensible Length');
+year_project_update_subtitle($yp, 'and a subtitle that also refuses to stop');
+$long = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
+
+$usableIn = 8.5 - (2 * 0.35);   // visible spine less the safe inset at each end
+check('a long name is shrunk to fit the spine, not overflowed',
+    $long['spine']['width_mm'] / 25.4 <= $usableIn + 0.01,
+    sprintf('%.2fin of %.2fin usable at %.1fpt',
+        $long['spine']['width_mm'] / 25.4, $usableIn, $long['spine']['size_pt']));
+check('...and is still big enough to read',
+    $long['spine']['size_pt'] >= 5.0, $long['spine']['size_pt'] . 'pt');
+
+/* The text is ROTATED. A spine drawn upright would be a line running off both
+   long edges of a third-of-an-inch-wide page, and the page size alone would not
+   show it. The transform is what makes it a spine. */
+$spineStreams = '';
+if (preg_match_all('/stream\r?\n(.*?)endstream/s', $long['bytes'], $ss)) {
+    foreach ($ss[1] as $c) { $d = @gzuncompress($c); if ($d !== false) { $spineStreams .= $d . "\n"; } }
+}
+/* A QUARTER TURN, not merely "some transform". The matrix mPDF emits for a
+   rotation is `a b c d e f cm`, where at 90 degrees a and d are ~0 and |b| and
+   |c| are ~1. Checking only that a transform exists passes on a page that was
+   translated and never turned, which is exactly the bug worth catching. */
+$quarterTurn = false;
+if (preg_match_all('/(-?[\\d.]+) (-?[\\d.]+) (-?[\\d.]+) (-?[\\d.]+) (-?[\\d.]+) (-?[\\d.]+) cm/', $spineStreams, $cm, PREG_SET_ORDER)) {
+    foreach ($cm as $m) {
+        if (abs((float) $m[1]) < 0.01 && abs((float) $m[4]) < 0.01
+            && abs(abs((float) $m[2]) - 1.0) < 0.01 && abs(abs((float) $m[3]) - 1.0) < 0.01) {
+            $quarterTurn = true;
+            break;
+        }
+    }
+}
+check('the line is turned a quarter turn onto the spine, not left upright', $quarterTurn);
+
+year_project_update_title($yp, 'Our Big Year!');
+year_project_update_subtitle($yp, '');
+
 /* That the COVER carries the name is checked in tools/verify-pdf-geometry.php,
  * against the drawing call — the text in a finished PDF is compressed and
  * subsetted, so looking for it in these bytes would prove nothing either way. */

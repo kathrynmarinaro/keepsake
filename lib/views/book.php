@@ -576,14 +576,19 @@ function render_page(array $page, ?array $choice): string
       <?= $layouts === array() ? 'Create layout' : 'Create new layout' ?>
     </button>
     <?php if ($project['active_book_layout_id'] !== null): ?>
-      <?php /* THREE FILES, because a printer wants two of them and you want the
-               third. Lulu and Mixam both take the cover and the book block as
-               SEPARATE uploads — hand them one file with the cover as page 1 and
-               it gets bound in as the first interior page. "Whole book" stays
-               first because it is the one for reading a proof before paying for
-               anything. */ ?>
+      <?php /* FOUR FILES: three that a hardcover printer wants as separate
+               uploads — cover, spine, book block — and the whole book, which is
+               the one for reading a proof before paying for anything. Hand a
+               printer a single file with the cover as page 1 and the cover gets
+               bound in as the first interior page.
+
+               THE SPINE'S WIDTH IS A CONFIG VALUE, not something this app can
+               work out: it depends on the page count AND the paper, so the
+               printer tells you — it is in the filename of the template they
+               send. config.example.php, export.spine_width_in. */ ?>
       <a class="btn-secondary" href="api/export.php?id=<?= $projectId ?>">Export PDF (whole book)</a>
       <a class="btn-secondary" href="api/export.php?id=<?= $projectId ?>&amp;part=cover">Export cover only</a>
+      <a class="btn-secondary" href="api/export.php?id=<?= $projectId ?>&amp;part=spine">Export spine only</a>
       <a class="btn-secondary" href="api/export.php?id=<?= $projectId ?>&amp;part=interior">Export pages only</a>
     <?php else: ?>
       <button class="btn-secondary" type="button" disabled

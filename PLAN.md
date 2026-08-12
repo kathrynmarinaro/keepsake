@@ -2375,3 +2375,42 @@ the raw buffer still contains plausible page objects further down. What caught i
 was reading the first bytes. This file's own header had warned about exactly this
 ("Image() is not something that asks" for a page); the warning is now beside the
 line that has to get it right.
+
+### Round 12: the spine as its own PDF
+
+> "I just got the templates for the printer. Add a Spine export with the title
+> and subtitle of the book in one line."
+
+**The template is the spec, and it was read rather than assumed.** Mixam's
+8.5x8.5 hardcover pack has four page sizes in it, and the text is hex-encoded
+inside compressed streams — decoding it gives the numbers straight from the
+printer:
+
+- spine: **0.35in x 8.50in visible**, on a page **0.35in x 10.10in** — 0.80in of
+  wrap above and below;
+- cover panels: 10.10in square, same 0.80 wrap;
+- body: 8.75in square, which is exactly what this app already exports.
+
+The 0.80 matters: a hardcover's boards wrap the block, so the cover parts carry
+far more bleed than the pages do. Using the interior's 0.125 would have produced
+a spine an inch and a half short.
+
+**The width is a config value, not a constant.** It depends on the page count AND
+the paper, so only the printer knows it — it is in the filename of the template
+they send (`…_Hardcover_Photo_Books_0_35.pdf`). `export.spine_width_in`.
+
+Drawn with `Text()` inside `Rotate()`, not `WriteFixedPosHTML()`. The HTML path
+lays out in a box in unrotated space and ignores the transform: asked for a line
+on a 0.35in-wide page it produced six wrapped lines of one character each,
+stacked down the page. One line whose exact centre matters wants the two calls
+that place exactly, measured with `GetStringWidth` — the same metrics that draw
+it. Long names shrink to fit rather than overflowing, because the alternative is
+a title trimmed off mid-word at both ends of the finished book.
+
+Reads top-to-bottom, the English convention: shelve it and the title is right
+way up.
+
+The test measures the produced PDF against the template's own numbers — 0.35 by
+10.10 — rather than against what the code computes, and asserts a real 90-degree
+matrix rather than merely "a transform exists", which would pass on a page that
+was translated and never turned.

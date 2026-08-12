@@ -319,6 +319,32 @@ return array(
         'trim_width_in'  => 8.5,
         'trim_height_in' => 8.5,
 
+        /* THE SPINE, for the separate spine PDF the cover printer asks for.
+         *
+         * WIDTH DEPENDS ON YOUR PAGE COUNT AND YOUR PAPER, so the printer tells
+         * you what it is — it is in the filename of the template they hand you
+         * (…_Hardcover_Photo_Books_0_35.pdf is a 0.35in spine). It is NOT
+         * something this app can work out: it knows the page count but not the
+         * stock. Change this when the printer gives you a new number, and export
+         * the spine again.
+         *
+         * The spine PAGE is this wide by trim-height + 2 × spine_bleed_in tall.
+         * Mixam's 8.5x8.5 hardcover template ships its spine page as
+         * 0.35in x 10.10in — 8.50 of visible spine with 0.80 of wrap top and
+         * bottom — and that 0.80 is NOT the same as the interior's 0.125: a
+         * hardcover's boards wrap around the block, so the cover parts carry
+         * far more bleed than the pages do.
+         */
+        'spine_width_in' => 0.35,
+        'spine_bleed_in' => 0.8,
+
+        /* How far to keep type off the spine's long edges and its ends. The
+         * spine is a third of an inch wide and the fold lands on both edges of
+         * it, so this is the difference between a title that reads and one
+         * that runs into the hinge. */
+        'spine_safe_in'  => 0.06,
+        'spine_end_safe_in' => 0.35,
+
         /* Bleed, in inches, added to EACH of the four edges — the exported
          * PDF page is trim + 2×bleed on both dimensions (8.75in x 8.75in at
          * the defaults above). THE TWO PRINTERS AGREE EXACTLY HERE, no

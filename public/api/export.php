@@ -1,5 +1,5 @@
 <?php
-/* GET /api/export.php?id=N[&part=cover|interior|all]
+/* GET /api/export.php?id=N[&part=cover|spine|interior|all]
  *
  * The one action brief §5.5/PLAN.md's exit criterion asks for: "a full
  * year's book exports without manual intervention." Reads the year's
@@ -56,7 +56,8 @@ if ($project === null) {
  * that asked for a cover, and the difference is only obvious after it is
  * printed. */
 $part = isset($_GET['part']) ? (string) $_GET['part'] : PDF_EXPORT_PART_ALL;
-if (!in_array($part, array(PDF_EXPORT_PART_ALL, PDF_EXPORT_PART_COVER, PDF_EXPORT_PART_INTERIOR), true)) {
+if (!in_array($part, array(PDF_EXPORT_PART_ALL, PDF_EXPORT_PART_COVER,
+    PDF_EXPORT_PART_INTERIOR, PDF_EXPORT_PART_SPINE), true)) {
     json_error('bad_request', 400, 'Unknown export part: ' . $part);
 }
 

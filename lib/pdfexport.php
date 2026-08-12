@@ -165,6 +165,7 @@ function pdf_require_library(): void
 const PDF_EXPORT_PART_ALL      = 'all';
 const PDF_EXPORT_PART_COVER    = 'cover';
 const PDF_EXPORT_PART_INTERIOR = 'interior';
+const PDF_EXPORT_PART_SPINE    = 'spine';
 
 /** See this file's header. Generous on purpose — never hit by real content. */
 const PDF_EXPORT_MAX_TEXT_CHARS = 4000;
@@ -199,7 +200,23 @@ function pdf_export_geometry(): array
     $pageHIn = $trimH + (2 * $bleed);
     $mmPerIn = 25.4;
 
+    /* THE SPINE IS ITS OWN PAGE AND ITS OWN BLEED. A hardcover's boards wrap
+       around the block, so the cover parts carry far more bleed than the pages
+       do — Mixam's 8.5x8.5 template ships the spine as 0.35in x 10.10in, which
+       is 8.50 of visible spine with 0.80 of wrap above and below. Using the
+       interior's 0.125 here would produce a page an inch and a half too short
+       and it would be rejected. */
+    $spineW      = (float) cfg('export.spine_width_in', 0.35);
+    $spineBleed  = (float) cfg('export.spine_bleed_in', 0.8);
+    $spineHIn    = $trimH + (2 * $spineBleed);
+
     return array(
+        'spine_width_in'     => $spineW,
+        'spine_bleed_in'     => $spineBleed,
+        'spine_page_w_mm'    => $spineW * $mmPerIn,
+        'spine_page_h_mm'    => $spineHIn * $mmPerIn,
+        'spine_safe_mm'      => (float) cfg('export.spine_safe_in', 0.06) * $mmPerIn,
+        'spine_end_safe_mm'  => (float) cfg('export.spine_end_safe_in', 0.35) * $mmPerIn,
         'trim_width_in'    => $trimW,
         'trim_height_in'   => $trimH,
         'bleed_in'         => $bleed,
@@ -749,6 +766,108 @@ function pdf_render_text_page_html(array $page): string
 }
 
 /**
+ * The spine: the book's name along it, on one line, reading top to bottom.
+ *
+ * ITS OWN PDF, because a hardcover's cover, spine and book block are three
+ * separate uploads at the printer — see PDF_EXPORT_PART_SPINE.
+ *
+ * DRAWN WITH Text() AND Rotate(), not WriteFixedPosHTML. The HTML path lays out
+ * inside a box in unrotated space and ignores the transform: asked for a line
+ * on a 0.35in-wide page it produced six wrapped lines, one character each,
+ * stacked down the page. This is one line whose exact centre matters, so it is
+ * placed with the two calls that place exactly — measured with GetStringWidth,
+ * which is the same engine that will draw it.
+ *
+ * TOP TO BOTTOM is the English-language convention: shelve the book and the
+ * title reads correctly with your head upright. Rotating the other way is what
+ * European spines do, and mixing the two on one shelf is the thing you notice.
+ *
+ * @return array{text:string, size_pt:float, width_mm:float} what it drew, so a
+ *   caller (and the test) can see whether it had to shrink to fit
+ */
+function pdf_draw_spine_page(\Mpdf\Mpdf $mpdf, array $geo, array $project): array
+{
+    $text = pdf_spine_text($project);
+
+    $pageWMm = (float) $geo['spine_page_w_mm'];
+    $pageHMm = (float) $geo['spine_page_h_mm'];
+
+    /* The usable band. Across: the spine's width less the safe inset on both
+       long edges, which is where the fold lands. Along: the visible spine, less
+       an inset at each end so the title does not run into the wrap. */
+    $bandMm  = max(1.0, $pageWMm - (2 * (float) $geo['spine_safe_mm']));
+    $lengthMm = max(
+        10.0,
+        ((float) $geo['trim_height_in'] * 25.4) - (2 * (float) $geo['spine_end_safe_mm'])
+    );
+
+    if ($text === '') {
+        return array('text' => '', 'size_pt' => 0.0, 'width_mm' => 0.0);
+    }
+
+    $mpdf->SetFont('sans', 'B');
+
+    /* SHRINK TO FIT RATHER THAN OVERFLOW. A long book name on a short spine is
+       ordinary, and the alternative — letting it run past the ends — is a title
+       trimmed off mid-word at the top and bottom of the finished book.
+       Measured, not estimated: GetStringWidth is the same metrics the drawing
+       uses. */
+    $sizePt = min(
+        /* Never taller than the band it sits in. 0.72 is cap height as a share
+           of point size for a typical sans — leaving the rest as breathing room
+           either side of the letters. */
+        ($bandMm / 25.4 * 72.0) / 0.72,
+        22.0
+    );
+
+    $widthMm = 0.0;
+    for (; $sizePt >= 5.0; $sizePt -= 0.5) {
+        $mpdf->SetFontSize($sizePt);
+        $widthMm = (float) $mpdf->GetStringWidth($text);
+        if ($widthMm <= $lengthMm) {
+            break;
+        }
+    }
+
+    /* Rotate about the page's centre, then place the line centred on that same
+       point. -90 turns the top of the text towards the spine's head. */
+    $cx = $pageWMm / 2;
+    $cy = $pageHMm / 2;
+
+    $mpdf->Rotate(-90, $cx, $cy);
+    /* Text() takes the BASELINE, so the line is nudged down by roughly half a
+       cap height to sit optically centred across the spine rather than hanging
+       above the middle. */
+    $mpdf->Text($cx - ($widthMm / 2), $cy + ($sizePt / 72 * 25.4 * 0.72 / 2), $text);
+    $mpdf->Rotate(0);
+
+    return array('text' => $text, 'size_pt' => $sizePt, 'width_mm' => $widthMm);
+}
+
+/**
+ * The one line that goes on the spine: the book's name, then its subtitle.
+ *
+ * "The title and subtitle of the book in one line." Joined with an en dash
+ * rather than a colon or a bullet — it is what a printed spine does when it has
+ * to carry both, and it reads as a pause rather than as punctuation belonging
+ * to either half.
+ *
+ * A subtitle that merely repeats the title is dropped: year_project_title()
+ * falls back to the year, and "2025 – 2025" is not a spine.
+ */
+function pdf_spine_text(array $project): string
+{
+    $title    = trim((string) year_project_title($project));
+    $subtitle = trim((string) ($project['subtitle'] ?? ''));
+
+    if ($subtitle === '' || $subtitle === $title) {
+        return $title;
+    }
+
+    return $title . ' – ' . $subtitle;
+}
+
+/**
  * page_type='snapshot': the hero photo down one side, the title and sections
  * down the other. Two-up portrait, as Kathryn asked for.
  *
@@ -1116,9 +1235,79 @@ function pdf_export_resolve_layout(int $yearProjectId): array
  *
  * @return array{bytes:string, filename:string, part:string, page_count:int}
  */
+/**
+ * What one part of a book downloads as.
+ *
+ * The name follows the book's name, so a renamed book does not arrive in the
+ * Downloads folder still called by its year. The year stays on the front
+ * regardless: it is what makes a shelf of these files sort, and what tells two
+ * books called "Our Big Year" apart. Anything not safe in a filename becomes a
+ * hyphen rather than being dropped, so two different titles cannot collapse
+ * into one name.
+ *
+ * THE PART IS IN THE NAME, and it matters more than it looks: three of these
+ * land in a Downloads folder one after another and are then fed to a printer's
+ * upload form, where cover, spine and book block are three separate fields.
+ * Three files called the same thing is how the spine gets uploaded as the
+ * cover.
+ */
+function pdf_export_filename(array $project, string $part): string
+{
+    $slug = preg_replace('/[^A-Za-z0-9]+/', '-', year_project_title($project));
+    $slug = trim(substr(trim((string) $slug, '-'), 0, 60), '-');
+    $year = (string) $project['year'];
+
+    $suffix = array(
+        PDF_EXPORT_PART_ALL      => '',
+        PDF_EXPORT_PART_COVER    => '-cover',
+        PDF_EXPORT_PART_INTERIOR => '-interior',
+        PDF_EXPORT_PART_SPINE    => '-spine',
+    );
+
+    return 'Keepsake-' . $year
+        . ($slug !== '' && $slug !== $year ? '-' . $slug : '')
+        . ($suffix[$part] ?? '')
+        . '.pdf';
+}
+
+/**
+ * The spine as its own one-page PDF, at the printer's spine size.
+ *
+ * Separate from pdf_export_build()'s document because the page is a different
+ * shape: mPDF fixes the format when the Mpdf is constructed, and a spine is
+ * 0.35in x 10.10in where every other page in this app is 8.75in square.
+ *
+ * @return array{bytes:string, filename:string, part:string, page_count:int, spine:array}
+ */
+function pdf_export_build_spine(array $project): array
+{
+    $geo = pdf_export_geometry();
+
+    $mpdf = new \Mpdf\Mpdf(array(
+        'format'        => array($geo['spine_page_w_mm'], $geo['spine_page_h_mm']),
+        'margin_left'   => 0, 'margin_right'  => 0,
+        'margin_top'    => 0, 'margin_bottom' => 0,
+        'margin_header' => 0, 'margin_footer' => 0,
+        'tempDir'       => sys_get_temp_dir() . '/keepsake-mpdf',
+    ));
+    $mpdf->SetTitle(year_project_title($project) . ' — spine');
+    $mpdf->AddPage();
+
+    $drawn = pdf_draw_spine_page($mpdf, $geo, $project);
+
+    return array(
+        'bytes'      => $mpdf->Output('', 'S'),
+        'filename'   => pdf_export_filename($project, PDF_EXPORT_PART_SPINE),
+        'part'       => PDF_EXPORT_PART_SPINE,
+        'page_count' => 1,
+        'spine'      => $drawn,
+    );
+}
+
 function pdf_export_build(int $yearProjectId, string $part = PDF_EXPORT_PART_ALL): array
 {
-    if (!in_array($part, array(PDF_EXPORT_PART_ALL, PDF_EXPORT_PART_COVER, PDF_EXPORT_PART_INTERIOR), true)) {
+    if (!in_array($part, array(PDF_EXPORT_PART_ALL, PDF_EXPORT_PART_COVER,
+        PDF_EXPORT_PART_INTERIOR, PDF_EXPORT_PART_SPINE), true)) {
         throw new InvalidArgumentException('bad export part: ' . $part);
     }
 
@@ -1133,6 +1322,14 @@ function pdf_export_build(int $yearProjectId, string $part = PDF_EXPORT_PART_ALL
     }
 
     list($project, $layout) = pdf_export_resolve_layout($yearProjectId);
+
+    /* THE SPINE LEAVES HERE. It is a different page size from every other part
+       — 0.35in x 10.10in against the book's 8.75 square — so it cannot share the
+       document this function goes on to build, and it needs neither the layout's
+       pages nor the cover photo. */
+    if ($part === PDF_EXPORT_PART_SPINE) {
+        return pdf_export_build_spine($project);
+    }
 
     $pages = book_layout_pages_with_content((int) $layout['id']);
     $geo   = pdf_export_geometry();
@@ -1228,30 +1425,7 @@ function pdf_export_build(int $yearProjectId, string $part = PDF_EXPORT_PART_ALL
     pdf_cleanup_export_crops();
     imageproc_prune_export_cache();
 
-    /* The download's name follows the book's name, so a renamed book does not
-     * arrive in the Downloads folder still called by its year. The year is kept
-     * on the front regardless: it is what makes a shelf of these files sort and
-     * makes two books called "Our Big Year" tell themselves apart. Anything not
-     * safe in a filename becomes a hyphen rather than being dropped, so two
-     * different titles cannot collapse into one name. */
-    $slug = preg_replace('/[^A-Za-z0-9]+/', '-', year_project_title($project));
-    $slug = trim(substr(trim((string) $slug, '-'), 0, 60), '-');
-    $year = (string) $project['year'];
-
-    /* The part is IN THE FILENAME, and it matters more than it looks: these two
-       files go to a printer's upload form one after the other, and two
-       downloads called the same thing is how the cover gets uploaded as the
-       interior. */
-    $suffix = array(
-        PDF_EXPORT_PART_ALL      => '',
-        PDF_EXPORT_PART_COVER    => '-cover',
-        PDF_EXPORT_PART_INTERIOR => '-interior',
-    );
-
-    $filename = 'Keepsake-' . $year
-        . ($slug !== '' && $slug !== $year ? '-' . $slug : '')
-        . $suffix[$part]
-        . '.pdf';
+    $filename = pdf_export_filename($project, $part);
 
     return array(
         'bytes'       => $bytes,
