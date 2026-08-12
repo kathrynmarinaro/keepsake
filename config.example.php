@@ -338,12 +338,24 @@ return array(
         'spine_width_in' => 0.35,
         'spine_bleed_in' => 0.8,
 
-        /* How far to keep type off the spine's long edges and its ends. The
-         * spine is a third of an inch wide and the fold lands on both edges of
-         * it, so this is the difference between a title that reads and one
-         * that runs into the hinge. */
-        'spine_safe_in'  => 0.06,
-        'spine_end_safe_in' => 0.35,
+        /* How far to keep type off the spine's long edges, where the fold
+         * lands. The spine is a third of an inch wide, so this is the
+         * difference between a title that reads and one that runs into the
+         * hinge. */
+        'spine_safe_in'  => 0.04,
+
+        /* HOW MUCH OF THE SPINE'S LENGTH THE WORDS FILL, as a fraction of the
+         * visible spine — 0.80 leaves a tenth of the spine clear at the head
+         * and a tenth at the foot. The type size is solved BACKWARDS from this
+         * rather than being a number of points: a spine looks wrong when the
+         * words are the wrong PROPORTION of it, and the proportion is the thing
+         * that should stay fixed while the name changes.
+         *
+         * It is a target, not a promise. A short name would need type taller
+         * than the spine is wide to fill 80% of its length, and there the width
+         * wins — the words come out shorter and centred, which is what a short
+         * title on a wide-ish spine should look like anyway. */
+        'spine_fill'     => 0.80,
 
         /* Bleed, in inches, added to EACH of the four edges — the exported
          * PDF page is trim + 2×bleed on both dimensions (8.75in x 8.75in at

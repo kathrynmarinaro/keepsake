@@ -167,6 +167,14 @@ const PDF_EXPORT_PART_COVER    = 'cover';
 const PDF_EXPORT_PART_INTERIOR = 'interior';
 const PDF_EXPORT_PART_SPINE    = 'spine';
 
+/* DejaVu Sans — mPDF's 'sans' — as a share of the point size. Used to work out
+ * how tall a line of spine type actually is, and where its middle falls. Cap
+ * height is how far an E rises above the baseline; the descender is how far a p
+ * hangs below it. Together they are the ink, and the ink is what has to fit
+ * between the folds. */
+const PDF_SPINE_CAP  = 0.729;
+const PDF_SPINE_DESC = 0.236;
+
 /** See this file's header. Generous on purpose — never hit by real content. */
 const PDF_EXPORT_MAX_TEXT_CHARS = 4000;
 
@@ -215,8 +223,8 @@ function pdf_export_geometry(): array
         'spine_bleed_in'     => $spineBleed,
         'spine_page_w_mm'    => $spineW * $mmPerIn,
         'spine_page_h_mm'    => $spineHIn * $mmPerIn,
-        'spine_safe_mm'      => (float) cfg('export.spine_safe_in', 0.06) * $mmPerIn,
-        'spine_end_safe_mm'  => (float) cfg('export.spine_end_safe_in', 0.35) * $mmPerIn,
+        'spine_safe_mm'      => (float) cfg('export.spine_safe_in', 0.04) * $mmPerIn,
+        'spine_fill'         => (float) cfg('export.spine_fill', 0.80),
         'trim_width_in'    => $trimW,
         'trim_height_in'   => $trimH,
         'bleed_in'         => $bleed,
@@ -771,100 +779,168 @@ function pdf_render_text_page_html(array $page): string
  * ITS OWN PDF, because a hardcover's cover, spine and book block are three
  * separate uploads at the printer — see PDF_EXPORT_PART_SPINE.
  *
+ * TITLE BOLD, SUBTITLE REGULAR, which is why this cannot be one string: the two
+ * are measured separately and placed end to end, because a single Text() call
+ * carries a single font.
+ *
+ * THE SIZE IS SOLVED BACKWARDS FROM A PROPORTION. "The space it takes up should
+ * be 80%, with 10% above and below." So rather than picking points and hoping,
+ * this measures the line at a reference size, and — width scaling linearly with
+ * point size — computes the size that makes it exactly that fraction of the
+ * visible spine. A spine looks wrong when the words are the wrong PROPORTION of
+ * it, and the proportion is the thing that should hold while the name changes.
+ *
+ * The fill is a target, not a promise, and the ACROSS dimension wins when they
+ * disagree: a short name would need type taller than the spine is wide to fill
+ * 80% of its length. Then the line comes out shorter than 80% and centred,
+ * which is what a short title on a spine should look like anyway. The returned
+ * 'fill' says which happened.
+ *
  * DRAWN WITH Text() AND Rotate(), not WriteFixedPosHTML. The HTML path lays out
  * inside a box in unrotated space and ignores the transform: asked for a line
  * on a 0.35in-wide page it produced six wrapped lines, one character each,
- * stacked down the page. This is one line whose exact centre matters, so it is
- * placed with the two calls that place exactly — measured with GetStringWidth,
- * which is the same engine that will draw it.
+ * stacked down the page.
  *
  * TOP TO BOTTOM is the English-language convention: shelve the book and the
- * title reads correctly with your head upright. Rotating the other way is what
- * European spines do, and mixing the two on one shelf is the thing you notice.
+ * title reads correctly with your head upright.
  *
- * @return array{text:string, size_pt:float, width_mm:float} what it drew, so a
- *   caller (and the test) can see whether it had to shrink to fit
+ * @return array{text:string, title:string, subtitle:string, size_pt:float,
+ *   width_mm:float, fill:float, capped_by:string}
  */
 function pdf_draw_spine_page(\Mpdf\Mpdf $mpdf, array $geo, array $project): array
 {
-    $text = pdf_spine_text($project);
+    list($title, $subtitle) = pdf_spine_parts($project);
+    $separator = $subtitle === '' ? '' : ' – ';
+    $whole     = $title . $separator . $subtitle;
+
+    $empty = array(
+        'text' => '', 'title' => '', 'subtitle' => '', 'size_pt' => 0.0,
+        'width_mm' => 0.0, 'fill' => 0.0, 'capped_by' => 'nothing-to-draw',
+    );
+    if ($title === '') {
+        return $empty;
+    }
 
     $pageWMm = (float) $geo['spine_page_w_mm'];
     $pageHMm = (float) $geo['spine_page_h_mm'];
+    $visibleMm = (float) $geo['trim_height_in'] * 25.4;
 
-    /* The usable band. Across: the spine's width less the safe inset on both
-       long edges, which is where the fold lands. Along: the visible spine, less
-       an inset at each end so the title does not run into the wrap. */
-    $bandMm  = max(1.0, $pageWMm - (2 * (float) $geo['spine_safe_mm']));
-    $lengthMm = max(
-        10.0,
-        ((float) $geo['trim_height_in'] * 25.4) - (2 * (float) $geo['spine_end_safe_mm'])
-    );
+    /* The band across the spine: its width less the safe inset at both long
+       edges, which is where the fold lands. */
+    $bandMm = max(1.0, $pageWMm - (2 * (float) $geo['spine_safe_mm']));
+    $targetMm = $visibleMm * (float) $geo['spine_fill'];
 
-    if ($text === '') {
-        return array('text' => '', 'size_pt' => 0.0, 'width_mm' => 0.0);
+    /* MEASURED AT A REFERENCE SIZE, then scaled. Text width is linear in point
+       size, so one measurement of each run answers every size — and it is the
+       same engine's metrics that will draw them. */
+    $refPt = 20.0;
+
+    $mpdf->SetFont('sans', 'B', $refPt);
+    $titleRef = (float) $mpdf->GetStringWidth($title);
+
+    $mpdf->SetFont('sans', '', $refPt);
+    $restRef = $subtitle === '' ? 0.0 : (float) $mpdf->GetStringWidth($separator . $subtitle);
+
+    $refWidth = $titleRef + $restRef;
+    if ($refWidth <= 0.0) {
+        return $empty;
     }
 
-    $mpdf->SetFont('sans', 'B');
+    /* The size that hits the target proportion exactly... */
+    $sizePt = $refPt * ($targetMm / $refWidth);
 
-    /* SHRINK TO FIT RATHER THAN OVERFLOW. A long book name on a short spine is
-       ordinary, and the alternative — letting it run past the ends — is a title
-       trimmed off mid-word at the top and bottom of the finished book.
-       Measured, not estimated: GetStringWidth is the same metrics the drawing
-       uses. */
-    $sizePt = min(
-        /* Never taller than the band it sits in. 0.72 is cap height as a share
-           of point size for a typical sans — leaving the rest as breathing room
-           either side of the letters. */
-        ($bandMm / 25.4 * 72.0) / 0.72,
-        22.0
-    );
+    /* ...capped so the LETTERS still fit across the spine, descenders included.
+       DejaVu Sans — mPDF's 'sans' — has a cap height of 0.729em and a descender
+       of 0.236em, so a line of type with both is 0.965em of ink from the top of
+       an E to the bottom of a p. Sizing on cap height alone, which is what this
+       did first, hangs every descender out past the band and towards the fold:
+       "the one with the puffin" has three of them. */
+    $maxByBand = ($bandMm / 25.4 * 72.0) / (PDF_SPINE_CAP + PDF_SPINE_DESC);
 
-    $widthMm = 0.0;
-    for (; $sizePt >= 5.0; $sizePt -= 0.5) {
-        $mpdf->SetFontSize($sizePt);
-        $widthMm = (float) $mpdf->GetStringWidth($text);
-        if ($widthMm <= $lengthMm) {
-            break;
-        }
+    $cappedBy = 'fill';
+    if ($sizePt > $maxByBand) {
+        $sizePt   = $maxByBand;
+        $cappedBy = 'spine-width';
+    }
+    if ($sizePt < 5.0) {
+        $sizePt   = 5.0;
+        $cappedBy = 'minimum-legible';
     }
 
-    /* Rotate about the page's centre, then place the line centred on that same
-       point. -90 turns the top of the text towards the spine's head. */
+    $scale      = $sizePt / $refPt;
+    $titleMm    = $titleRef * $scale;
+    $restMm     = $restRef * $scale;
+    $widthMm    = $titleMm + $restMm;
+
+    /* Rotate about the page's centre, then lay the runs out from the point that
+       centres the whole line on it. -90 turns the head of the text towards the
+       top of the spine. */
     $cx = $pageWMm / 2;
     $cy = $pageHMm / 2;
 
+    /* Text() takes the BASELINE. Centring the INK — not the baseline — means
+       offsetting by half the difference between what rises above the baseline
+       and what hangs below it, so a line with descenders sits in the middle of
+       the spine rather than high on it. */
+    $emMm     = $sizePt / 72 * 25.4;
+    $baseline = $cy + ($emMm * (PDF_SPINE_CAP - PDF_SPINE_DESC) / 2);
+    $startX   = $cx - ($widthMm / 2);
+
     $mpdf->Rotate(-90, $cx, $cy);
-    /* Text() takes the BASELINE, so the line is nudged down by roughly half a
-       cap height to sit optically centred across the spine rather than hanging
-       above the middle. */
-    $mpdf->Text($cx - ($widthMm / 2), $cy + ($sizePt / 72 * 25.4 * 0.72 / 2), $text);
+
+    $mpdf->SetFont('sans', 'B', $sizePt);
+    $mpdf->Text($startX, $baseline, $title);
+
+    if ($restMm > 0.0) {
+        $mpdf->SetFont('sans', '', $sizePt);
+        $mpdf->Text($startX + $titleMm, $baseline, $separator . $subtitle);
+    }
+
     $mpdf->Rotate(0);
 
-    return array('text' => $text, 'size_pt' => $sizePt, 'width_mm' => $widthMm);
+    return array(
+        'text'      => $whole,
+        'title'     => $title,
+        'subtitle'  => $subtitle,
+        'size_pt'   => $sizePt,
+        'width_mm'  => $widthMm,
+        'fill'      => $visibleMm > 0 ? $widthMm / $visibleMm : 0.0,
+        'capped_by' => $cappedBy,
+    );
 }
 
 /**
- * The one line that goes on the spine: the book's name, then its subtitle.
+ * The two runs that go on the spine: the book's name, then its subtitle.
  *
- * "The title and subtitle of the book in one line." Joined with an en dash
- * rather than a colon or a bullet — it is what a printed spine does when it has
- * to carry both, and it reads as a pause rather than as punctuation belonging
- * to either half.
+ * Split rather than joined because they are set differently — the title bold,
+ * the subtitle regular — and a single Text() call carries a single font.
  *
  * A subtitle that merely repeats the title is dropped: year_project_title()
  * falls back to the year, and "2025 – 2025" is not a spine.
+ *
+ * @return array{0:string, 1:string} title, subtitle
  */
-function pdf_spine_text(array $project): string
+function pdf_spine_parts(array $project): array
 {
     $title    = trim((string) year_project_title($project));
     $subtitle = trim((string) ($project['subtitle'] ?? ''));
 
-    if ($subtitle === '' || $subtitle === $title) {
-        return $title;
+    if ($subtitle === $title) {
+        $subtitle = '';
     }
 
-    return $title . ' – ' . $subtitle;
+    return array($title, $subtitle);
+}
+
+/**
+ * The spine as one string — what the two runs read as, for a filename, a
+ * document title, or a test that does not care where the bold stops.
+ */
+function pdf_spine_text(array $project): string
+{
+    list($title, $subtitle) = pdf_spine_parts($project);
+
+    return $subtitle === '' ? $title : $title . ' – ' . $subtitle;
 }
 
 /**

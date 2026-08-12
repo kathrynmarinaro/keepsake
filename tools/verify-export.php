@@ -545,19 +545,59 @@ $dupe = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
 check('...and does not print the same words twice',
     $dupe['spine']['text'] === 'Our Big Year', $dupe['spine']['text']);
 
-/* IT MUST FIT. A long name on a short spine is ordinary; letting it overflow
-   means a title trimmed off mid-word at both ends of the finished book. */
-year_project_update_title($yp, 'A Really Very Long Book Name That Keeps Going On And On Past Any Sensible Length');
-year_project_update_subtitle($yp, 'and a subtitle that also refuses to stop');
+/* THE PROPORTION IS THE SPEC. "The space it takes up should be 80%, with 10%
+   above and below" — so the type size is solved backwards from that, and a long
+   name lands ON the target rather than merely under some maximum. */
+year_project_update_title($yp, 'A Really Very Long Book Name That Keeps Going And Going');
+year_project_update_subtitle($yp, 'and a subtitle that refuses to stop');
 $long = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
 
-$usableIn = 8.5 - (2 * 0.35);   // visible spine less the safe inset at each end
-check('a long name is shrunk to fit the spine, not overflowed',
-    $long['spine']['width_mm'] / 25.4 <= $usableIn + 0.01,
-    sprintf('%.2fin of %.2fin usable at %.1fpt',
-        $long['spine']['width_mm'] / 25.4, $usableIn, $long['spine']['size_pt']));
-check('...and is still big enough to read',
-    $long['spine']['size_pt'] >= 5.0, $long['spine']['size_pt'] . 'pt');
+check('a long name is sized to fill exactly the target proportion',
+    abs($long['spine']['fill'] - 0.80) < 0.005,
+    sprintf('%.1f%% of the spine at %.1fpt', $long['spine']['fill'] * 100, $long['spine']['size_pt']));
+check('...which is what "80%, 10% above and below" means',
+    $long['spine']['capped_by'] === 'fill', $long['spine']['capped_by']);
+check('...and it is still big enough to read', $long['spine']['size_pt'] >= 5.0);
+
+/* THE SPINE'S WIDTH WINS WHEN THEY DISAGREE. A short name would need type
+   taller than the spine is wide to fill 80% of its length; letting the fill
+   drive there would run the letters into both folds. */
+year_project_update_title($yp, '2025');
+year_project_update_subtitle($yp, '');
+$short = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
+check('a short name is capped by the spine\'s width, not stretched to fill it',
+    $short['spine']['capped_by'] === 'spine-width' && $short['spine']['fill'] < 0.80);
+
+/* AND THE INK FITS BETWEEN THE FOLDS — cap height AND descenders. Sizing on cap
+   height alone, which this did first, hangs every p and g out past the band
+   and towards the fold. */
+$geoSpine = pdf_export_geometry();
+$bandIn   = ($geoSpine['spine_page_w_mm'] - (2 * $geoSpine['spine_safe_mm'])) / 25.4;
+foreach (array('long' => $long, 'short' => $short) as $label => $built) {
+    $inkIn = $built['spine']['size_pt'] / 72 * (PDF_SPINE_CAP + PDF_SPINE_DESC);
+    check("the {$label} name's ink fits across the spine, descenders included",
+        $inkIn <= $bandIn + 0.0005,
+        sprintf('%.3fin of ink in a %.3fin band', $inkIn, $bandIn));
+}
+
+/* TITLE BOLD, SUBTITLE REGULAR. Two runs, so the PDF must select two fonts —
+   one string could only ever be one of them. */
+year_project_update_title($yp, 'Our Big Year');
+year_project_update_subtitle($yp, 'the one with the puffin');
+$twoRuns = pdf_export_build($yp, PDF_EXPORT_PART_SPINE);
+check('the title and the subtitle are separate runs',
+    $twoRuns['spine']['title'] === 'Our Big Year'
+    && $twoRuns['spine']['subtitle'] === 'the one with the puffin');
+
+$spineFonts = '';
+if (preg_match_all('/stream\r?\n(.*?)endstream/s', $twoRuns['bytes'], $sf)) {
+    foreach ($sf[1] as $c) { $d = @gzuncompress($c); if ($d !== false) { $spineFonts .= $d . "\n"; } }
+}
+preg_match_all('/\/(F\d+) [\d.]+ Tf/', $spineFonts, $fonts);
+check('...set in two different fonts, which is the bold and the regular',
+    count(array_unique($fonts[1] ?? array())) >= 2,
+    implode(',', array_unique($fonts[1] ?? array())));
+
 
 /* The text is ROTATED. A spine drawn upright would be a line running off both
    long edges of a third-of-an-inch-wide page, and the page size alone would not

@@ -2414,3 +2414,40 @@ The test measures the produced PDF against the template's own numbers — 0.35 b
 10.10 — rather than against what the code computes, and asserts a real 90-degree
 matrix rather than merely "a transform exists", which would pass on a page that
 was translated and never turned.
+
+### Round 12, refined: bold title, regular subtitle, sized by proportion
+
+> "Title in bold, subtitle in regular… the space it takes up should be 80%, with
+> 10% above and below. Adjust the font size to make that happen."
+
+Two runs rather than one string — a single `Text()` call carries a single font —
+measured separately and laid end to end.
+
+The size is now **solved backwards from the proportion**: measure the line once
+at a reference size, and since width is linear in point size, compute the size
+that makes it exactly 80% of the visible spine. A spine looks wrong when the
+words are the wrong proportion of it, and the proportion is what should hold
+while the name changes.
+
+**Two things the request runs into, both physical.**
+
+The first is descenders. Sizing on cap height alone — which the first version did
+— hangs every p and g past the safe band and towards the fold, and "the one with
+the puffin" has three. The size now accounts for the whole ink height, cap plus
+descender (0.729 + 0.236 em in DejaVu Sans), and the baseline is offset to centre
+the INK rather than the baseline.
+
+The second is that **80% is not always reachable, and the spine's width has to
+win.** A 0.35in spine with a 0.04in inset each side leaves a 0.27in band, which
+caps type at about 20pt. "Emma's Year – the one with the puffin" reaches 59% at
+that size; filling 80% would need 27.5pt, whose ink is 0.368in — wider than the
+spine itself. Letting the fill drive would run the letters through both folds.
+So the fill is a target, the width is a limit, and the build reports which one
+bound it (`capped_by`).
+
+A longer name hits 80% exactly, which is what the test asserts; a short one is
+capped and centred, which is what a short title on a spine should look like.
+
+If 80% matters more than the type size, the lever is tracking — letter-spacing
+the line out to the target rather than growing it. Not built: it changes how the
+words look, and that is a taste question rather than a correctness one.
