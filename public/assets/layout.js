@@ -18,12 +18,6 @@
  *   2. Subtitle tap-to-edit and cover-photo pick — brief §4.6, Phase 6. The
  *      subtitle wiring is the literal same pattern review.js already uses
  *      (same endpoint, same inline-edit.js call) — not re-derived here.
- *   3. "Reflow from here" — POSTs to api/book-layouts-reflow.php, which is a
- *      thin wrapper over lib/layout.php's layout_reflow_from(). Reloads on
- *      success: pages from that point on are wholesale replaced, and this
- *      screen has no per-page patch logic to keep in sync with what that
- *      function just did (same "structural change reloads" rule review.js's
- *      own header documents for merge/split/delete).
  *   4. Drag-and-drop, PHOTOS ONLY (see lib/repo.php's book_page_slot_swap()/
  *      _move() for why): native HTML5 drag events, not swipe.js/reorder.js —
  *      neither fits. swipe.js is a single-row delete gesture; reorder.js
@@ -45,7 +39,7 @@
  *      page between side-by-side and stacked) — sometimes on both the
  *      source AND destination page for a move. There is no longer a DOM
  *      patch that's "fully described by these two nodes", so this now
- *      follows the same reload rule reflow/generate/activate already use.
+ *      follows the same reload rule generate/activate already use.
  *
  *   7. Deleting a layout version — removes one generated version and its
  *      pages (api/book-layouts-delete.php), after a confirm that names what
@@ -155,11 +149,6 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  if (action === 'reflow') {
-    await reflowFrom(button);
-    return;
-  }
-
   if (action === 'rename-project') {
     /* The SAME dialog the kebab's "Rename" opens — one function, called from
        both places, because Kathryn asked for the two interactions to match and
@@ -189,39 +178,6 @@ document.addEventListener('click', async (event) => {
     await adjustCrop(button);
   }
 });
-
-/* -------------------------------------------------------------- reflow --- */
-
-async function reflowFrom(button) {
-  const page = Number(button.dataset.page);
-  const layoutId = Number(document.querySelector('.ks-book')?.dataset.layoutId);
-  if (!layoutId || !page) { return; }
-
-  /* Says out loud that a hand-arranged order does not survive this. Reflow
-     rebuilds page ROWS from that point on, so any pages you dragged into place
-     after it go back to the order the engine picks. Pages before it are
-     genuinely untouched, order included. */
-  if (!window.confirm(
-    `Reflow from page ${page} onward? Every page from ${page} to the end of `
-    + 'this version is regenerated, including any pages you dragged into a '
-    + 'different order after it. Pages before it are never touched.'
-  )) {
-    return;
-  }
-
-  button.disabled = true;
-  try {
-    const result = await apiPost('api/book-layouts-reflow.php', {
-      layout_id: layoutId,
-      from_page_number: page,
-    });
-    showSnackbar(`Reflowed from page ${result.from} — ${result.pages} pages regenerated.`);
-    window.location.reload();
-  } catch (err) {
-    button.disabled = false;
-    showSnackbar(describe(err), { isError: true });
-  }
-}
 
 /* --------------------------------------------------------- cover photo --- */
 

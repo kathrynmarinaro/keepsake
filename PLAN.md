@@ -2224,3 +2224,41 @@ apart from the start of a drag.
 that can break an existing book; it is deliberately first and deliberately
 null-defaulted so that it cannot. Phases 3, 4 and 5 are each independently
 shippable after it.
+
+### Round 10, built: Phases 1 and 2
+
+**Phase 1 — the arrangement is frozen.** `book_pages` gained `template_name` and
+`template_order`, both nullable; `layout_generate()` writes them through a new
+`layout_freeze_arrangements()` pass; and one reader,
+`layout_page_arrangements()`, replaced the `compose_assign()` loop that the
+preview and the exporter each kept a copy of. Null still means "decide it the
+old way", so every layout already on the server renders exactly as before.
+
+Two things worth recording because neither was visible from the plan:
+
+*The freeze has to read the JOINED rows.* `book_pages_for_layout()` returns
+`book_page_photos` rows alone, with no width or height on them, so
+`compose_occupants()` sees every slot as a shapeless wildcard. Freezing from
+that view would have written an arrangement chosen without knowing which photos
+were portrait, and it would then have disagreed with the preview and the
+exporter, which both read `book_layout_pages_with_content()`. Found by
+disabling the stored path to check the new test could fail — and discovering it
+could not, because no slot the test could see had a shape at all.
+
+*The obvious version of the test is vacuous.* "Swap two photos and the
+arrangement does not change" passes against the bug if the two photos are the
+same shape, because the derived answer would not have changed either. The test
+now insists on swapping a portrait for a landscape, and that requirement is
+written down beside it. Verified both ways: it fails with the stored path
+disabled and passes with it.
+
+**Phase 2 — reflow is gone.** `public/api/book-layouts-reflow.php`,
+`layout_reflow_from()`, the button, its JS, and its test block are deleted. Two
+parameters it used to be the only caller of — `layout_plan()`'s `$historySeed`
+and `layout_load_year_content()`'s `$exclude` — are kept, documented as always
+empty now, because they are the seams anything that appends to an existing book
+would need. `compose_assign()`'s docblock, which argued FOR deriving rather than
+storing, now records that the argument was overturned and why.
+
+Phases 3, 4 and 5 (refresh one page, drop a photo, edit text from the layout)
+are unstarted and independently shippable.

@@ -2,7 +2,7 @@
 /* Print-ready PDF export — Phase 7, brief §5.5.
  *
  * READS, NEVER RECOMPUTES. Everything this file renders was already decided
- * by Phase 5's layout_generate()/layout_reflow_from() and possibly hand-
+ * by Phase 5's layout_generate() and possibly hand-
  * adjusted by Phase 6's drag-and-drop — this is exactly the arrangement
  * lib/repo.php's book_layout_pages_with_content() already returns, turned
  * into PDF drawing calls instead of HTML for a browser. If a page looks
@@ -1152,23 +1152,11 @@ function pdf_export_build(int $yearProjectId): array
         $mpdf->AddPage();
     }
 
-    /* Template choice for the WHOLE book at once, exactly as public/layout.php
-     * does it — see compose_assign(). Doing it per page would pick the same
-     * template every time, and doing it differently here from the preview would
-     * mean the printed book quietly disagreed with the screen Kathryn approved
-     * it on. Same function, same input, same answer. */
-    $choices    = array();
-    $photoPages = array();
-    $occupants  = array();
-    foreach ($pages as $page) {
-        if ($page['page_type'] === 'photos' && $page['slots'] !== array()) {
-            $photoPages[] = (int) $page['id'];
-            $occupants[]  = compose_occupants($page['slots']);
-        }
-    }
-    foreach (compose_assign($occupants) as $i => $choice) {
-        $choices[$photoPages[$i]] = $choice;
-    }
+    /* Template choice for the WHOLE book at once, through the same reader the
+     * preview uses — layout_page_arrangements(). It has to be the same answer
+     * as the screen the book was approved on, and the only way to guarantee
+     * that is for there to be one function rather than two that match. */
+    $choices = layout_page_arrangements($pages);
 
     /* Explicit AddPage() between pages rather than page-break-after in markup.
      * A photos page is drawn with the coordinate API, which paints onto the

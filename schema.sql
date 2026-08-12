@@ -674,6 +674,25 @@ CREATE TABLE IF NOT EXISTS book_pages (
   -- she is looking at is a one-tap fix.
   caption_override TEXT NULL,
 
+  -- THE ARRANGEMENT, FROZEN. Which compose.php template draws this page, and in
+  -- what occupant order (a comma-separated list of indices, e.g. "0,2,1").
+  --
+  -- These exist because a layout is something Kathryn REWORKS BY HAND. Until
+  -- Round 10 the template was recomputed at render time by compose_assign()
+  -- from the slot shapes plus a rotation over the whole book, and that function
+  -- argued for deriving rather than storing on the grounds that a derived
+  -- choice cannot disagree with itself after a swap. True while the machine
+  -- owned the layout; false the moment a person does — swapping two photos on
+  -- page 4 could change how page 4 was drawn, and through the rotation the
+  -- pages after it. Storing it is only safe because "reflow from here" was
+  -- removed in the same round; deriving it was only safe while reflow existed.
+  --
+  -- NULL means "decide it the old way". Every layout generated before this
+  -- column existed therefore renders exactly as it did, with no migration
+  -- beyond the ALTER TABLE.
+  template_name    VARCHAR(40) NULL,
+  template_order   VARCHAR(60) NULL,
+
   PRIMARY KEY (id),
 
   -- Serves rendering a layout in order (Phase 6's page-by-page review, and

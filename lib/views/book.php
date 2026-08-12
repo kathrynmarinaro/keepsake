@@ -93,7 +93,7 @@ function page_fmt_date(string $ymd): string
  *
  * NO TYPE LABEL. It used to print a "Birthday" / "School year" pill at the top
  * of the text column — "I don't want the type of content shown on the page".
- * The pill in the page's TOOLBAR, next to "Reflow from here", stays: that is
+ * The pill in the page's TOOLBAR stays: that is
  * screen chrome for telling pages apart while reordering them, and it is
  * outside the drawn page.
  *
@@ -319,7 +319,7 @@ function render_page_canvas(array $slots, ?array $choice, string $caption, int $
     return '<div class="ks-page-canvas">' . $inner . '</div>';
 }
 
-/** One page card: header, reflow button, and whichever body its page_type calls for. */
+/** One page card: header, and whichever body its page_type calls for. */
 function render_page(array $page, ?array $choice): string
 {
     ob_start();
@@ -345,9 +345,6 @@ function render_page(array $page, ?array $choice): string
         <strong class="ks-page-label">Page <?= (int) $page['page_number'] ?></strong>
         <div class="row ks-page-actions">
           <span class="pill<?= $type === 'photos' ? '' : ' is-plain' ?>"><?= h($type) ?></span>
-          <button type="button" class="btn-ghost" data-act="reflow" data-page="<?= (int) $page['page_number'] ?>">
-            Reflow from here
-          </button>
         </div>
       </div>
 
@@ -357,7 +354,7 @@ function render_page(array $page, ?array $choice): string
         <?php foreach ($page['slots'] as $slot) { echo render_text_slot($slot, true); } ?>
       <?php elseif ($page['slots'] === array()): ?>
         <?php // Phase 6's known gap: moving the only photo off a page can leave
-              // an empty book_pages row until a reflow — see lib/pdfexport.php's
+              // an empty book_pages row — see lib/pdfexport.php's
               // identical fail-soft case. ?>
         <p class="hint">(empty page)</p>
       <?php else: ?>
@@ -625,27 +622,22 @@ function render_page(array $page, ?array $choice): string
           another photo to swap them, or onto a different page's background to
           move it there. Text cards aren't drag targets. Tap
           <span aria-hidden="true">⤢</span> on a photo to adjust how it's
-          cropped on this page. “Reflow from here” regenerates every page from
-          that one to the end of the book — including any you moved by hand
-          after it. The pages before it are never touched.
+          cropped on this page. Nothing in this version rearranges itself: it was
+          settled when you created it, and only you change it from here.
         </p>
         <?php
-          /* Template choice is a property of the SEQUENCE, not of one page —
+          /* Frozen at generation and read back here — see
+             layout_page_arrangements(). Template choice is a property of the
+             SEQUENCE, not of one page —
              interchangeable layouts rotate by least-recently-used so a book of
              portraits is not the same arrangement forty times over. So it is
              computed once for the whole layout here and handed down, which is
              also what lets lib/pdfexport.php arrive at the same answer. */
-          $choices = array();
-          $photoPages = array();
-          foreach ($pages as $page) {
-              if ($page['page_type'] === 'photos' && $page['slots'] !== array()) {
-                  $photoPages[] = (int) $page['id'];
-                  $occupants[]  = compose_occupants($page['slots']);
-              }
-          }
-          foreach (compose_assign($occupants ?? array()) as $i => $choice) {
-              $choices[$photoPages[$i]] = $choice;
-          }
+          /* One reader, shared with the exporter — see
+             layout_page_arrangements(). This used to run the compose_assign()
+             loop here and again in lib/pdfexport.php, agreeing only because
+             both ran the same function on the same input. */
+          $choices = layout_page_arrangements($pages);
         ?>
         <div class="ks-book" data-layout-id="<?= (int) $selected['id'] ?>">
           <?php foreach (array_chunk($pages, 2) as $spread): ?>

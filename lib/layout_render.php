@@ -156,3 +156,4 @@ function cover_band_metrics(bool $hasSubtitle, float $safeFrac): array
         'title_top'  => COVER_BAND_PAD,
     );
 }
+

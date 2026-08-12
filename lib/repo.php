@@ -1388,7 +1388,7 @@ function event_group_delete(int $id): void
  *
  * VERSIONS ARE NEVER OVERWRITTEN (brief §4.5). There is deliberately no
  * "replace this layout's pages" function: generating again means
- * book_layout_create() and a new version, and reflowing means
+ * book_layout_create() and a new version, and regenerating means
  * book_layout_delete_pages_from() inside one version. Those are the only two
  * ways pages ever change, so there is no third path for a future caller to
  * reach for by accident.
@@ -1495,6 +1495,38 @@ function book_page_create(int $layoutId, int $pageNumber, string $pageType, ?int
     );
 
     return (int) db()->lastInsertId();
+}
+
+/**
+ * Freeze which template draws a page, and in what occupant order.
+ *
+ * Written once by layout_generate() as it builds the layout, and again by the
+ * per-page refresh control. See schema.sql's comment on book_pages.template_name
+ * for WHY a layout stores this rather than working it out again every render.
+ *
+ * Passing null for either clears both, which puts the page back to being
+ * decided the old way — the state every page generated before Round 10 is in.
+ */
+function book_page_set_arrangement(int $pageId, ?string $templateName, ?array $order): void
+{
+    $name = $templateName !== null && trim($templateName) !== '' ? trim($templateName) : null;
+
+    /* Stored as a comma-separated list rather than JSON: it is a handful of
+       small integers, it is read by exactly one function, and a malformed one
+       has to degrade to "decide it the old way" rather than throw — which is
+       easier to guarantee about a string of digits than about a JSON document. */
+    $encoded = null;
+    if ($name !== null && $order !== null && $order !== array()) {
+        $encoded = implode(',', array_map('intval', array_values($order)));
+    }
+    if ($encoded === null) {
+        $name = null;
+    }
+
+    q(
+        'UPDATE book_pages SET template_name = ?, template_order = ? WHERE id = ?',
+        array($name, $encoded, $pageId)
+    );
 }
 
 /**
@@ -1729,7 +1761,7 @@ function book_page_slot_set_crop(int $slotId, ?array $rect): bool
  * defense-in-depth every other year-isolation check in this app also gets.
  *
  * Fails soft (returns false, changes nothing) rather than throwing: a stale
- * drag target — the other slot was deleted by a reflow that ran in another
+ * drag target — the other slot was deleted by something that ran in another
  * tab, say — degrades this one action instead of crashing the screen.
  */
 function book_page_slot_swap(int $slotIdA, int $slotIdB): bool
@@ -1773,7 +1805,7 @@ function book_page_slot_swap(int $slotIdA, int $slotIdB): bool
  * SAME-LAYOUT ONLY, same reasoning as the swap above.
  *
  * Fails soft (returns false, changes nothing): a full destination page, a bad
- * slot_number, a stale page id (deleted by a reflow since the drag started),
+ * slot_number, a stale page id (deleted since the drag started),
  * or a source slot that no longer holds a photo all leave the layout exactly
  * as it was rather than throwing mid-drag.
  *
@@ -1982,7 +2014,7 @@ function book_page_delete_and_renumber(int $pageId): bool
 /**
  * Every page of a layout in page order, each carrying its own 'slots' list in
  * slot order. Two queries, not one per page: a full year's book is ~100 pages
- * and every reader of this (reflow, the preview screen, Phase 6, Phase 7)
+ * and every reader of this (the preview screen, Phase 6, Phase 7)
  * wants all of them.
  */
 function book_pages_for_layout(int $layoutId): array

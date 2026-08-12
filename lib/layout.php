@@ -19,9 +19,12 @@
  *        v
  *   layout_write_pages()        page specs -> book_pages/book_page_photos
  *
- * layout_generate() runs all three against a new book_layouts row.
- * layout_reflow_from() runs all three again inside an EXISTING layout,
- * starting at a given page number — see its own comment.
+ * layout_generate() runs all three against a new book_layouts row, and then
+ * freezes each page's arrangement — see layout_freeze_arrangements(). That is
+ * the only path that writes pages. There was a second, "reflow from here",
+ * which regenerated an existing layout from a given page onward; it was removed
+ * in Round 10 because a layout is now something Kathryn reworks by hand and
+ * nothing may rebuild it under her.
  *
  * ==================================================== WHAT DECIDES A PAGE
  *
@@ -1341,8 +1344,11 @@ function layout_text_slot(array $text): array
  *     groups: list<array>       event_groups rows
  *   }
  * @param array $historySeed page densities already in the book ahead of this
- *   plan — empty for a fresh generation, the retained pages' sizes for a
- *   reflow, so the rhythm continues from what Kathryn is already looking at.
+ *   plan, so the rhythm continues from them rather than restarting. Always
+ *   empty now that generation is the only caller — it existed for "reflow from
+ *   here", which had pages before its starting point to continue from. Kept
+ *   because the density rhythm is the one thing that WOULD need it if pages
+ *   are ever appended to an existing book.
  * @return list<array{page_type:string, snapshot_id:?int, slots:list<array>}>
  */
 function layout_plan(array $content, array $tuning, array $historySeed = array()): array
@@ -1625,8 +1631,9 @@ function layout_plan(array $content, array $tuning, array $historySeed = array()
  *     cover would be a surprise. Flagged here rather than decided silently.
  *
  * @param array $exclude array{photo?:list<int>, quote?:list<int>,
- *   anecdote?:list<int>, snapshot?:list<int>} — content already spoken for,
- *   used by layout_reflow_from() to leave the retained pages' content alone.
+ *   anecdote?:list<int>, snapshot?:list<int>} — content already spoken for.
+ *   Always empty now that generation is the only caller; it existed so "reflow
+ *   from here" could leave the retained pages' content alone.
  */
 function layout_load_year_content(int $yearProjectId, array $exclude = array()): array
 {
@@ -1742,6 +1749,130 @@ function layout_write_pages(int $layoutId, array $pages, int $startPageNumber = 
 }
 
 /**
+ * Which template draws each photos page of a layout, keyed by page id.
+ *
+ * THE ONE PLACE THIS IS DECIDED. The preview (lib/views/book.php) and the
+ * exporter (lib/pdfexport.php) each used to run the compose_assign() loop
+ * themselves. They agreed only because they ran the same function over the same
+ * input — which is a coincidence maintained by hand, and exactly the sort that
+ * stops being true the first time one of them learns about a stored choice and
+ * the other does not.
+ *
+ * A page that has an arrangement stored uses it. A page that does not is
+ * decided the old way, by compose_assign() over the whole sequence — see
+ * schema.sql on book_pages.template_name for why new layouts store it and
+ * existing ones do not.
+ *
+ * A STORED CHOICE THAT NO LONGER FITS IS IGNORED rather than drawn. If the
+ * template has since been renamed out of the library, or the page has gained or
+ * lost a photo since it was frozen, the stored order no longer describes this
+ * page and honouring it would draw a page with a photo missing or repeated.
+ * Falling back is visible and correct; obeying a stale record is neither.
+ *
+ * @param list<array> $pages book_pages rows, each with its 'slots'
+ * @return array<int, array{name:string,order:list<int>}|null> by page id
+ */
+function layout_page_arrangements(array $pages): array
+{
+    $photoPages = array();
+    $occupants  = array();
+
+    foreach ($pages as $page) {
+        if ($page['page_type'] === 'photos' && $page['slots'] !== array()) {
+            $photoPages[] = $page;
+            $occupants[]  = compose_occupants($page['slots']);
+        }
+    }
+
+    /* Derived for the whole run regardless, because the rotation that stops
+       four identical pages using one template is a property of the SEQUENCE —
+       so it cannot be computed for only the pages that need it. */
+    $derived = compose_assign($occupants);
+
+    $out = array();
+    foreach ($photoPages as $i => $page) {
+        $out[(int) $page['id']] = layout_stored_arrangement($page, count($occupants[$i]))
+            ?? ($derived[$i] ?? null);
+    }
+
+    return $out;
+}
+
+/**
+ * A page's frozen arrangement, or null if it has none or it no longer fits.
+ *
+ * Split out so the checks are in one readable place and so the refresh control
+ * can ask "what is this page set to?" without re-deriving the whole book.
+ */
+function layout_stored_arrangement(array $page, int $occupantCount): ?array
+{
+    $name = trim((string) ($page['template_name'] ?? ''));
+    $raw  = trim((string) ($page['template_order'] ?? ''));
+    if ($name === '' || $raw === '') {
+        return null;
+    }
+
+    $templates = compose_templates();
+    if (!isset($templates[$name])) {
+        return null;   // renamed or removed from the library since it was frozen
+    }
+
+    $order = array_map('intval', explode(',', $raw));
+    if (count($order) !== $occupantCount) {
+        return null;   // the page gained or lost a photo since it was frozen
+    }
+
+    /* Every occupant placed exactly once. A duplicated index would print one
+       photo twice and drop another. */
+    $seen = $order;
+    sort($seen);
+    if ($seen !== range(0, $occupantCount - 1)) {
+        return null;
+    }
+
+    if (count($templates[$name]['slots']) !== $occupantCount) {
+        return null;   // the template itself changed shape
+    }
+
+    return array('name' => $name, 'order' => $order);
+}
+
+/**
+ * Write down which template draws each photos page of a freshly generated
+ * layout, so that nothing recomputes it later.
+ *
+ * Deliberately a SEPARATE PASS over the finished layout rather than something
+ * layout_write_pages() does as it goes: the choice depends on the whole
+ * sequence — the rotation in compose_assign() is what stops four similar pages
+ * being drawn four identical ways — so it cannot be made one page at a time,
+ * and the pages have to exist before it can be.
+ *
+ * It reads through layout_page_arrangements(), the same function the preview
+ * and the exporter read through. At this moment nothing is stored yet, so what
+ * comes back is the derived answer; storing it is what makes every later render
+ * agree with this one.
+ */
+function layout_freeze_arrangements(int $layoutId): void
+{
+    /* book_layout_pages_with_content(), NOT book_pages_for_layout(). The first
+       joins the photos table; the second returns book_page_photos rows alone,
+       with no width or height on them — so compose_occupants() would see every
+       slot as a shapeless wildcard and freeze an arrangement chosen without
+       knowing which photos were portrait. It would then disagree with the
+       preview and the exporter, which both read the joined rows. Caught by
+       disabling the stored path and finding the freeze test had nothing to
+       swap, because no slot it could see had a shape at all. */
+    $pages = book_layout_pages_with_content($layoutId);
+
+    foreach (layout_page_arrangements($pages) as $pageId => $choice) {
+        if ($choice === null) {
+            continue;   // no template accepts this page; leave it derived
+        }
+        book_page_set_arrangement((int) $pageId, $choice['name'], $choice['order']);
+    }
+}
+
+/**
  * "Create Book Layout" (brief §5.3) for one year: a NEW book_layouts row every
  * time, never an overwrite (brief §4.5, schema.sql's book_layouts comment), so
  * Kathryn can generate v2, dislike it, and still have v1 exactly as it was.
@@ -1763,6 +1894,11 @@ function layout_generate(int $yearProjectId): array
     $layoutId = book_layout_create($yearProjectId);
     $written  = layout_write_pages($layoutId, $pages, 1);
 
+    /* FREEZE THE ARRANGEMENT. From here the layout is a thing Kathryn reworks
+       by hand, and a page's template must not change under her when she swaps
+       two photos — see schema.sql on book_pages.template_name. */
+    layout_freeze_arrangements($layoutId);
+
     $project = year_project_get($yearProjectId);
     if ($project !== null && $project['active_book_layout_id'] === null) {
         year_project_set_active_layout($yearProjectId, $layoutId);
@@ -1777,68 +1913,3 @@ function layout_generate(int $yearProjectId): array
     );
 }
 
-/**
- * Brief §4.5's "reflow from here": regenerate this layout from $fromPageNumber
- * onward, leaving every earlier page exactly as it is — including whatever
- * Kathryn changed by hand there (that is the whole point; §4.5's "local by
- * default" edits live on those pages).
- *
- * The rule that makes it work is simple and worth stating: EVERYTHING ON THE
- * RETAINED PAGES IS SPOKEN FOR. The content on pages 1..N-1 is collected and
- * excluded, the rest of the year is re-planned from scratch, and the result is
- * numbered from N. Two consequences, both correct and both deliberate:
- *
- *   - a photo Kathryn dragged onto page 2 will not turn up again on page 40;
- *   - a photo she dragged OFF page 2 becomes available again and is placed
- *     downstream, rather than vanishing from the book.
- *
- * The variety heuristic is seeded from the retained pages' own sizes, so page
- * N doesn't restart the rhythm as though the book began there.
- *
- * @return array{from:int, kept:int, pages:int}
- */
-function layout_reflow_from(int $layoutId, int $fromPageNumber): array
-{
-    $layout = book_layout_get($layoutId);
-    if ($layout === null) {
-        throw new InvalidArgumentException('unknown book layout: ' . $layoutId);
-    }
-
-    $fromPageNumber = max(1, $fromPageNumber);
-    $exclude = array('photo' => array(), 'quote' => array(), 'anecdote' => array(), 'snapshot' => array());
-    $history = array();
-    $kept    = 0;
-
-    foreach (book_pages_for_layout($layoutId) as $page) {
-        if ((int) $page['page_number'] >= $fromPageNumber) {
-            continue;
-        }
-        $kept++;
-
-        if ($page['snapshot_id'] !== null) {
-            $exclude['snapshot'][] = (int) $page['snapshot_id'];
-        }
-        foreach ($page['slots'] as $slot) {
-            foreach (array('photo' => 'photo_id', 'quote' => 'quote_id', 'anecdote' => 'anecdote_id') as $kind => $column) {
-                if ($slot[$column] !== null) {
-                    $exclude[$kind][] = (int) $slot[$column];
-                }
-            }
-        }
-
-        // Same rule as layout_plan()'s own history: photo pages set the
-        // rhythm, snapshot and text pages don't.
-        if ($page['page_type'] === 'photos') {
-            $history[] = count($page['slots']);
-        }
-    }
-
-    $tuning  = layout_tuning();
-    $content = layout_load_year_content((int) $layout['year_project_id'], $exclude);
-    $pages   = layout_plan($content, $tuning, $history);
-
-    book_layout_delete_pages_from($layoutId, $fromPageNumber);
-    $written = layout_write_pages($layoutId, $pages, $fromPageNumber);
-
-    return array('from' => $fromPageNumber, 'kept' => $kept, 'pages' => $written);
-}

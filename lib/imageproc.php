@@ -575,7 +575,7 @@ function imageproc_prepare_cached(string $srcAbs, array $rect, ?int $maxW = null
 
 /**
  * Delete prepared images older than a day. Called after an export, so the
- * cache follows the book around rather than growing forever — a reflow or a
+ * cache follows the book around rather than growing forever — a new layout or a
  * re-crop changes the key and orphans the old file.
  */
 function imageproc_prune_export_cache(int $maxAgeSeconds = 86400): void

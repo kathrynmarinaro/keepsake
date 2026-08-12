@@ -59,15 +59,14 @@
  *      snapshot's hero photo is not also loose in the flow.
  *   8. Versioning (brief §4.5): regenerating INSERTs version 2 and leaves
  *      version 1's pages byte-for-byte as they were.
- *   9. "Reflow from here" (brief §4.5): after a simulated manual edit
- *      (a photo swapped directly in book_page_photos on an early page),
- *      reflowing from page N leaves every page before N byte-for-byte
- *      untouched — manual edit included — regenerates from N onward, does
- *      not duplicate content already used on the retained pages, and puts
- *      the evicted photo back into the flow — and the regenerated tail
- *      still honours the 2-3 rule, which is worth checking separately
- *      because excluding the retained pages' content is what manufactures
- *      the one-photo remainders the merging pass exists to absorb.
+ *   9. THE ARRANGEMENT IS FROZEN: generation writes down which template draws
+ *      each photos page, and swapping two differently-shaped photos across
+ *      pages afterwards changes none of them. A stored choice that no longer
+ *      describes its page — wrong photo count, unknown template, an order that
+ *      would place one photo twice — is ignored rather than drawn.
+ *      This replaced a "reflow from here" block; reflow was removed in Round 10
+ *      because a layout is something Kathryn reworks by hand and nothing may
+ *      rebuild it under her.
  *  10. Fail-soft: a year with no content at all, and an event group holding
  *      a single photo, both generate rather than throwing.
  *
@@ -864,122 +863,110 @@ check('the two versions arranged the same content the same way (deterministic)',
     array_map('page_fingerprint', book_pages_for_layout($v2['layout_id']))
     === array_map('page_fingerprint', $v1Before));
 
-/* ============================================================ reflow ====== */
+/* ============================================== the arrangement is frozen == */
 
-echo "\nlayout_reflow_from(): a manual edit before page N survives it...\n";
+echo "\nlayout_generate(): a page's arrangement does not move when photos do...\n";
 
-$layoutId = $v2['layout_id'];
-$before   = book_pages_for_layout($layoutId);
+/* WHAT THIS REPLACED. There was a "reflow from here" block here, checking that
+   regenerating a layout from page N left the pages before it untouched. Round 10
+   removed reflow: a layout is something Kathryn reworks by hand, and nothing may
+   rebuild it under her.
+ 
+   What matters instead is the property reflow's removal made possible. The
+   template each page uses was recomputed at render time from the slot shapes
+   plus a rotation over the whole book, so swapping two photos could change how
+   that page — and, through the rotation, the pages after it — were drawn. It is
+   written down at generation now, and this is the check that it stays put. */
 
-/* Simulate exactly what Phase 6's drag-and-drop will do: swap a photo on an
-   early page for one that currently sits much later in the book. The reflow
-   must (a) leave that page alone, (b) not place the moved-in photo a second
-   time downstream, (c) put the evicted photo back into the flow. */
-$reflowFrom = 6;
-$earlySlot  = null;
-foreach ($before as $page) {
-    if ((int) $page['page_number'] < $reflowFrom && $page['page_type'] === 'photos' && $page['slots'] !== array()) {
-        foreach ($page['slots'] as $slot) {
-            if ($slot['photo_id'] !== null) {
-                $earlySlot = $slot;
-                break 2;
-            }
+$frozenLayout = $v2['layout_id'];
+/* The joined rows, so slots carry width/height — the same view the preview
+   and the exporter read, and the only one where shapes exist. */
+$frozenPages  = book_layout_pages_with_content($frozenLayout);
+
+$storedBefore = array();
+foreach ($frozenPages as $page) {
+    $storedBefore[(int) $page['id']] = array($page['template_name'], $page['template_order']);
+}
+check('generation writes an arrangement for every photos page',
+    count(array_filter($storedBefore, static fn(array $a): bool => $a[0] !== null)) > 0);
+
+$arrangedBefore = layout_page_arrangements($frozenPages);
+
+/* Swap two photos between pages, exactly as the drag-and-drop does. */
+/* THE TWO PHOTOS MUST BE DIFFERENT SHAPES, or this check has no teeth: the
+   arrangement used to be derived from the slots' SHAPES, so swapping a portrait
+   for another portrait would not have changed it either way and the test would
+   pass against the bug it exists to catch. Confirmed by disabling the stored
+   path and watching this fail. */
+$shapeOf = static function (array $slot): string {
+    $w = (int) ($slot['width'] ?? 0);
+    $h = (int) ($slot['height'] ?? 0);
+    return $w > 0 && $h > 0 && $w >= $h ? 'L' : 'P';
+};
+
+$swapA     = null;
+$swapAPage = 0;
+$swapB     = null;
+foreach ($frozenPages as $page) {
+    if ($page['page_type'] !== 'photos') { continue; }
+    foreach ($page['slots'] as $slot) {
+        if ($slot['photo_id'] === null) { continue; }
+        if ($swapA === null) {
+            $swapA     = $slot;
+            $swapAPage = (int) $page['id'];
+            continue;
+        }
+        if ((int) $page['id'] !== $swapAPage && $shapeOf($slot) !== $shapeOf($swapA)) {
+            $swapB = $slot;
+            break 2;
         }
     }
 }
-$evicted = (int) $earlySlot['photo_id'];
 
-$movedIn = null;
-foreach ($before as $page) {
-    if ((int) $page['page_number'] >= $reflowFrom) {
-        foreach ($page['slots'] as $slot) {
-            if ($slot['photo_id'] !== null) {
-                $movedIn = (int) $slot['photo_id'];
-                break 2;
-            }
-        }
+if ($swapA !== null && $swapB !== null) {
+    book_page_slot_swap((int) $swapA['id'], (int) $swapB['id']);
+
+    $after          = book_layout_pages_with_content($frozenLayout);
+    $arrangedAfter  = layout_page_arrangements($after);
+
+    check('...and swapping two photos across pages does not change any of them',
+        $arrangedAfter === $arrangedBefore);
+
+    $storedAfter = array();
+    foreach ($after as $page) {
+        $storedAfter[(int) $page['id']] = array($page['template_name'], $page['template_order']);
     }
+    check('...the stored arrangement itself is untouched by a swap',
+        $storedAfter === $storedBefore);
+} else {
+    check('the fixture has two differently-shaped photos on different pages', false);
 }
-check('the test found an early slot and a later photo to swap into it', $earlySlot !== null && $movedIn !== null);
 
-q('UPDATE book_page_photos SET photo_id = ? WHERE id = ?', array($movedIn, (int) $earlySlot['id']));
-
-$keptBefore = array_values(array_filter($before, static fn(array $p): bool => (int) $p['page_number'] < $reflowFrom));
-// Re-read so the manual edit is part of the "before" we compare against.
-$keptBefore = array_values(array_filter(book_pages_for_layout($layoutId), static fn(array $p): bool => (int) $p['page_number'] < $reflowFrom));
-
-$reflow = layout_reflow_from($layoutId, $reflowFrom);
-check('reflow reported the pages it kept', $reflow['kept'] === count($keptBefore));
-check('reflow wrote pages from page ' . $reflowFrom . ' onward', $reflow['pages'] > 0);
-
-$after     = book_pages_for_layout($layoutId);
-$keptAfter = array_values(array_filter($after, static fn(array $p): bool => (int) $p['page_number'] < $reflowFrom));
-check('every page before the reflow point is byte-for-byte untouched', $keptAfter == $keptBefore);
-check('...including the hand-swapped photo', in_array($movedIn, slot_ids($keptAfter, 'photo_id'), true));
-
-$tail = array_values(array_filter($after, static fn(array $p): bool => (int) $p['page_number'] >= $reflowFrom));
-check('the tail regenerated', $tail !== array());
-check('page numbering is still dense across the seam', array_map(static fn(array $p): int => (int) $p['page_number'], $after) === range(1, count($after)));
-check('the hand-swapped photo does NOT appear a second time downstream', !in_array($movedIn, slot_ids($tail, 'photo_id'), true));
-check('the photo it displaced is back in the flow rather than lost', in_array($evicted, slot_ids($tail, 'photo_id'), true));
-
-/* The 2-3 rule has to survive a reflow too, and a reflow is where it is most
-   likely to break: excluding the retained pages' content cuts page-groups in
-   half, so remainders of one photo are actively manufactured here. They are
-   the merging pass's job — the only 1-photo pages the tail may contain are
-   the same two legitimate kinds as a fresh generation. */
-$tailSingles = array();
-foreach ($tail as $page) {
-    if ($page['page_type'] !== 'photos') {
-        continue;
-    }
-    $ids = slot_ids(array($page), 'photo_id');
-    if (count($ids) === 1) {
-        $tailSingles[] = $ids[0];
-    } elseif (count($ids) < 1 || count($ids) > LAYOUT_MAX_SLOTS) {
-        $tailSingles[] = -1;  // forces the check below to fail, and says why
-    }
+/* A stored choice that no longer describes its page is ignored rather than
+   drawn — otherwise a page that gained or lost a photo prints one twice. */
+$firstPhotoPage = null;
+foreach (book_layout_pages_with_content($frozenLayout) as $page) {
+    if ($page['page_type'] === 'photos' && count($page['slots']) > 1) { $firstPhotoPage = $page; break; }
 }
-sort($tailSingles);
-$expectedTailSingles = array($fullPagePhoto, $marchLoose);
-sort($expectedTailSingles);
-check(
-    'the reflowed tail holds a drawable number a page, bar the full_page flag and the neighbourless March photo',
-    $tailSingles === $expectedTailSingles
-);
+if ($firstPhotoPage !== null) {
+    $count = count($firstPhotoPage['slots']);
+    check('a stored arrangement is used when it fits',
+        layout_stored_arrangement($firstPhotoPage, $count) !== null);
+    check('...ignored when the page has a different number of photos',
+        layout_stored_arrangement($firstPhotoPage, $count + 1) === null);
 
-$allAfter = slot_ids($after, 'photo_id');
-check('no photo is duplicated anywhere in the reflowed book', count($allAfter) === count(array_unique($allAfter)));
-$quotesAfter    = slot_ids($after, 'quote_id');
-$anecdotesAfter = slot_ids($after, 'anecdote_id');
-check(
-    'no quote or anecdote is duplicated either',
-    count($quotesAfter) === count(array_unique($quotesAfter))
-        && count($anecdotesAfter) === count(array_unique($anecdotesAfter))
-);
-$snapAfter = array();
-foreach ($after as $page) {
-    if ($page['snapshot_id'] !== null) {
-        $snapAfter[] = (int) $page['snapshot_id'];
-    }
+    $bogus = $firstPhotoPage;
+    $bogus['template_name'] = 'no-such-template';
+    check('...and ignored when the template no longer exists',
+        layout_stored_arrangement($bogus, $count) === null);
+
+    $dupe = $firstPhotoPage;
+    $dupe['template_order'] = implode(',', array_fill(0, $count, 0));
+    check('...and ignored when it would place one photo twice',
+        layout_stored_arrangement($dupe, $count) === null);
+} else {
+    check('the fixture has a multi-photo page to check the guards against', false);
 }
-check('the snapshot still appears exactly once', count($snapAfter) === 1);
-
-check('version 1 is STILL untouched after a reflow of version 2', book_pages_for_layout($v1['layout_id']) == $v1Before);
-
-echo "\nReflow edge cases...\n";
-$fromOne = layout_reflow_from($layoutId, 1);
-check('reflowing from page 1 keeps nothing and rebuilds the whole book', $fromOne['kept'] === 0 && $fromOne['pages'] > 0);
-$beyondEnd = layout_reflow_from($layoutId, 9999);
-check('reflowing from beyond the last page adds nothing and keeps everything', $beyondEnd['pages'] === 0 && $beyondEnd['kept'] === count(book_pages_for_layout($layoutId)));
-
-$threw = false;
-try {
-    layout_reflow_from(999999, 1);
-} catch (InvalidArgumentException $e) {
-    $threw = true;
-}
-check('reflowing an unknown layout is refused loudly, not silently', $threw);
 
 /* ========================================================== fail soft ===== */
 

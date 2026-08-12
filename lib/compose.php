@@ -325,12 +325,19 @@ function compose_occupants(array $slots): array
  * the same arrangement forty times. That is a property of the sequence, so a
  * per-page function could not compute it.
  *
- * It also has to be identical in the browser preview and the PDF. Deriving it
- * from the page's own content plus its position — rather than storing a choice
- * when the layout is generated — follows the same reasoning layout_render.php
- * used for its mirror bit: a decision recomputed from current content cannot
- * disagree with itself after a manual swap or a reflow moves photos around,
- * where a stored one silently would.
+ * It also has to be identical in the browser preview and the PDF, which is why
+ * both read it through one function — layout_page_arrangements().
+ *
+ * THIS FUNCTION IS NO LONGER THE LAST WORD. It used to be: the argument here
+ * was that a decision recomputed from current content cannot disagree with
+ * itself after a swap moves photos around, where a stored one silently would.
+ * That held while the machine owned the layout and failed the moment Kathryn
+ * reworked one by hand — swapping two photos could change how that page, and
+ * through the rotation below the pages after it, were drawn. Round 10 froze the
+ * answer at generation (schema.sql, book_pages.template_name) and removed
+ * "reflow from here", which is what made freezing safe. What this computes is
+ * now the answer for a page that has nothing stored: every layout made before
+ * that round, and any page whose stored choice no longer fits.
  *
  * A page whose shapes no template accepts gets null rather than a wrong
  * template. Callers draw nothing for it and the page is visibly empty, which is
