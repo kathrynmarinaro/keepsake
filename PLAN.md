@@ -2141,3 +2141,86 @@ One consequence to be deliberate about: a stored template is a hand edit, and
 `book-layouts-reflow.php` currently rebuilds pages from scratch. Reflowing past
 a page that has been refreshed should either preserve the choice or say plainly
 that it will not.
+
+## Round 10 plan — locked layouts, and the queue
+
+Kathryn, after using the Book tab on a real book: **"I don't want 'reflow'. I do
+want layouts to be locked when I create one and go through and rework them how I
+like it."**
+
+### The thing all of it turns on
+
+A layout is *almost* already locked. `book_pages` and `book_page_slots` are real
+rows written at generation, so which photos are on which page, in what order,
+does not move on its own. **One thing is not stored: the arrangement.** The
+template each page uses is recomputed at render time by `compose_assign()`, from
+the slot shapes plus a rotation over the whole sequence — twice, once in
+`lib/views/book.php` and once in `lib/pdfexport.php`.
+
+`compose_assign()`'s own docblock defends that choice, and is worth quoting
+because this round overturns it:
+
+> a decision recomputed from current content cannot disagree with itself after a
+> manual swap or a reflow moves photos around, where a stored one silently would
+
+That was right when the layout was a thing the machine owned. It is wrong the
+moment the layout is a thing Kathryn reworks by hand: swap two photos on page 4
+and the arrangement of page 4 — and possibly of every page after it, through the
+rotation — can change underneath her. Deriving is only safe while nothing edits;
+storing is only safe once nothing regenerates. **Removing reflow and storing the
+arrangement are the same decision, and neither is safe without the other.**
+
+Storing it also happens to be the missing piece under two of the queued
+features, which is why they are one round and not four.
+
+### Phase 1 — freeze the arrangement (everything else depends on this)
+
+- `book_pages` gains `template_name VARCHAR(40) NULL` and `template_order
+  VARCHAR(60) NULL` (the occupant order as a comma-separated list, e.g. `0,2,1`).
+  **Null means "decide it the old way"**, so every layout already on the server
+  keeps rendering exactly as it does today and there is no data migration — one
+  `ALTER TABLE` and nothing else.
+- `layout_generate()` writes the choice for each page as it creates it.
+- One new reader — `book_page_arrangement()` — replacing the `compose_assign()`
+  loop in **both** `lib/views/book.php` and `lib/pdfexport.php`. Stored when
+  present, derived when not. Two callers, one rule; today they each re-derive and
+  agree only because they run the same function on the same input.
+- Test: generate a layout, swap two photos, re-render — the arrangement of every
+  page is byte-identical. That test fails today, which is the bug.
+
+### Phase 2 — remove reflow
+
+Delete, not deprecate: `public/api/book-layouts-reflow.php`,
+`layout_reflow_from()` in `lib/layout.php`, the "Reflow from here" button in
+`lib/views/book.php`, its handler in `public/assets/layout.js`, and the reflow
+block in `tools/verify-layout.php`. The generate-a-new-version path stays — that
+is how you start over, and it leaves the old version intact to compare against.
+
+### Phase 3 — refresh one page (backlog 4)
+
+With Phase 1 done this is small: an endpoint that asks `compose_candidates()`
+for that page's occupants, takes the NEXT one after the stored name, writes it,
+and re-renders the one page. **Cycles rather than randomises** — most pages have
+two or three candidates, and cycling means you can always get back to the one you
+preferred. The button sits where the reflow button was.
+
+### Phase 4 — drop a photo out of the book (backlog 2)
+
+Sets `photos.skip_for_book`, deletes that slot, and re-picks the arrangement for
+that page's remaining occupants. The design question this was blocked on — what
+happens to the hole it leaves — is answered by Phase 1: the page re-arranges
+itself and nothing else in the book moves.
+
+### Phase 5 — edit text from the layout (backlog 1)
+
+Independent of the rest; last because it shares nothing with them. Click a text
+slot, open the entry modal that Content already uses, listen for
+`keepsake:entry-saved` to re-render in place. The care is in telling a click
+apart from the start of a drag.
+
+### Order and risk
+
+1 → 2 → 3 → 4 → 5. Phase 1 is the only one with a schema change and the only one
+that can break an existing book; it is deliberately first and deliberately
+null-defaulted so that it cannot. Phases 3, 4 and 5 are each independently
+shippable after it.
