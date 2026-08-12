@@ -232,9 +232,9 @@ function pdf_export_geometry(): array
         'spine_bleed_in'     => $spineBleed,
         'spine_page_w_mm'    => $spineW * $mmPerIn,
         'spine_page_h_mm'    => $spineHIn * $mmPerIn,
-        'spine_safe_mm'      => (float) cfg('export.spine_safe_in', 0.04) * $mmPerIn,
-        'spine_fill'         => (float) cfg('export.spine_fill', 0.80),
-        'spine_type_height'  => (float) cfg('export.spine_type_height', 0.55),
+        'spine_safe_mm'      => (float) cfg('export.spine_safe_in', 0.02) * $mmPerIn,
+        'spine_max_length'   => (float) cfg('export.spine_max_length', 0.90),
+        'spine_type_height'  => (float) cfg('export.spine_type_height', 0.80),
         'trim_width_in'    => $trimW,
         'trim_height_in'   => $trimH,
         'bleed_in'         => $bleed,
@@ -835,10 +835,22 @@ function pdf_draw_spine_page(\Mpdf\Mpdf $mpdf, array $geo, array $project): arra
     $pageHMm = (float) $geo['spine_page_h_mm'];
     $visibleMm = (float) $geo['trim_height_in'] * 25.4;
 
-    /* The band across the spine: its width less the safe inset at both long
-       edges, which is where the fold lands. */
-    $bandMm = max(1.0, $pageWMm - (2 * (float) $geo['spine_safe_mm']));
-    $targetMm = $visibleMm * (float) $geo['spine_fill'];
+    /* THE 80% IS ACROSS THE SPINE, not along it — the skinny side. The ink from
+       the top of an h to the bottom of a p fills that fraction of the spine's
+       width, and what is left over is the clearance to the folds, split evenly:
+       at 0.80 that is a tenth of the spine clear on each long edge.
+       spine_safe_in is a FLOOR under that clearance, not a competing limit, so
+       a big type-height setting cannot drive the letters onto the fold. */
+    $typeHeight = (float) $geo['spine_type_height'];
+    $clearMm    = max(
+        $pageWMm * (1.0 - $typeHeight) / 2.0,
+        (float) $geo['spine_safe_mm']
+    );
+    $bandMm = max(1.0, $pageWMm - (2 * $clearMm));
+
+    /* Along the spine there is no target, only a limit: whatever size the width
+       rule picks, the words must still fit between the ends. */
+    $targetMm = $visibleMm * (float) $geo['spine_max_length'];
 
     /* MEASURED AT A REFERENCE SIZE, then scaled. Text width is linear in point
        size, so one measurement of each run answers every size — and it is the
@@ -856,29 +868,20 @@ function pdf_draw_spine_page(\Mpdf\Mpdf $mpdf, array $geo, array $project): arra
         return $empty;
     }
 
-    /* The size that hits the target proportion exactly... */
-    $sizePt = $refPt * ($targetMm / $refWidth);
+    /* THE WIDTH RULE SETS THE SIZE. The ink is one em tall in this face — see
+       PDF_SPINE_ASC — so the point size that fills the band is the band itself,
+       converted. This is the number the whole spine is built from. */
+    $inkEm    = PDF_SPINE_ASC + PDF_SPINE_DESC;
+    $sizePt   = ($bandMm / 25.4 * 72.0) / $inkEm;
+    $cappedBy = 'type-height';
 
-    /* ...then held to a SIZE THAT LOOKS LIKE A SPINE.
-     *
-     * Two separate limits, and they do different jobs. The first is taste: type
-     * whose ink is as tall as the band is legal and looks wrong — it crowds
-     * both folds and reads as a label rather than a book. spine_type_height is
-     * the ink as a fraction of the spine's whole width, so it is a number you
-     * can picture: 0.55 means the letters take up a bit over half the spine and
-     * leave the rest as margin.
-     *
-     * The second is physics: never wider than the safe band, whatever the first
-     * says, because past that the letters are printing on the fold. */
-    $inkEm     = PDF_SPINE_ASC + PDF_SPINE_DESC;
-    $maxByTaste = (($pageWMm * (float) $geo['spine_type_height']) / 25.4 * 72.0) / $inkEm;
-    $maxByBand  = ($bandMm / 25.4 * 72.0) / $inkEm;
-    $maxByBand  = min($maxByBand, $maxByTaste);
-
-    $cappedBy = 'fill';
-    if ($sizePt > $maxByBand) {
-        $sizePt   = $maxByBand;
-        $cappedBy = $maxByBand < $maxByTaste - 0.001 ? 'spine-width' : 'type-height';
+    /* AND THE LENGTH RULE CAN ONLY MAKE IT SMALLER. A long name at the width's
+       size would run off both ends; shrinking is the only honest answer, since
+       the alternative is a title trimmed mid-word at the head and the foot. */
+    $atSize = $refWidth * ($sizePt / $refPt);
+    if ($atSize > $targetMm) {
+        $sizePt   = $refPt * ($targetMm / $refWidth);
+        $cappedBy = 'length';
     }
     if ($sizePt < 5.0) {
         $sizePt   = 5.0;

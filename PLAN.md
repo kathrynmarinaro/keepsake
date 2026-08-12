@@ -2482,3 +2482,32 @@ spine and leave 0.079in of margin on each side.
 The three limits now stack in a clear order — fill the target proportion, unless
 that is taller than the type-height dial allows, unless THAT is wider than the
 safe band. `capped_by` says which one bound it.
+
+### Round 12, corrected again: the 80% is the skinny side
+
+> "I meant 80% horizontally, the skinny side, not the long side."
+
+My reading, not hers. Two rounds of arithmetic went into filling 80% of the
+spine's LENGTH — including a long explanation of why that was impossible on a
+0.35in spine, which was true and beside the point.
+
+The rule is now what she asked for the first time. `spine_type_height` = 0.80:
+the ink, ascender to descender, fills 80% of the spine's WIDTH and leaves a
+tenth of it clear on each long edge. On this book that is 0.28in of type with
+0.035in of margin, which comes out at 20.2pt.
+
+Everything else follows from that one number rather than competing with it:
+
+- the clearance is DERIVED from it — (1 − 0.80) / 2 — so the margin cannot
+  disagree with the type size, and `spine_safe_in` is only a floor beneath it
+  for a careless setting;
+- the length is a limit, not a target: nothing is stretched to reach it, and a
+  name too long to fit at the width's size is shrunk (`spine_max_length`, 0.90);
+- a short name gets the SAME type size as a long one, which is the point of
+  sizing across rather than along. A spine reading "2025" should not be set in
+  180pt.
+
+Worth noting the two rounds cost: the size that comes out — 20.2pt — is almost
+exactly the 20.1pt of the very first version, which she said was too large. It
+was not too large. It was off-centre, because it was measured from the cap
+height, and the eye read the asymmetry as size.
