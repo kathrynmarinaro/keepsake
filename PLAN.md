@@ -2451,3 +2451,34 @@ capped and centred, which is what a short title on a spine should look like.
 If 80% matters more than the type size, the lever is tracking — letter-spacing
 the line out to the target rather than growing it. Not built: it changes how the
 words look, and that is a taste question rather than a correctness one.
+
+### Round 12, corrected: it was not centred, and it was too big
+
+> "The font is too large. And because of ascenders and descenders, it looks
+> non-centered."
+
+Both real, and the second was a genuine bug that the arithmetic had hidden.
+
+**The metrics were the wrong ones.** The size and the centring were computed
+from CAP HEIGHT, and in DejaVu Sans Condensed — read out of the font's own OS/2
+table rather than estimated — cap height is 0.729em while the ASCENDER is
+0.760em. An h, d, k or f rises higher than an E. So every ascender hung past the
+band on one side while the descenders stayed inside it on the other: the line was
+centred on a box that was not the box the ink actually occupied. Measuring from
+the ascender line to the descender line — which in this face is exactly 1.000em —
+makes the line symmetric about its own middle whatever letters are in it.
+
+That is worth noting as a class of error: the earlier version was verified, and
+what it verified was that the ink fitted a band computed with the same wrong
+constant. A test can only be as right as the number it shares with the code.
+
+**And the type was as tall as it was allowed to be.** Sizing purely by what fits
+produces type whose ink is the full height of the safe band — legal, and it
+reads as a label rather than a book, crowding both folds. There is now a
+`spine_type_height` dial: the ink as a fraction of the spine's whole width, so
+it is a number you can picture. At 0.55 the letters take a bit over half the
+spine and leave 0.079in of margin on each side.
+
+The three limits now stack in a clear order — fill the target proportion, unless
+that is taller than the type-height dial allows, unless THAT is wider than the
+safe band. `capped_by` says which one bound it.

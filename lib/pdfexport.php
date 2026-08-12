@@ -167,13 +167,22 @@ const PDF_EXPORT_PART_COVER    = 'cover';
 const PDF_EXPORT_PART_INTERIOR = 'interior';
 const PDF_EXPORT_PART_SPINE    = 'spine';
 
-/* DejaVu Sans — mPDF's 'sans' — as a share of the point size. Used to work out
- * how tall a line of spine type actually is, and where its middle falls. Cap
- * height is how far an E rises above the baseline; the descender is how far a p
- * hangs below it. Together they are the ink, and the ink is what has to fit
- * between the folds. */
-const PDF_SPINE_CAP  = 0.729;
-const PDF_SPINE_DESC = 0.236;
+/* DejaVu Sans Condensed — mPDF's 'sans' — as a share of the point size, read
+ * out of the font's own OS/2 table rather than estimated.
+ *
+ * ASCENDER, NOT CAP HEIGHT, and that distinction was a bug. Cap height (0.729)
+ * is how far an E rises; the ASCENDER (0.760) is how far an h, d, k or f rises,
+ * and it is taller. Sizing and centring on cap height therefore let every
+ * ascender hang out past the band on one side while the descenders stayed
+ * inside it on the other — which is exactly what "because of ascenders and
+ * descenders, it looks non-centered" is describing. A line set between the
+ * ascender and descender lines is symmetric about its own middle whatever
+ * letters are in it.
+ *
+ * The two together come to exactly 1.000em, which is not a coincidence: it is
+ * how the face is drawn. */
+const PDF_SPINE_ASC  = 0.760;
+const PDF_SPINE_DESC = 0.240;
 
 /** See this file's header. Generous on purpose — never hit by real content. */
 const PDF_EXPORT_MAX_TEXT_CHARS = 4000;
@@ -225,6 +234,7 @@ function pdf_export_geometry(): array
         'spine_page_h_mm'    => $spineHIn * $mmPerIn,
         'spine_safe_mm'      => (float) cfg('export.spine_safe_in', 0.04) * $mmPerIn,
         'spine_fill'         => (float) cfg('export.spine_fill', 0.80),
+        'spine_type_height'  => (float) cfg('export.spine_type_height', 0.55),
         'trim_width_in'    => $trimW,
         'trim_height_in'   => $trimH,
         'bleed_in'         => $bleed,
@@ -849,18 +859,26 @@ function pdf_draw_spine_page(\Mpdf\Mpdf $mpdf, array $geo, array $project): arra
     /* The size that hits the target proportion exactly... */
     $sizePt = $refPt * ($targetMm / $refWidth);
 
-    /* ...capped so the LETTERS still fit across the spine, descenders included.
-       DejaVu Sans — mPDF's 'sans' — has a cap height of 0.729em and a descender
-       of 0.236em, so a line of type with both is 0.965em of ink from the top of
-       an E to the bottom of a p. Sizing on cap height alone, which is what this
-       did first, hangs every descender out past the band and towards the fold:
-       "the one with the puffin" has three of them. */
-    $maxByBand = ($bandMm / 25.4 * 72.0) / (PDF_SPINE_CAP + PDF_SPINE_DESC);
+    /* ...then held to a SIZE THAT LOOKS LIKE A SPINE.
+     *
+     * Two separate limits, and they do different jobs. The first is taste: type
+     * whose ink is as tall as the band is legal and looks wrong — it crowds
+     * both folds and reads as a label rather than a book. spine_type_height is
+     * the ink as a fraction of the spine's whole width, so it is a number you
+     * can picture: 0.55 means the letters take up a bit over half the spine and
+     * leave the rest as margin.
+     *
+     * The second is physics: never wider than the safe band, whatever the first
+     * says, because past that the letters are printing on the fold. */
+    $inkEm     = PDF_SPINE_ASC + PDF_SPINE_DESC;
+    $maxByTaste = (($pageWMm * (float) $geo['spine_type_height']) / 25.4 * 72.0) / $inkEm;
+    $maxByBand  = ($bandMm / 25.4 * 72.0) / $inkEm;
+    $maxByBand  = min($maxByBand, $maxByTaste);
 
     $cappedBy = 'fill';
     if ($sizePt > $maxByBand) {
         $sizePt   = $maxByBand;
-        $cappedBy = 'spine-width';
+        $cappedBy = $maxByBand < $maxByTaste - 0.001 ? 'spine-width' : 'type-height';
     }
     if ($sizePt < 5.0) {
         $sizePt   = 5.0;
@@ -883,7 +901,7 @@ function pdf_draw_spine_page(\Mpdf\Mpdf $mpdf, array $geo, array $project): arra
        and what hangs below it, so a line with descenders sits in the middle of
        the spine rather than high on it. */
     $emMm     = $sizePt / 72 * 25.4;
-    $baseline = $cy + ($emMm * (PDF_SPINE_CAP - PDF_SPINE_DESC) / 2);
+    $baseline = $cy + ($emMm * (PDF_SPINE_ASC - PDF_SPINE_DESC) / 2);
     $startX   = $cx - ($widthMm / 2);
 
     $mpdf->Rotate(-90, $cx, $cy);

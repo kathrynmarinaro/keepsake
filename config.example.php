@@ -357,6 +357,17 @@ return array(
          * title on a wide-ish spine should look like anyway. */
         'spine_fill'     => 0.80,
 
+        /* HOW TALL THE LETTERS ARE, as a fraction of the spine's whole width —
+         * the ink from the top of an h to the bottom of a p. 0.55 means the
+         * type takes a bit over half the spine and leaves the rest as margin.
+         *
+         * This is the "make it smaller" dial. Type sized only by what FITS
+         * comes out as tall as the safe band allows, which is legal and looks
+         * wrong: it crowds both folds and reads as a label rather than a book.
+         * Raise it towards 0.7 for a bolder spine, drop it towards 0.45 for a
+         * quieter one. It is capped by spine_safe_in regardless. */
+        'spine_type_height' => 0.55,
+
         /* Bleed, in inches, added to EACH of the four edges — the exported
          * PDF page is trim + 2×bleed on both dimensions (8.75in x 8.75in at
          * the defaults above). THE TWO PRINTERS AGREE EXACTLY HERE, no
