@@ -2517,3 +2517,47 @@ body.has-entry-modal { overflow: hidden; }
 /* Not a full-width button: it sits beside the photo it removes, and it must
    never be the biggest tap target in a form whose main job is Save. */
 .hero-preview-clear { width: auto; flex: 0 0 auto; }
+
+/* ============ Taking a photo out of the book, and editing a text card ============
+ *
+ * The ✕ sits opposite the crop control on the same photo, so the two page-level
+ * actions on a photo are in the two corners you can reach without covering the
+ * picture you are judging.
+ */
+.ks-slot-drop-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(20, 24, 26, 0.55);
+  color: #fff;
+  font-size: 0.9rem;
+  line-height: 1;
+  /* Below the drag threshold on purpose: this control lives on a draggable
+     photo, and a big target here is a target you hit while starting a drag. */
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.ks-slot-photo:hover .ks-slot-drop-btn,
+.ks-slot-drop-btn:focus-visible { opacity: 1; }
+/* No hover on a touch screen, so it is simply always there. */
+@media (hover: none) {
+  .ks-slot-drop-btn { opacity: 0.85; }
+}
+
+/* A text card is a LINK to its entry now. It must not start looking like one —
+   the page it sits on is a picture of a printed page, and a blue underline in
+   the middle of it would be a lie about what prints. */
+a.ks-slot-text {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+a.ks-slot-text:hover { outline: 2px solid var(--teal); outline-offset: -2px; }

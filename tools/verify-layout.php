@@ -1012,6 +1012,75 @@ if ($guardPage !== null) {
     check('the fixture has a multi-photo page to check the guards against', false);
 }
 
+/* ------------------------------------------ taking a photo out of the book */
+
+echo "\nDropping a photo: skipped, not deleted, and only its page re-arranges...\n";
+
+$dropPage = null;
+foreach (book_layout_pages_with_content($frozenLayout) as $page) {
+    if ($page['page_type'] === 'photos' && count($page['slots']) > 1) { $dropPage = $page; break; }
+}
+
+if ($dropPage === null) {
+    check('the fixture has a multi-photo page to drop from', false);
+} else {
+    $dropPageId = (int) $dropPage['id'];
+    $dropSlot   = null;
+    foreach ($dropPage['slots'] as $slot) {
+        if ($slot['photo_id'] !== null) { $dropSlot = $slot; break; }
+    }
+
+    $before      = layout_page_arrangements(book_layout_pages_with_content($frozenLayout));
+    $slotsBefore = count($dropPage['slots']);
+    $photoId     = (int) $dropSlot['photo_id'];
+
+    /* Exactly what api/book-page-slots-drop.php does. */
+    photo_update($photoId, array('skip_for_book' => true));
+    book_page_slot_delete((int) $dropSlot['id']);
+    book_page_delete_and_renumber($dropPageId);
+    layout_resettle_arrangements($frozenLayout);
+
+    $photo = photo_get($photoId);
+    check('the photo is still in the library', $photo !== null);
+    check('...marked skipped rather than deleted', $photo !== null && (int) $photo['skip_for_book'] === 1);
+
+    $after     = book_layout_pages_with_content($frozenLayout);
+    $afterPage = null;
+    foreach ($after as $page) {
+        if ((int) $page['id'] === $dropPageId) { $afterPage = $page; break; }
+    }
+
+    check('...and gone from the page it was on',
+        $afterPage !== null && count($afterPage['slots']) === $slotsBefore - 1);
+
+    /* Slot numbers close up behind it: a page left holding slots 1 and 3 would
+       hand the composer an occupant list with a hole in it. */
+    if ($afterPage !== null) {
+        $numbers = array_map(static fn(array $s): int => (int) $s['slot_number'], $afterPage['slots']);
+        check('...with the slot numbering closed up behind it',
+            $numbers === range(1, count($numbers)), implode(',', $numbers));
+    }
+
+    $movedElse = array();
+    foreach (layout_page_arrangements($after) as $pageId => $choice) {
+        if ((int) $pageId === $dropPageId) { continue; }
+        if (($before[$pageId] ?? null) !== $choice) { $movedElse[] = $pageId; }
+    }
+    check('...and no other page in the book moved',
+        $movedElse === array(), 'moved: ' . implode(',', $movedElse));
+
+    /* And it is out of the running for the NEXT book, which is the point of a
+       flag rather than a deletion. */
+    /* $yp — the project this layout belongs to. An id that does not exist
+       returns nothing, and "not in nothing" passes for the wrong reason. */
+    $eligible = layout_load_year_content($yp);
+    $stillIn  = false;
+    foreach (($eligible['photos'] ?? array()) as $p) {
+        if ((int) $p['id'] === $photoId) { $stillIn = true; break; }
+    }
+    check('...and the layout engine will not offer it again', !$stillIn);
+}
+
 /* ------------------------------------------------- try another arrangement */
 
 echo "\nlayout_cycle_arrangement(): steps on, saves, and comes back round...\n";

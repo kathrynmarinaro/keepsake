@@ -491,6 +491,22 @@ check('the book tab renders', $book['fatal'] === null, (string) $book['fatal']);
    characters and add an ellipsis, while the PDF printed all of it — so the one
    screen whose job is judging what will print was showing a page that never
    would. Reported as "the quote is getting cut off". */
+/* THE ✕ THAT TAKES A PHOTO OUT OF THE BOOK, and the text card that links to
+   its own detail page. Both are Book-tab controls added in Round 10; both are
+   checked here because a control that does not render is a feature that does
+   not exist. */
+check('every photo on a page offers a way out of the book',
+    substr_count($book['html'], 'data-act="drop-photo"') === substr_count($book['html'], 'data-act="adjust-crop"'),
+    substr_count($book['html'], 'data-act="drop-photo"') . ' drop vs '
+    . substr_count($book['html'], 'data-act="adjust-crop"') . ' crop controls');
+
+check('a text card links to its own entry',
+    (bool) preg_match('/<a class="ks-slot ks-slot-text[^"]*"\s+href="[^"]*#entry-(quote|anecdote)-\d+"/', $book['html']),
+    'no entry link found on a text slot');
+check('...to the Content tab, where the detail form actually lives',
+    (bool) preg_match('/href="[^"]*tab=content[^"]*#entry-/', $book['html'])
+    || (bool) preg_match('/href="project\.php\?id=\d+[^"]*#entry-/', $book['html']));
+
 check('a slot quote is not truncated in the preview',
     str_contains($book['html'], 'I would like to take it home now'));
 check('...and carries no ellipsis of its own',

@@ -1498,6 +1498,42 @@ function book_page_create(int $layoutId, int $pageNumber, string $pageType, ?int
 }
 
 /**
+ * Remove one slot from a page, closing the gap in the slot numbering behind it.
+ *
+ * The renumber matters: book_page_photos.slot_number is what the composer reads
+ * as "which occupant is this", so a page left holding slots 1 and 3 would be
+ * asked to fill a two-slot template with an occupant list that has a hole in it.
+ */
+function book_page_slot_delete(int $slotId): bool
+{
+    $slot = book_page_slot_get($slotId);
+    if ($slot === null) {
+        return false;
+    }
+
+    $pageId = (int) $slot['book_page_id'];
+    $number = (int) $slot['slot_number'];
+
+    q('DELETE FROM book_page_photos WHERE id = ?', array($slotId));
+
+    $later = q(
+        'SELECT id, slot_number FROM book_page_photos
+          WHERE book_page_id = ? AND slot_number > ?
+          ORDER BY slot_number',
+        array($pageId, $number)
+    )->fetchAll();
+
+    foreach ($later as $row) {
+        q(
+            'UPDATE book_page_photos SET slot_number = ? WHERE id = ?',
+            array((int) $row['slot_number'] - 1, (int) $row['id'])
+        );
+    }
+
+    return true;
+}
+
+/**
  * One page with its slots joined to their photos — the same shape
  * book_layout_pages_with_content() returns, for a single page.
  *

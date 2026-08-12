@@ -21,6 +21,15 @@ if (!isset($project) || !is_array($project)) {
 $projectId   = (int) $project['id'];
 $projectName = year_project_title($project);
 
+/* A function in PHP cannot see this file's top-level variables, and
+   render_text_slot() needs the project to build the link to its entry. A
+   constant rather than threading a parameter down through render_page() and
+   render_page_canvas(), neither of which has any other use for it. Guarded
+   because tools/verify-screens.php renders views repeatedly. */
+if (!defined('BOOK_TAB_PROJECT_ID')) {
+    define('BOOK_TAB_PROJECT_ID', $projectId);
+}
+
 require_once __DIR__ . '/../grouping.php';
 require_once __DIR__ . '/../layout.php';
 require_once __DIR__ . '/../layout_render.php';
@@ -195,6 +204,15 @@ function render_photo_slot(array $slot, string $flexStyle = ''): string
         <?php endif; ?>
         <button type="button" class="ks-slot-crop-btn" data-act="adjust-crop"
                 data-slot-id="<?= (int) $slot['id'] ?>" aria-label="Adjust crop">⤢</button>
+        <?php /* Takes this photo OUT OF THE BOOK — it marks the photo itself as
+                 skipped, which is why it is not called "delete": the photo stays
+                 in the library and on the Content tab, where the same flag can be
+                 turned off again. The page it was on re-arranges around what is
+                 left. */ ?>
+        <button type="button" class="ks-slot-drop-btn" data-act="drop-photo"
+                data-slot-id="<?= (int) $slot['id'] ?>"
+                aria-label="Take this photo out of the book"
+                title="Take this photo out of the book">✕</button>
       </div>
       <?php /* No per-photo caption here any more. Kathryn chose the page-foot
                treatment, so a photo's caption prints as part of one line at the
@@ -222,7 +240,29 @@ function render_text_slot(array $slot, bool $standalone, string $flexStyle = '')
              A quote already announces itself with quotation marks, and an
              anecdote with a date and no attribution; neither needed a label to
              say what it was. */ ?>
-    <div class="ks-slot ks-slot-text<?= $standalone ? ' is-standalone' : '' ?><?= $isQuote ? ' is-quote' : '' ?>" style="<?= h($flexStyle) ?>">
+    <?php
+      /* CLICKING THE TEXT OPENS ITS DETAIL PAGE — "click and it opens the detail
+         page for the quote/anecdote/etc".
+ 
+         A LINK to the Content tab rather than a modal opened in place. The
+         detail form is a <details> element that only the Content tab renders;
+         entry-modal.js works by MOVING that element into an overlay, so there
+         is nothing here for it to move. The alternatives were rendering every
+         entry's form into this screen as well — a second copy of markup kept in
+         sync by hand — or fetching it over the wire, which is a new endpoint and
+         a new rendering path for a link's worth of benefit.
+ 
+         An <a> also means it behaves like a link: middle-click, long-press,
+         open in a new tab. And a text slot is not a drag target, so there is no
+         click-versus-drag to disentangle here — only photos are draggable. */
+      $entryKind = $isQuote ? 'quote' : 'anecdote';
+      $entryId   = (int) ($isQuote ? $slot['quote_id'] : $slot['anecdote_id']);
+      $entryHref = project_url(BOOK_TAB_PROJECT_ID, 'content', array('view' => 'grid', 'type' => $entryKind))
+          . '#entry-' . $entryKind . '-' . $entryId;
+    ?>
+    <a class="ks-slot ks-slot-text<?= $standalone ? ' is-standalone' : '' ?><?= $isQuote ? ' is-quote' : '' ?>"
+       href="<?= h($entryHref) ?>" style="<?= h($flexStyle) ?>"
+       title="Open this <?= h($entryKind) ?> to edit it">
       <?php if ($isQuote): ?>
         <?php /* Both marks inline, and the whole thing centred — the mirror of
                  pdf_render_text_block_html(). The opening mark used to hang in
@@ -237,7 +277,7 @@ function render_text_slot(array $slot, bool $standalone, string $flexStyle = '')
         <p><?= h(page_snippet((string) $slot['anecdote_text'], null)) ?></p>
         <span class="hint ks-quote-meta"><?= h(page_fmt_date((string) $slot['anecdote_date'])) ?></span>
       <?php endif; ?>
-    </div>
+    </a>
     <?php
     return ob_get_clean();
 }

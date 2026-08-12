@@ -81,6 +81,7 @@ import { showSnackbar } from './swipe.js';
 import { renameProject } from './project-menu.js';
 import { openPhotoPicker } from './photo-picker.js';
 import { openCropper } from './crop.js';
+import { confirmDanger } from './confirm.js';
 
 function describe(err) {
   if (err instanceof ApiError && err.detail) { return err.detail; }
@@ -146,6 +147,11 @@ document.addEventListener('click', async (event) => {
       button.disabled = false;
       showSnackbar(describe(err));
     }
+    return;
+  }
+
+  if (action === 'drop-photo') {
+    await dropPhoto(button);
     return;
   }
 
@@ -675,6 +681,38 @@ async function cycleArrangement(button) {
     window.location.reload();
   } catch (err) {
     showSnackbar(err.message || 'Could not rearrange that page.');
+    button.disabled = false;
+  }
+}
+
+/* ------------------------------------------ take a photo out of the book --- */
+
+/* NOT a delete, and the confirm says so: the photo stays in the library and on
+   the Content tab, where "Skip for book" can be turned back off. What it loses
+   is its place in this book.
+
+   Confirmed rather than undoable, unlike a swipe-delete elsewhere in the suite:
+   this re-arranges the page it was on, so there is no single action to reverse
+   — putting the photo back would not put the page back the way it was. */
+async function dropPhoto(button) {
+  const slotId = Number(button.dataset.slotId);
+  if (!slotId) { return; }
+
+  const ok = await confirmDanger({
+    title: 'Take this photo out of the book?',
+    body: 'It stays in your library — you can put it back from the Content tab by '
+      + 'turning off "Skip for book". This page will re-arrange around the photos '
+      + 'that are left.',
+    confirmLabel: 'Take it out',
+  });
+  if (!ok) { return; }
+
+  button.disabled = true;
+  try {
+    await apiPost('api/book-page-slots-drop.php', { slot_id: slotId });
+    window.location.reload();
+  } catch (err) {
+    showSnackbar(err.message || 'Could not take that photo out.');
     button.disabled = false;
   }
 }

@@ -2302,3 +2302,47 @@ photos only fit one template says so instead of appearing to do nothing.
 
 Remaining: drop a photo out of the book (backlog 2), and edit text from the
 layout (backlog 1).
+
+### Round 10, finished: the last two from the queue
+
+**Drop a photo out of the book (backlog 2).** A ✕ on every photo in the Book
+tab. It sets `photos.skip_for_book` — the same flag the Content tab already
+toggles — deletes the slot, closes up the slot numbering behind it, removes the
+page if that emptied it, and re-settles the layout. So the page it was on
+re-arranges around what is left and nothing else in the book moves, which is the
+question this was blocked on and which Phase 1 answered.
+
+Not called "delete", because it is not one: the photo keeps its caption, its
+group and its place in the library, and turning the flag off puts it back in the
+running. The confirm says so. It is confirmed rather than undoable — unlike a
+swipe-delete elsewhere in the suite — because it re-arranges a page, so there is
+no single action to reverse: putting the photo back would not put the page back.
+
+The flag is set BEFORE the slot is removed, deliberately. A failure between the
+two then leaves a photo marked skipped but still placed, which is visible and
+correctable, rather than a photo silently gone from the book and still eligible
+for the next one.
+
+**Edit text from the layout (backlog 1).** A text card is an `<a>` to its own
+entry on the Content tab — `#entry-quote-12` — and `entry-modal.js` opens what
+the fragment names on arrival.
+
+A LINK, not a modal opened in place, and the reason is structural: the detail
+form is a `<details>` element that only the Content tab renders, and
+entry-modal.js works by MOVING that element into an overlay. There is nothing on
+the Book tab for it to move. The alternatives were rendering every entry's form
+into this screen as well — a second copy of markup kept in sync by hand — or
+fetching it over the wire, which is a new endpoint and a new rendering path for
+a link's worth of benefit. An `<a>` also behaves like a link: middle-click,
+long-press, open in a new tab.
+
+The click-versus-drag problem the backlog entry warned about turned out not to
+exist: only photos are drag targets, and a text card never was.
+
+One wrinkle worth recording: `render_text_slot()` is a function, and a PHP
+function cannot see the view's top-level `$projectId`. It reads a
+`BOOK_TAB_PROJECT_ID` constant rather than having the id threaded down through
+`render_page()` and `render_page_canvas()`, neither of which has any other use
+for it.
+
+That empties the queue.

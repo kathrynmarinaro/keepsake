@@ -189,3 +189,32 @@ document.addEventListener('keepsake:entry-removed', (event) => {
 window.addEventListener('pageshow', (event) => {
   if (event.persisted) { closeEntry(); }
 });
+
+/* ARRIVING FROM THE BOOK TAB. A text slot on the Book tab links here as
+   #entry-quote-12, because the detail form lives on this screen and only this
+   screen renders it. Landing on the anchor scrolls to the entry but leaves it
+   closed, which is not what the link promised, so this opens it.
+ 
+   The summary is CLICKED rather than the details being opened directly: the
+   click path above is the one that puts it in the overlay, and going straight
+   to `details.open` would expand it in place — the very reflow this module
+   exists to avoid. */
+function openFromHash() {
+  const match = /^#entry-(quote|anecdote|snapshot|photo)-(\d+)$/.exec(window.location.hash || '');
+  if (!match) { return; }
+
+  const details = document.getElementById(`entry-${match[1]}-${match[2]}`);
+  const summary = details && details.querySelector(':scope > summary');
+  if (!summary) { return; }
+
+  summary.click();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', openFromHash);
+} else {
+  openFromHash();
+}
+
+/* Back/forward between two entries on the same screen. */
+window.addEventListener('hashchange', openFromHash);
