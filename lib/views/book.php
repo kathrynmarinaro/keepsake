@@ -345,6 +345,17 @@ function render_page(array $page, ?array $choice): string
         <strong class="ks-page-label">Page <?= (int) $page['page_number'] ?></strong>
         <div class="row ks-page-actions">
           <span class="pill<?= $type === 'photos' ? '' : ' is-plain' ?>"><?= h($type) ?></span>
+          <?php if ($type === 'photos' && count($page['slots']) > 1): ?>
+            <?php /* Cycles this page through the arrangements its photos allow,
+                     and saves the one it lands on. Only offered where there is
+                     something to cycle THROUGH: a single-photo page has one
+                     arrangement and a button that does nothing is worse than no
+                     button. */ ?>
+            <button type="button" class="btn-ghost" data-act="cycle-arrangement"
+                    data-page-id="<?= (int) $page['id'] ?>" title="Try this page a different way">
+              Try another arrangement
+            </button>
+          <?php endif; ?>
         </div>
       </div>
 

@@ -1498,6 +1498,53 @@ function book_page_create(int $layoutId, int $pageNumber, string $pageType, ?int
 }
 
 /**
+ * One page with its slots joined to their photos — the same shape
+ * book_layout_pages_with_content() returns, for a single page.
+ *
+ * Exists because deciding one page's arrangement needs its photos' dimensions,
+ * and reading the whole layout to answer a question about one page is the sort
+ * of thing that is fine until a book has a hundred pages in it.
+ */
+function book_page_with_content(int $pageId): ?array
+{
+    $page = book_page_get($pageId);
+    if ($page === null) {
+        return null;
+    }
+
+    $page['slots'] = q(
+        'SELECT bpp.*, p.width, p.height, p.thumb_path, p.original_path
+           FROM book_page_photos bpp
+           LEFT JOIN photos p ON p.id = bpp.photo_id
+          WHERE bpp.book_page_id = ?
+          ORDER BY bpp.slot_number',
+        array($pageId)
+    )->fetchAll();
+
+    return $page;
+}
+
+/** Which layout a page belongs to, or 0 if the page is gone. */
+function book_layout_id_for_page(int $pageId): int
+{
+    $row = q('SELECT book_layout_id FROM book_pages WHERE id = ?', array($pageId))->fetch();
+    return $row === false ? 0 : (int) $row['book_layout_id'];
+}
+
+/** Which layout a slot belongs to, or 0 if the slot is gone. */
+function book_layout_id_for_slot(int $slotId): int
+{
+    $row = q(
+        'SELECT bp.book_layout_id
+           FROM book_page_photos bpp
+           JOIN book_pages bp ON bp.id = bpp.book_page_id
+          WHERE bpp.id = ?',
+        array($slotId)
+    )->fetch();
+    return $row === false ? 0 : (int) $row['book_layout_id'];
+}
+
+/**
  * Freeze which template draws a page, and in what occupant order.
  *
  * Written once by layout_generate() as it builds the layout, and again by the
@@ -1507,17 +1554,30 @@ function book_page_create(int $layoutId, int $pageNumber, string $pageType, ?int
  * Passing null for either clears both, which puts the page back to being
  * decided the old way — the state every page generated before Round 10 is in.
  */
-function book_page_set_arrangement(int $pageId, ?string $templateName, ?array $order): void
+function book_page_set_arrangement(int $pageId, ?string $templateName, ?array $order, string $shapes = ''): void
 {
     $name = $templateName !== null && trim($templateName) !== '' ? trim($templateName) : null;
 
-    /* Stored as a comma-separated list rather than JSON: it is a handful of
-       small integers, it is read by exactly one function, and a malformed one
-       has to degrade to "decide it the old way" rather than throw — which is
-       easier to guarantee about a string of digits than about a JSON document. */
+    /* "PLL:0,2,1" — the SHAPES this arrangement was chosen for, then the order.
+     *
+     * The shapes are half the point. A stored arrangement must survive a page
+     * being redrawn and must NOT survive its photos changing shape: drag a
+     * landscape onto a page of portraits and the page is supposed to
+     * re-arrange itself around it, which is the behaviour Kathryn asked to keep.
+     * Recording what it was chosen for is how the reader tells "still true"
+     * from "stale" without anyone having to remember to clear it.
+     *
+     * One column rather than two because the two-column ALTER TABLE had already
+     * gone out; adding a third would have meant a second migration for a
+     * mid-deploy change of mind. A colon-separated string of letters and digits
+     * is not elegant, and it is cheaper than that.
+     *
+     * Comma-separated integers rather than JSON for the order: a handful of
+     * small numbers read by exactly one function, where a malformed value has
+     * to degrade to "decide it the old way" rather than throw. */
     $encoded = null;
-    if ($name !== null && $order !== null && $order !== array()) {
-        $encoded = implode(',', array_map('intval', array_values($order)));
+    if ($name !== null && $order !== null && $order !== array() && $shapes !== '') {
+        $encoded = $shapes . ':' . implode(',', array_map('intval', array_values($order)));
     }
     if ($encoded === null) {
         $name = null;

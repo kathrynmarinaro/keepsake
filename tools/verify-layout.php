@@ -865,7 +865,7 @@ check('the two versions arranged the same content the same way (deterministic)',
 
 /* ============================================== the arrangement is frozen == */
 
-echo "\nlayout_generate(): a page's arrangement does not move when photos do...\n";
+echo "\nArrangements: the dragged page adapts, the rest hold still...\n";
 
 /* WHAT THIS REPLACED. There was a "reflow from here" block here, checking that
    regenerating a layout from page N left the pages before it untouched. Round 10
@@ -885,19 +885,21 @@ $frozenPages  = book_layout_pages_with_content($frozenLayout);
 
 $storedBefore = array();
 foreach ($frozenPages as $page) {
-    $storedBefore[(int) $page['id']] = array($page['template_name'], $page['template_order']);
+    $storedBefore[(int) $page['id']] = $page['template_order'];
 }
 check('generation writes an arrangement for every photos page',
-    count(array_filter($storedBefore, static fn(array $a): bool => $a[0] !== null)) > 0);
+    count(array_filter($storedBefore)) > 0);
+check('...recorded against the shapes it was chosen for',
+    count(array_filter($storedBefore, static fn($v): bool => is_string($v) && strpos($v, ':') !== false)) > 0);
 
 $arrangedBefore = layout_page_arrangements($frozenPages);
 
-/* Swap two photos between pages, exactly as the drag-and-drop does. */
-/* THE TWO PHOTOS MUST BE DIFFERENT SHAPES, or this check has no teeth: the
-   arrangement used to be derived from the slots' SHAPES, so swapping a portrait
-   for another portrait would not have changed it either way and the test would
-   pass against the bug it exists to catch. Confirmed by disabling the stored
-   path and watching this fail. */
+/* THE TWO PHOTOS MUST BE DIFFERENT SHAPES. That is the whole case: dragging a
+   landscape onto a page of portraits is supposed to re-arrange THAT page around
+   it — "I liked that the layout would update based on the photo I dragged into
+   it" — while leaving every other page alone, which is what the stored
+   arrangement is for. Swapping two photos of the same shape would change
+   nothing either way and the test would have no teeth. */
 $shapeOf = static function (array $slot): string {
     $w = (int) ($slot['width'] ?? 0);
     $h = (int) ($slot['height'] ?? 0);
@@ -907,6 +909,7 @@ $shapeOf = static function (array $slot): string {
 $swapA     = null;
 $swapAPage = 0;
 $swapB     = null;
+$swapBPage = 0;
 foreach ($frozenPages as $page) {
     if ($page['page_type'] !== 'photos') { continue; }
     foreach ($page['slots'] as $slot) {
@@ -917,7 +920,8 @@ foreach ($frozenPages as $page) {
             continue;
         }
         if ((int) $page['id'] !== $swapAPage && $shapeOf($slot) !== $shapeOf($swapA)) {
-            $swapB = $slot;
+            $swapB     = $slot;
+            $swapBPage = (int) $page['id'];
             break 2;
         }
     }
@@ -925,47 +929,165 @@ foreach ($frozenPages as $page) {
 
 if ($swapA !== null && $swapB !== null) {
     book_page_slot_swap((int) $swapA['id'], (int) $swapB['id']);
+    /* What api/book-page-slots-swap.php does next. */
+    layout_resettle_arrangements($frozenLayout);
 
-    $after          = book_layout_pages_with_content($frozenLayout);
-    $arrangedAfter  = layout_page_arrangements($after);
+    $after         = book_layout_pages_with_content($frozenLayout);
+    $arrangedAfter = layout_page_arrangements($after);
 
-    check('...and swapping two photos across pages does not change any of them',
-        $arrangedAfter === $arrangedBefore);
-
-    $storedAfter = array();
-    foreach ($after as $page) {
-        $storedAfter[(int) $page['id']] = array($page['template_name'], $page['template_order']);
+    $touched   = array($swapAPage, $swapBPage);
+    $movedElse = array();
+    foreach ($arrangedAfter as $pageId => $choice) {
+        if (in_array((int) $pageId, $touched, true)) { continue; }
+        if (($arrangedBefore[$pageId] ?? null) !== $choice) { $movedElse[] = $pageId; }
     }
-    check('...the stored arrangement itself is untouched by a swap',
-        $storedAfter === $storedBefore);
+
+    check('a swap leaves every page it did not touch exactly as it was',
+        $movedElse === array(),
+        count($movedElse) . ' other page(s) changed: ' . implode(',', $movedElse));
+
+    /* And the two pages it DID touch are re-arranged around their new shapes,
+       then saved — not left describing the photos they used to hold. */
+    $storedAfter = array();
+    $sigAfter    = array();
+    foreach ($after as $page) {
+        $storedAfter[(int) $page['id']] = (string) $page['template_order'];
+        if ($page['page_type'] === 'photos' && $page['slots'] !== array()) {
+            $sigAfter[(int) $page['id']] = layout_shape_signature(compose_occupants($page['slots']));
+        }
+    }
+
+    $stale = array();
+    foreach ($touched as $pageId) {
+        if (!isset($sigAfter[$pageId]) || $storedAfter[$pageId] === '') { continue; }
+        $recorded = explode(':', $storedAfter[$pageId], 2)[0];
+        if ($recorded !== $sigAfter[$pageId]) { $stale[] = $pageId; }
+    }
+    check('...and the pages it did touch are saved against their NEW shapes',
+        $stale === array(), 'stale on page(s): ' . implode(',', $stale));
+
+    /* Saved means saved: rendering again changes nothing further. */
+    check('...and re-reading gives the same answer again',
+        layout_page_arrangements(book_layout_pages_with_content($frozenLayout)) === $arrangedAfter);
 } else {
     check('the fixture has two differently-shaped photos on different pages', false);
 }
 
-/* A stored choice that no longer describes its page is ignored rather than
-   drawn — otherwise a page that gained or lost a photo prints one twice. */
-$firstPhotoPage = null;
+/* The guards. A stored choice that no longer describes its page is ignored
+   rather than drawn — otherwise a page prints one photo twice, or keeps a
+   shape it no longer has. */
+$guardPage = null;
 foreach (book_layout_pages_with_content($frozenLayout) as $page) {
-    if ($page['page_type'] === 'photos' && count($page['slots']) > 1) { $firstPhotoPage = $page; break; }
+    if ($page['page_type'] === 'photos' && count($page['slots']) > 1 && $page['template_order']) {
+        $guardPage = $page;
+        break;
+    }
 }
-if ($firstPhotoPage !== null) {
-    $count = count($firstPhotoPage['slots']);
-    check('a stored arrangement is used when it fits',
-        layout_stored_arrangement($firstPhotoPage, $count) !== null);
-    check('...ignored when the page has a different number of photos',
-        layout_stored_arrangement($firstPhotoPage, $count + 1) === null);
+if ($guardPage !== null) {
+    $occ = compose_occupants($guardPage['slots']);
+    check('a stored arrangement is used when it still fits',
+        layout_stored_arrangement($guardPage, $occ) !== null);
 
-    $bogus = $firstPhotoPage;
+    $swappedShapes = $occ;
+    $swappedShapes[0]['shape'] = $swappedShapes[0]['shape'] === 'P' ? 'L' : 'P';
+    check('...ignored once the page holds a different SHAPE of photo',
+        layout_stored_arrangement($guardPage, $swappedShapes) === null);
+
+    $bogus = $guardPage;
     $bogus['template_name'] = 'no-such-template';
     check('...and ignored when the template no longer exists',
-        layout_stored_arrangement($bogus, $count) === null);
+        layout_stored_arrangement($bogus, $occ) === null);
 
-    $dupe = $firstPhotoPage;
-    $dupe['template_order'] = implode(',', array_fill(0, $count, 0));
+    $dupe = $guardPage;
+    $sig  = explode(':', (string) $guardPage['template_order'], 2)[0];
+    $dupe['template_order'] = $sig . ':' . implode(',', array_fill(0, count($occ), 0));
     check('...and ignored when it would place one photo twice',
-        layout_stored_arrangement($dupe, $count) === null);
+        layout_stored_arrangement($dupe, $occ) === null);
+
+    $legacy = $guardPage;
+    $legacy['template_order'] = '0,1';
+    check('...and ignored when it predates the shape signature',
+        layout_stored_arrangement($legacy, $occ) === null);
 } else {
     check('the fixture has a multi-photo page to check the guards against', false);
+}
+
+/* ------------------------------------------------- try another arrangement */
+
+echo "\nlayout_cycle_arrangement(): steps on, saves, and comes back round...\n";
+
+$cyclePage = null;
+foreach (book_layout_pages_with_content($frozenLayout) as $page) {
+    if ($page['page_type'] !== 'photos' || count($page['slots']) < 2) { continue; }
+    if (count(compose_candidates(compose_occupants($page['slots']), array())) > 1) {
+        $cyclePage = $page;
+        break;
+    }
+}
+
+if ($cyclePage === null) {
+    check('the fixture has a page with more than one possible arrangement', false);
+} else {
+    $cycleId    = (int) $cyclePage['id'];
+    $occ        = compose_occupants($cyclePage['slots']);
+    $candidates = array_map(static fn(array $c): string => $c['name'], compose_candidates($occ, array()));
+
+    $start = layout_stored_arrangement($cyclePage, $occ);
+    $first = layout_cycle_arrangement($cycleId);
+    check('cycling returns a template name', $first !== null && $first !== '');
+    check('...and it is one the photos actually fit', in_array((string) $first, $candidates, true));
+    if ($start !== null) {
+        check('...and it is not the one it was already on', $first !== $start['name']);
+    }
+
+    /* Saved, not just returned. */
+    $reread = book_page_with_content($cycleId);
+    $stored = layout_stored_arrangement($reread, compose_occupants($reread['slots']));
+    check('...the new arrangement is what the page now renders as',
+        $stored !== null && $stored['name'] === $first);
+
+    /* CYCLES. Going round the whole list must arrive back where it started —
+       that is the property that makes the button usable, because it means you
+       can always get back to the one you liked. A random pick could not
+       promise it. */
+    $seen = array((string) $first);
+    for ($i = 1; $i < count($candidates); $i++) {
+        $seen[] = (string) layout_cycle_arrangement($cycleId);
+    }
+    sort($candidates);
+    $unique = array_values(array_unique($seen));
+    sort($unique);
+    check('...and one full turn visits every arrangement exactly once',
+        $unique === $candidates,
+        'visited ' . implode(',', $seen) . ' of ' . implode(',', $candidates));
+
+    /* A full turn is N presses from where it began, so it ends where it began —
+       not on $first, which is one press in. Getting this backwards is the easy
+       mistake, and the check is only worth having if it says the true thing. */
+    $backAgain  = book_page_with_content($cycleId);
+    $backStored = layout_stored_arrangement($backAgain, compose_occupants($backAgain['slots']));
+    if ($start !== null) {
+        check('...and lands back exactly where it started',
+            $backStored !== null && $backStored['name'] === $start['name'],
+            'ended on ' . ($backStored['name'] ?? 'nothing') . ', started on ' . $start['name']);
+    } else {
+        check('...and ends on a template the photos fit',
+            $backStored !== null && in_array($backStored['name'], $candidates, true));
+    }
+
+    /* A page with one photo has nowhere to go, and says so rather than
+       pretending. */
+    $singleId = 0;
+    foreach (book_layout_pages_with_content($frozenLayout) as $page) {
+        if ($page['page_type'] === 'photos' && count($page['slots']) === 1) {
+            $singleId = (int) $page['id'];
+            break;
+        }
+    }
+    if ($singleId > 0) {
+        check('a page with one photo reports that there is nowhere to cycle to',
+            layout_cycle_arrangement($singleId) === null);
+    }
 }
 
 /* ========================================================== fail soft ===== */

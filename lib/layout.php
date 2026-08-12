@@ -1791,7 +1791,7 @@ function layout_page_arrangements(array $pages): array
 
     $out = array();
     foreach ($photoPages as $i => $page) {
-        $out[(int) $page['id']] = layout_stored_arrangement($page, count($occupants[$i]))
+        $out[(int) $page['id']] = layout_stored_arrangement($page, $occupants[$i])
             ?? ($derived[$i] ?? null);
     }
 
@@ -1804,37 +1804,67 @@ function layout_page_arrangements(array $pages): array
  * Split out so the checks are in one readable place and so the refresh control
  * can ask "what is this page set to?" without re-deriving the whole book.
  */
-function layout_stored_arrangement(array $page, int $occupantCount): ?array
+function layout_stored_arrangement(array $page, array $occupants): ?array
 {
     $name = trim((string) ($page['template_name'] ?? ''));
     $raw  = trim((string) ($page['template_order'] ?? ''));
-    if ($name === '' || $raw === '') {
+    if ($name === '' || $raw === '' || strpos($raw, ':') === false) {
+        return null;
+    }
+
+    list($shapes, $orderRaw) = explode(':', $raw, 2);
+
+    /* THE SHAPES MUST STILL MATCH. This is what keeps "drag a landscape onto a
+       page of portraits and watch it re-arrange" working while everything else
+       stays put: the arrangement is remembered for the photos it was chosen
+       for, and the moment those change it is no longer an answer to this
+       question. Nothing has to remember to clear it. */
+    if ($shapes !== layout_shape_signature($occupants)) {
         return null;
     }
 
     $templates = compose_templates();
     if (!isset($templates[$name])) {
-        return null;   // renamed or removed from the library since it was frozen
+        return null;   // renamed or removed from the library since it was chosen
     }
 
-    $order = array_map('intval', explode(',', $raw));
-    if (count($order) !== $occupantCount) {
-        return null;   // the page gained or lost a photo since it was frozen
+    $count = count($occupants);
+    $order = array_map('intval', explode(',', $orderRaw));
+    if (count($order) !== $count) {
+        return null;
     }
 
     /* Every occupant placed exactly once. A duplicated index would print one
        photo twice and drop another. */
     $seen = $order;
     sort($seen);
-    if ($seen !== range(0, $occupantCount - 1)) {
+    if ($seen !== range(0, $count - 1)) {
         return null;
     }
 
-    if (count($templates[$name]['slots']) !== $occupantCount) {
+    if (count($templates[$name]['slots']) !== $count) {
         return null;   // the template itself changed shape
     }
 
     return array('name' => $name, 'order' => $order);
+}
+
+/**
+ * The shapes a page's occupants have, as one short string — "PLL", "PP".
+ *
+ * Deliberately only the shape and not the exact ratio: the templates choose on
+ * portrait-or-landscape, so that is the thing whose change should invalidate a
+ * stored arrangement. Recording ratios would make every crop adjustment look
+ * like a reason to re-arrange the page, which it is not.
+ */
+function layout_shape_signature(array $occupants): string
+{
+    $out = '';
+    foreach ($occupants as $occupant) {
+        $shape = (string) ($occupant['shape'] ?? '?');
+        $out  .= $shape === '' ? '?' : $shape[0];
+    }
+    return $out;
 }
 
 /**
@@ -1864,12 +1894,104 @@ function layout_freeze_arrangements(int $layoutId): void
        swap, because no slot it could see had a shape at all. */
     $pages = book_layout_pages_with_content($layoutId);
 
+    $shapes = array();
+    foreach ($pages as $page) {
+        if ($page['page_type'] === 'photos' && $page['slots'] !== array()) {
+            $shapes[(int) $page['id']] = layout_shape_signature(compose_occupants($page['slots']));
+        }
+    }
+
     foreach (layout_page_arrangements($pages) as $pageId => $choice) {
         if ($choice === null) {
             continue;   // no template accepts this page; leave it derived
         }
-        book_page_set_arrangement((int) $pageId, $choice['name'], $choice['order']);
+        book_page_set_arrangement(
+            (int) $pageId,
+            $choice['name'],
+            $choice['order'],
+            $shapes[(int) $pageId] ?? ''
+        );
     }
+}
+
+/**
+ * Step a page on to the NEXT arrangement its photos allow, and save it.
+ *
+ * "I want to be able to cycle through the different versions of the layouts for
+ * those types of photos if I don't like the one it landed on."
+ *
+ * CYCLES, deliberately, rather than picking at random. Most pages have two or
+ * three candidates; cycling means pressing the button again always gets you
+ * back to the one you preferred, and random never reliably does.
+ *
+ * Returns the name it landed on, or null if the page has no photos, or only one
+ * template will draw them — in which case there is nothing to cycle through and
+ * the caller should say so rather than pretend something happened.
+ */
+function layout_cycle_arrangement(int $pageId): ?string
+{
+    $page = book_page_with_content($pageId);
+    if ($page === null || $page['page_type'] !== 'photos' || $page['slots'] === array()) {
+        return null;
+    }
+
+    $occupants  = compose_occupants($page['slots']);
+    /* No rotation state: this is a deliberate choice about ONE page, so the
+       "don't use the same template twice in a row" ordering that shapes a fresh
+       book has no business steering it. */
+    $candidates = compose_candidates($occupants, array());
+    if (count($candidates) < 2) {
+        return null;
+    }
+
+    $current = layout_stored_arrangement($page, $occupants);
+    $index   = 0;
+    if ($current !== null) {
+        foreach ($candidates as $i => $candidate) {
+            if ($candidate['name'] === $current['name']) {
+                $index = $i;
+                break;
+            }
+        }
+        $index = ($index + 1) % count($candidates);
+    }
+
+    $pick = $candidates[$index];
+    book_page_set_arrangement(
+        $pageId,
+        $pick['name'],
+        $pick['order'],
+        layout_shape_signature($occupants)
+    );
+
+    return $pick['name'];
+}
+
+/**
+ * Re-settle a layout's arrangements after its photos have been moved around.
+ *
+ * WHY THIS EXISTS RATHER THAN THE PAGE SIMPLY STAYING PUT. The first version of
+ * locked layouts froze the arrangement outright, so dragging a landscape onto a
+ * page of portraits left it drawn as though the landscape were a portrait.
+ * Kathryn: "I liked that the layout would update based on the photo I dragged
+ * into it. I don't want to lose that. I just want to save the layout after I've
+ * altered it."
+ *
+ * So both, and they do not conflict: the page whose photos changed re-arranges
+ * itself, and the answer is written down. Every other page keeps what it had —
+ * which is the thing the freeze was for, since the rotation used to let a change
+ * on one page redraw the pages after it.
+ *
+ * It re-freezes the WHOLE layout on purpose. layout_page_arrangements() returns
+ * the stored choice for a page whose shapes still match and a fresh one for a
+ * page whose shapes do not, so writing all of them back rewrites the unchanged
+ * pages with exactly what they already had, and only the moved-about pages
+ * actually change. One code path, no list of "which pages might this have
+ * affected" to get wrong.
+ */
+function layout_resettle_arrangements(int $layoutId): void
+{
+    layout_freeze_arrangements($layoutId);
 }
 
 /**

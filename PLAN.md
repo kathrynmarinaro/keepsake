@@ -2262,3 +2262,43 @@ storing, now records that the argument was overturned and why.
 
 Phases 3, 4 and 5 (refresh one page, drop a photo, edit text from the layout)
 are unstarted and independently shippable.
+
+### Round 10, corrected: adapt, then save — and cycle
+
+Phase 1 as first built was **too rigid**, and Kathryn caught it from the check
+instructions rather than the code:
+
+> "I liked that the layout would update based on the photo I dragged into it. I
+> don't want to lose that. I just want to save the layout after I've altered it.
+> And I want to be able to cycle through the different versions of the layouts
+> for those types of photos if I don't like the one it landed on."
+
+Freezing the arrangement outright meant dragging a landscape onto a page of
+portraits left it drawn as though the landscape were a portrait. The thing worth
+keeping was never "the page never changes" — it was "the page does not change
+BEHIND MY BACK", and specifically that a change on page 4 must not redraw page 9.
+
+The fix is to record what an arrangement was chosen FOR. `template_order` now
+holds `"PLL:0,2,1"` — the shape signature, then the order — and a stored
+arrangement is ignored the moment the page's shapes no longer match it. So:
+
+- drag a landscape onto a page of portraits and **that page re-arranges around
+  it**, exactly as before;
+- the swap and move endpoints then re-settle the layout, so the new arrangement
+  is **saved** rather than re-derived on every future render;
+- and **every other page keeps what it had**, because its signature still
+  matches — which is the property the round existed for.
+
+One column, not a third: the two-column `ALTER TABLE` had already shipped, and a
+mid-deploy change of mind should not cost a second migration.
+
+**Cycling (backlog 4) came with it**, since it is the same machinery:
+`layout_cycle_arrangement()` steps one page to the next template its photos
+allow and saves it, with the button where "Reflow from here" used to be. It
+cycles rather than randomising, and the test proves the property that makes that
+worth doing — a full turn visits every arrangement exactly once and lands back
+where it started, so you can always get back to the one you liked. A page whose
+photos only fit one template says so instead of appearing to do nothing.
+
+Remaining: drop a photo out of the book (backlog 2), and edit text from the
+layout (backlog 1).

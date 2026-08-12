@@ -149,6 +149,11 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  if (action === 'cycle-arrangement') {
+    await cycleArrangement(button);
+    return;
+  }
+
   if (action === 'rename-project') {
     /* The SAME dialog the kebab's "Rename" opens — one function, called from
        both places, because Kathryn asked for the two interactions to match and
@@ -645,4 +650,31 @@ if (versionSelect) {
   const form = versionSelect.closest('form');
   form?.querySelector('.version-go')?.setAttribute('hidden', '');
   versionSelect.addEventListener('change', () => form?.submit());
+}
+
+/* -------------------------------------------- try another arrangement --- */
+
+/* Steps ONE page to the next arrangement its photos allow. Reloads, following
+   the same rule generate/activate already use: the page's whole composition
+   changes, and this screen has no partial re-render for that. Nothing else in
+   the book moves — every other page keeps what it had. */
+async function cycleArrangement(button) {
+  const pageId = Number(button.dataset.pageId);
+  if (!pageId) { return; }
+
+  button.disabled = true;
+  try {
+    const result = await apiPost('api/book-pages-cycle-arrangement.php', { page_id: pageId });
+    if (!result.cycled) {
+      /* Not a failure: these photos only fit one template. Saying so is more
+         use than a button that appears to do nothing. */
+      showSnackbar('These photos only arrange one way.');
+      button.disabled = false;
+      return;
+    }
+    window.location.reload();
+  } catch (err) {
+    showSnackbar(err.message || 'Could not rearrange that page.');
+    button.disabled = false;
+  }
 }

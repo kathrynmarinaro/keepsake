@@ -26,6 +26,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../lib/bootstrap.php';
 require_once __DIR__ . '/../../lib/repo.php';
+/* For layout_resettle_arrangements() — a drag can change a page's shapes, and
+   the page it changed has to be re-arranged around them. */
+require_once __DIR__ . '/../../lib/layout.php';
 
 require_login_api();
 require_same_origin();
@@ -58,6 +61,13 @@ if (!$ok) {
 $pageDeleted = $sourcePageId !== null
     && $sourcePageId !== $targetPageId
     && book_page_get($sourcePageId) === null;
+
+/* Both pages may now hold different shapes than they were arranged for — see
+   layout_resettle_arrangements(). */
+$layoutId = book_layout_id_for_page($targetPageId);
+if ($layoutId > 0) {
+    layout_resettle_arrangements($layoutId);
+}
 
 $slot = book_page_slot_get($slotId);
 json_out(array(

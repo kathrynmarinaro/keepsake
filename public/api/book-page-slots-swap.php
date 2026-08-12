@@ -15,6 +15,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../lib/bootstrap.php';
 require_once __DIR__ . '/../../lib/repo.php';
+/* For layout_resettle_arrangements() — a drag can change a page's shapes, and
+   the page it changed has to be re-arranged around them. */
+require_once __DIR__ . '/../../lib/layout.php';
 
 require_login_api();
 require_same_origin();
@@ -35,6 +38,15 @@ if (!$ok) {
     // slots belonging to different layouts) is a 409, not a 500 — the UI
     // reports it and leaves the layout exactly as it was.
     json_error('swap_failed', 409, 'Could not swap those two slots.');
+}
+
+/* The two pages may now hold different SHAPES than they were arranged for, and
+   a page that has changed shape is supposed to re-arrange itself around what
+   landed on it — see layout_resettle_arrangements(). Pages that did not change
+   keep exactly what they had. */
+$layoutId = book_layout_id_for_slot($slotIdA);
+if ($layoutId > 0) {
+    layout_resettle_arrangements($layoutId);
 }
 
 json_out(array('swapped' => true));
